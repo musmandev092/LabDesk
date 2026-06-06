@@ -384,17 +384,23 @@ class WorklistPage(QWidget):
                          p["name"], p["units"], p["superscript"], ref, None),
                     )
 
+    def _lab_no(self, rid):
+        r = self.con.execute("SELECT lab_no FROM receipts WHERE id=?", (rid,)).fetchone()
+        return (r["lab_no"] if r and r["lab_no"] else f"#{rid}")
+
     def print_report(self):
         if self.current_receipt is None:
             return
         rid = self.current_receipt
         printer = db.get_setting(self.con, "default_printer", "")
+        labno = self._lab_no(rid)
 
         def done(ok, result):
             if not ok:
                 QMessageBox.warning(self, "Print", f"Could not prepare the report:\n{result}")
                 return
             report.print_bytes(result, self, "Print Report", printer)
+            db.log_audit(self.con, self.user["username"], "printed_report", labno)
 
         tasks.run_in_background(self, lambda con: report.build_report_bytes(con, rid), done,
                                 clicked=self.print_btn, busy_text="Preparing…")
@@ -410,8 +416,11 @@ class WorklistPage(QWidget):
         if not path:
             return
 
+        labno = self._lab_no(rid)
+
         def done(ok, result):
             if ok:
+                db.log_audit(self.con, self.user["username"], "exported_pdf", f"{labno} → {path}")
                 QMessageBox.information(self, "PDF", f"Saved:\n{path}")
             else:
                 QMessageBox.warning(self, "PDF", f"Could not save the PDF:\n{result}")

@@ -197,6 +197,8 @@ class SettingsPage(QWidget):
         def done(ok, result):
             if ok:
                 report.print_bytes(result, self, "Print Test Page", name)
+                db.log_audit(self.con, self.user["username"], "printer_test",
+                             name or "ask-each-time")
             else:
                 QMessageBox.warning(self, "Printer", f"Could not print:\n{result}")
 
@@ -387,6 +389,8 @@ class SettingsPage(QWidget):
     def _test_whatsapp(self):
         ok, msg = whatsapp.check_status(self.con)
         self.wa_status.setText(("✓ " if ok else "✗ ") + msg)
+        db.log_audit(self.con, self.user["username"], "whatsapp_test",
+                     ("ok" if ok else "failed") + f" — {msg[:80]}")
         (QMessageBox.information if ok else QMessageBox.warning)(self, "WhatsApp", msg)
 
     def _open_wa_login(self):
@@ -411,6 +415,8 @@ class SettingsPage(QWidget):
             else:
                 success, msg = False, (result if isinstance(result, str) else "Failed to send.")
             self.wa_status.setText(("✓ " if success else "✗ ") + msg)
+            db.log_audit(self.con, self.user["username"], "whatsapp_test_message",
+                         ("sent" if success else "failed") + f" — {num}")
             (QMessageBox.information if success else QMessageBox.warning)(self, "WhatsApp", msg)
 
         tasks.run_in_background(self, lambda con: whatsapp.send_text(con, num, text), done,

@@ -13,12 +13,14 @@ from PySide6.QtWidgets import QSizePolicy
 
 from .widgets import h1, h2, muted, card, page_header
 from . import tasks
+from .. import db
 
 
 class MicrobiologyPage(QWidget):
     def __init__(self, con, user):
         super().__init__()
         self.con = con
+        self.user = user
         self.current_item = None
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -210,4 +212,10 @@ class MicrobiologyPage(QWidget):
         c.execute("UPDATE receipt_items SET reported=1, reported_at=datetime('now','localtime') WHERE id=?",
                   (self.current_item,))
         c.commit()
+        info = c.execute(
+            "SELECT r.lab_no, ri.test_name FROM receipt_items ri "
+            "JOIN receipts r ON r.id=ri.receipt_id WHERE ri.id=?", (self.current_item,)
+        ).fetchone()
+        detail = f"{info['lab_no']} — {info['test_name']}" if info else f"item {self.current_item}"
+        db.log_audit(c, self.user["username"], "culture_saved", detail)
         QMessageBox.information(self, "Microbiology", "Culture report saved.")

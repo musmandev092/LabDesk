@@ -153,4 +153,6 @@ class SetupWizard(QDialog):
             (username, admin_name, h, salt),
         )
         c.commit()
+        db.log_audit(c, username, "setup_completed",
+                     f"first-run setup by {admin_name or username}")
         self.accept()

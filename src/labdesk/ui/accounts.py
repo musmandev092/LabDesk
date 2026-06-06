@@ -115,6 +115,8 @@ class AccountsPage(QWidget):
              self.exp_head.text().strip(), self.exp_amount.value()),
         )
         self.con.commit()
+        db.log_audit(self.con, self.user["username"], "expense_added",
+                     f"{self.exp_head.text().strip() or 'expense'} — {money(self.exp_amount.value())}")
         self.exp_head.clear(); self.exp_detail.clear(); self.exp_amount.setValue(0)
         self.refresh_expenses()
 
@@ -180,6 +182,8 @@ class AccountsPage(QWidget):
             "INSERT INTO ledger(kind,ref_id,detail,credit) VALUES ('due_recovery',?,?,?)",
             (rid, f"Due recovered {rec['lab_no']}", rec["due"]))
         self.con.commit()
+        db.log_audit(self.con, self.user["username"], "due_received",
+                     f"{rec['lab_no']} — {money(rec['due'] or 0)}")
         self.refresh_dues(); self.refresh_summary()
 
     def on_show(self):

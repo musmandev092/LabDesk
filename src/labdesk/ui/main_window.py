@@ -139,6 +139,13 @@ class MainWindow(QMainWindow):
         self.btn_group.button(0).setChecked(True)
         self.go(0)
 
+    def closeEvent(self, event):
+        # records sign-out (the "Sign out" button calls close()) and window close
+        if not getattr(self, "_logged_out", False):
+            self._logged_out = True
+            db.log_audit(self.con, self.user["username"], "logout", "session ended")
+        super().closeEvent(event)
+
     def go(self, idx: int):
         self.stack.setCurrentIndex(idx)
         page = self.pages[idx]

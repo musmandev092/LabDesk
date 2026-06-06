@@ -204,6 +204,10 @@ class ReceiptsPage(QWidget):
                 b.setEnabled(False)
 
     # ---------------------------------------------------------------
+    def _lab_no(self, rid):
+        r = self.con.execute("SELECT lab_no FROM receipts WHERE id=?", (rid,)).fetchone()
+        return (r["lab_no"] if r and r["lab_no"] else f"#{rid}")
+
     def _preview(self, kind):
         """kind: 'report' or 'receipt'. Builds the PDF off the UI thread, then
         opens the preview dialog when it's ready (window stays responsive)."""
@@ -213,6 +217,7 @@ class ReceiptsPage(QWidget):
         clicked = self.prev_rcpt_btn if kind == "receipt" else self.prev_rpt_btn
         title = "Receipt preview" if kind == "receipt" else "Report preview"
         build = report.build_receipt_bytes if kind == "receipt" else report.build_report_bytes
+        labno = self._lab_no(rid)
 
         def done(ok, result):
             if not ok:
@@ -220,6 +225,7 @@ class ReceiptsPage(QWidget):
                 return
             tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
             tmp.write(result); tmp.close()
+            db.log_audit(self.con, self.user["username"], "previewed_" + kind, labno)
             _PreviewDialog(tmp.name, self, title).exec()
 
         tasks.run_in_background(self, lambda con: build(con, rid), done,
@@ -258,12 +264,14 @@ class ReceiptsPage(QWidget):
         title = "Print Receipt" if kind == "receipt" else "Print Report"
         build = report.build_receipt_bytes if kind == "receipt" else report.build_report_bytes
         printer = db.get_setting(self.con, "default_printer", "")
+        labno = self._lab_no(rid)
 
         def done(ok, result):
             if not ok:
                 QMessageBox.warning(self, "Print", f"Could not prepare the document:\n{result}")
                 return
             report.print_bytes(result, self, title, printer)
+            db.log_audit(self.con, self.user["username"], "printed_" + kind, labno)
 
         tasks.run_in_background(self, lambda con: build(con, rid), done,
                                 clicked=clicked, busy_text="Preparing…")

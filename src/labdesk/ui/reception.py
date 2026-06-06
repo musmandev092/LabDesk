@@ -436,6 +436,7 @@ class ReceptionPage(QWidget):
             ).fetchone()
             if m:
                 pid = m["id"]
+        new_patient = not pid
         if pid:  # returning patient → reuse row + its permanent MR, refresh details
             row = c.execute("SELECT mr_no FROM patients WHERE id=?", (pid,)).fetchone()
             mr_no = mr_no or (row["mr_no"] if row else "") or f"MR{pid:05d}"
@@ -501,6 +502,9 @@ class ReceptionPage(QWidget):
             )
         c.commit()
         self._last_receipt = rid
+        db.log_audit(c, self.user["username"],
+                     "patient_created" if new_patient else "patient_updated",
+                     f"{name} ({mr_no})")
         db.log_audit(c, self.user["username"], "receipt_created",
                      f"{lab_no} — {name}, net {net:.0f}, paid {paid:.0f}, due {due:.0f}")
         QMessageBox.information(self, "Saved", f"Receipt {lab_no} saved.")

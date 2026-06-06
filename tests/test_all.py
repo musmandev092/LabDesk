@@ -422,6 +422,21 @@ n = con.execute("SELECT COUNT(*) FROM audit_log WHERE username='tester' AND acti
 check(n >= 1, "log_audit writes a row")
 db.log_audit(con, None, None, None)  # must tolerate junk and never raise
 check(True, "log_audit tolerates None args")
+# every action the app emits must have a friendly label on the Logs page
+from labdesk.ui.logs import ACTION_LABELS                       # noqa: E402
+EXPECTED_ACTIONS = {
+    "login", "login_failed", "logout", "setup_completed", "patient_created",
+    "patient_updated", "receipt_created", "discount_approved", "results_saved",
+    "culture_saved", "due_received", "expense_added", "expense_updated",
+    "expense_deleted", "previewed_receipt", "previewed_report", "printed_receipt",
+    "printed_report", "exported_pdf", "whatsapp_report", "whatsapp_receipt",
+    "whatsapp_test", "whatsapp_test_message", "printer_test", "user_created",
+    "user_enabled", "user_disabled", "password_changed", "settings_saved",
+    "doctor_created", "doctor_updated", "doctor_deleted", "test_created",
+    "test_updated", "test_deleted", "logs_cleared",
+}
+for _a in sorted(EXPECTED_ACTIONS):
+    check(_a in ACTION_LABELS, f"Logs page has a label for action '{_a}'")
 
 
 # ============================================================================
@@ -547,11 +562,20 @@ try:
 
     # ---- Logs page constructs and shows the audit rows ----
     from labdesk.ui.logs import LogsPage
-    lp = LogsPage(con, {"username": "admin", "role": "admin", "id": 1})
+    _u = {"username": "admin", "role": "admin", "id": 1}
+    lp = LogsPage(con, _u)
     lp.on_show()
     check(lp.table.rowCount() >= 1, "LogsPage lists audit entries")
     lp.search.setText("tester"); lp.refresh()
     check(lp.table.rowCount() >= 1, "LogsPage search filters")
+
+    # ---- pages that previously lacked self.user now construct with it ----
+    from labdesk.ui.microbiology import MicrobiologyPage
+    from labdesk.ui.accounts import AccountsPage
+    mp = MicrobiologyPage(con, _u)
+    check(getattr(mp, "user", None) is _u, "MicrobiologyPage stores self.user")
+    ap = AccountsPage(con, _u)
+    check(getattr(ap, "user", None) is not None, "AccountsPage has self.user")
 except Exception as e:  # pragma: no cover
     check(False, f"Qt section crashed: {e}")
 

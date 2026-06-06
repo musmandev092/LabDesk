@@ -13,14 +13,36 @@ from .. import db
 
 # action key -> (friendly label, colour) for the table
 ACTION_LABELS = {
+    # session / lifecycle
     "login": ("Signed in", "#1f9d55"),
     "login_failed": ("Failed sign-in", "#c0392b"),
+    "logout": ("Signed out", "#64727d"),
+    "setup_completed": ("Setup completed", "#0e7c86"),
+    # patients / reception
+    "patient_created": ("Patient created", "#0e7c86"),
+    "patient_updated": ("Patient updated", "#0e7c86"),
     "receipt_created": ("Receipt created", "#0e7c86"),
-    "results_saved": ("Results saved", "#0e7c86"),
-    "due_received": ("Due payment received", "#1f9d55"),
     "discount_approved": ("Discount approved", "#b9770e"),
+    # results / microbiology
+    "results_saved": ("Results saved", "#0e7c86"),
+    "culture_saved": ("Culture saved", "#0e7c86"),
+    # money
+    "due_received": ("Due payment received", "#1f9d55"),
+    "expense_added": ("Expense added", "#b9770e"),
+    "expense_updated": ("Expense edited", "#b9770e"),
+    "expense_deleted": ("Expense deleted", "#c0392b"),
+    # output (print / preview / pdf / whatsapp)
+    "previewed_receipt": ("Previewed receipt", "#64727d"),
+    "previewed_report": ("Previewed report", "#64727d"),
+    "printed_receipt": ("Printed receipt", "#0a5f67"),
+    "printed_report": ("Printed report", "#0a5f67"),
+    "exported_pdf": ("Saved PDF", "#0a5f67"),
     "whatsapp_report": ("WhatsApp report", "#0a5f67"),
     "whatsapp_receipt": ("WhatsApp receipt", "#0a5f67"),
+    "whatsapp_test": ("WhatsApp connection test", "#64727d"),
+    "whatsapp_test_message": ("WhatsApp test message", "#0a5f67"),
+    "printer_test": ("Printer test", "#64727d"),
+    # admin / catalog / users / settings
     "user_created": ("User created", "#0e7c86"),
     "user_enabled": ("User enabled", "#1f9d55"),
     "user_disabled": ("User disabled", "#c0392b"),
