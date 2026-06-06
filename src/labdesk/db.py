@@ -56,12 +56,19 @@ DEFAULT_SETTINGS = {
     "signatory_2_name": "",
     "signatory_2_title": "Consultant Pathologist",
     "dept_band": "HEMATOLOGY  |  CHEMICAL PATHOLOGY  |  HORMONES  |  MOLECULAR BIOLOGY  |  HISTOPATHOLOGY",
-    # WhatsApp (self-hosted WAHA gateway, see ui/whatsapp.py)
-    "whatsapp_url": "",          # e.g. http://localhost:3000
+    # Appearance
+    "theme": "light",            # "light" | "dark"
+    # WhatsApp (self-hosted wuzapi gateway, see whatsapp.py)
+    "whatsapp_url": "",          # e.g. http://localhost:8080
     "whatsapp_session": "default",
     "whatsapp_country_code": "92",
     "whatsapp_auto": "0",        # "1" => auto-send report when results saved
+    "whatsapp_auto_receipt": "0",  # "1" => auto-send the bill when a receipt is saved
     "whatsapp_api_key": "",
+    # caption templates ({lab}, {lab_no}, {name} placeholders; blank = built-in)
+    "whatsapp_report_caption": "",
+    "whatsapp_receipt_caption": "",
+    "whatsapp_timeout": "40",    # seconds for the upload before giving up
 }
 
 # Columns added after v1 — created on existing databases if missing.

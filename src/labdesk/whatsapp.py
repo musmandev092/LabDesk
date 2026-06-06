@@ -33,11 +33,28 @@ _TIMEOUT_GET = 8            # status / quick checks
 
 
 def _cfg(con):
+    try:
+        timeout = int(float(db.get_setting(con, "whatsapp_timeout", "") or _TIMEOUT_POST))
+    except (TypeError, ValueError):
+        timeout = _TIMEOUT_POST
+    timeout = max(5, min(timeout, 120))            # keep it sane (5-120s)
     return {
         "url": db.get_setting(con, "whatsapp_url", "").rstrip("/"),
         "token": db.get_setting(con, "whatsapp_api_key", ""),      # wuzapi user token
         "cc": db.get_setting(con, "whatsapp_country_code", "92") or "92",
+        "timeout": timeout,
     }
+
+
+def _caption(con, key: str, fallback: str, **vals) -> str:
+    """Render a caption template (with {lab}/{lab_no}/{name}); blank -> fallback."""
+    tpl = (db.get_setting(con, key, "") or "").strip()
+    if not tpl:
+        return fallback
+    try:
+        return tpl.format(**vals)
+    except (KeyError, IndexError, ValueError):
+        return tpl  # malformed template → send as-is rather than crash
 
 
 def _headers(cfg):
@@ -45,11 +62,11 @@ def _headers(cfg):
     return {"Content-Type": "application/json", "token": cfg["token"]}
 
 
-def _post(cfg, path, payload, timeout=_TIMEOUT_POST):
+def _post(cfg, path, payload, timeout=None):
     req = urllib.request.Request(
         f"{cfg['url']}{path}", data=json.dumps(payload).encode("utf-8"),
         headers=_headers(cfg), method="POST")
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with urllib.request.urlopen(req, timeout=timeout or cfg.get("timeout", _TIMEOUT_POST)) as r:
         return r.status, r.read().decode("utf-8", "replace")
 
 
@@ -212,7 +229,9 @@ def send_report(con, receipt_id: int, parent=None, *, silent: bool = False):
     except Exception as e:  # noqa: BLE001
         return False, f"Could not build the report PDF: {e}"
     lab = db.get_setting(con, "lab_name", "")
-    cap = f"{lab} — Lab report {r['lab_no']} for {r['patient_name']}".strip(" —")
+    cap = _caption(con, "whatsapp_report_caption",
+                   f"{lab} — Lab report {r['lab_no']} for {r['patient_name']}".strip(" —"),
+                   lab=lab, lab_no=r["lab_no"] or "", name=r["patient_name"] or "")
     return send_pdf(con, r["telephone"] or "", str(tmp), cap)
 
 
@@ -232,5 +251,38 @@ def send_receipt(con, receipt_id: int, parent=None, *, silent: bool = False):
     except Exception as e:  # noqa: BLE001
         return False, f"Could not build the receipt PDF: {e}"
     lab = db.get_setting(con, "lab_name", "")
-    cap = f"{lab} — Cash receipt {r['lab_no']} for {r['patient_name']}".strip(" —")
+    cap = _caption(con, "whatsapp_receipt_caption",
+                   f"{lab} — Cash receipt {r['lab_no']} for {r['patient_name']}".strip(" —"),
+                   lab=lab, lab_no=r["lab_no"] or "", name=r["patient_name"] or "")
     return send_pdf(con, r["telephone"] or "", str(tmp), cap)
+
+
+def send_text(con, raw_number: str, text: str) -> tuple[bool, str]:
+    """Send a plain WhatsApp text message (used by the Settings 'send test' button)."""
+    cfg = _cfg(con)
+    if not cfg["url"] or not cfg["token"]:
+        return False, "WhatsApp isn't set up yet (Settings → WhatsApp)."
+    phone = wa_number(raw_number, cfg["cc"])
+    if not phone:
+        return False, "Enter a valid number (03XXXXXXXXX) to send a test to."
+    try:
+        status, body = _post(cfg, "/chat/send/text", {"Phone": phone, "Body": text})
+        low = body.lower()
+        if "logged in" in low or "no session" in low or "not connected" in low:
+            return False, ("WhatsApp isn't linked. Open Settings → WhatsApp → "
+                           "Test connection and scan the QR code, then try again.")
+        if 200 <= status < 300:
+            return True, f"Test message sent to {raw_number}."
+        if status in (401, 403):
+            return False, "Access token is wrong (Settings → WhatsApp)."
+        return False, f"The gateway could not send the message (HTTP {status})."
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return False, "Access token is wrong (Settings → WhatsApp)."
+        return False, f"The gateway returned an error (HTTP {e.code})."
+    except urllib.error.URLError as e:
+        return False, _friendly_url_error(e)
+    except OSError as e:
+        return False, _friendly_url_error(e)
+    except Exception as e:  # noqa: BLE001
+        return False, f"Could not send on WhatsApp: {e}"

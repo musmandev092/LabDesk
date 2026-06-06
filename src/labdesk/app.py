@@ -11,7 +11,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
 from . import db
-from .ui.style import QSS, PRODUCT_NAME
+from .ui.style import QSS, PRODUCT_NAME, build_qss
 from .ui.login import LoginDialog
 from .ui.setup_wizard import SetupWizard
 from .ui.main_window import MainWindow
@@ -127,6 +127,8 @@ def run(argv: list[str]) -> int:
     # First-run / update: integrate into the desktop (menu entry + logo) and
     # show a one-time "installed" / "updated" notice when run as an AppImage.
     notice = _integrate_appimage(con)
+    # apply the saved theme now that we can read settings (splash was light)
+    app.setStyleSheet(build_qss(db.get_setting(con, "theme", "light")))
     if splash is not None:
         splash.close()
     if notice and os.environ.get("LABDESK_SELFTEST") != "1":

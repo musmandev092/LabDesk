@@ -12,8 +12,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtWidgets import QSizePolicy
 
 from .widgets import h1, h2, muted, card, money, page_header, field_label
-from . import tasks
-from .. import db, report, roles
+from . import tasks, wa
+from .. import db, report, roles, whatsapp
 from ..constants import TITLES, AGE_UNITS, SEXES, SPECIMEN_PRESETS, normalize_phone
 
 
@@ -515,6 +515,12 @@ class ReceptionPage(QWidget):
                         self, "Print", f"Saved as {lab_no}, but printing failed:\n{result}")
 
             tasks.run_in_background(self, lambda con: report.build_receipt_bytes(con, rid), _printed)
+        # optional: auto-send the bill on WhatsApp (gated silently so it never
+        # nags when WhatsApp isn't set up or the patient has no number)
+        if (db.get_setting(self.con, "whatsapp_auto_receipt", "0") == "1"
+                and whatsapp.config_ready(self.con)[0]
+                and whatsapp.recipient_ready(self.con, rid)[0]):
+            wa.send_async(self, self.con, "receipt", rid)
         self.clear_form()
 
     def clear_form(self):

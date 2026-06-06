@@ -1,11 +1,12 @@
 """Settings: lab branding, registration, report footer, WhatsApp, security."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QLineEdit, QPushButton, QFileDialog,
     QMessageBox, QHBoxLayout, QLabel, QScrollArea, QCheckBox, QComboBox,
-    QTableWidget, QTableWidgetItem, QHeaderView, QDialog,
+    QTableWidget, QTableWidgetItem, QHeaderView, QDialog, QApplication,
 )
 
 from PySide6.QtPrintSupport import QPrinterInfo
@@ -13,7 +14,8 @@ from PySide6.QtPrintSupport import QPrinterInfo
 from .widgets import h1, muted, card, page_header, field_label
 from . import tasks
 from .. import db
-from .. import report
+from .. import report, whatsapp
+from .style import build_qss, THEMES
 from ..roles import ROLES, role_label, can
 
 _LABEL_W = 200  # shared label-column width so all settings cards align
@@ -86,6 +88,9 @@ WHATSAPP_FIELDS = [
     ("whatsapp_url", "Gateway URL", "http://localhost:8080"),
     ("whatsapp_api_key", "Access token", "wuzapi user token"),
     ("whatsapp_country_code", "Country code", "92"),
+    ("whatsapp_timeout", "Upload timeout (sec)", "40"),
+    ("whatsapp_report_caption", "Report caption", "{lab} — Report {lab_no} for {name}"),
+    ("whatsapp_receipt_caption", "Receipt caption", "{lab} — Receipt {lab_no} for {name}"),
 ]
 
 
@@ -105,6 +110,7 @@ class SettingsPage(QWidget):
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
         host = QWidget(); col = QVBoxLayout(host); col.setSpacing(14)
 
+        col.addWidget(self._appearance_card())
         col.addWidget(self._text_card("Laboratory information", LAB_FIELDS))
         col.addWidget(self._text_card("Registration & accreditation", REG_FIELDS))
         col.addWidget(self._logo_card())
@@ -197,20 +203,64 @@ class SettingsPage(QWidget):
         # build the test page off the UI thread (WeasyPrint), then print
         tasks.run_in_background(self, lambda con: report.build_test_page_bytes(name), done)
 
+    def _appearance_card(self):
+        form = self._form()
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem("Light", "light")
+        self.theme_combo.addItem("Dark", "dark")
+        # apply instantly on change so the user sees the result; Save persists it
+        self.theme_combo.currentIndexChanged.connect(self._apply_theme_preview)
+        form.addRow(self._flbl("Theme"), self.theme_combo)
+        w = QWidget(); w.setLayout(form)
+        return card(
+            muted("Choose a light or dark look. The change applies immediately; "
+                  "click Save settings to keep it."),
+            w, title="Appearance",
+        )
+
+    def _apply_theme_preview(self):
+        theme = self.theme_combo.currentData() or "light"
+        app = QApplication.instance()
+        if app is not None:
+            app.setStyleSheet(build_qss(theme))
+
     def _whatsapp_card(self):
         form = self._form()
         for f in WHATSAPP_FIELDS:
             self._add_field(form, f)
-        self.wa_auto = QCheckBox("Automatically send the report on WhatsApp when results are saved")
+        self.wa_auto = QCheckBox("Auto-send the report when results are saved")
         form.addRow("", self.wa_auto)
+        self.wa_auto_receipt = QCheckBox("Auto-send the bill when a receipt is saved")
+        form.addRow("", self.wa_auto_receipt)
+
+        # status line + action buttons
+        self.wa_status = muted("")
+        form.addRow("", self.wa_status)
+
         test = QPushButton("Test connection"); test.setObjectName("ghost")
         test.clicked.connect(self._test_whatsapp)
-        form.addRow("", test)
+        link = QPushButton("Open linking page (QR)"); link.setObjectName("ghost")
+        link.clicked.connect(self._open_wa_login)
+        row1 = QHBoxLayout(); row1.setContentsMargins(0, 0, 0, 0)
+        row1.addWidget(test); row1.addWidget(link); row1.addStretch(1)
+        rw1 = QWidget(); rw1.setLayout(row1)
+        form.addRow("", rw1)
+
+        # send a real test message (the user triggers this, not automatic)
+        self.wa_test_num = QLineEdit(); self.wa_test_num.setPlaceholderText("03XXXXXXXXX")
+        send = QPushButton("Send test message"); send.setObjectName("ghost")
+        send.clicked.connect(self._send_test_whatsapp)
+        self._wa_test_btn = send
+        row2 = QHBoxLayout(); row2.setContentsMargins(0, 0, 0, 0)
+        row2.addWidget(self.wa_test_num, 1); row2.addWidget(send)
+        rw2 = QWidget(); rw2.setLayout(row2)
+        form.addRow(self._flbl("Send test to"), rw2)
+
         w = QWidget(); w.setLayout(form)
         return card(
-            muted("Self-hosted WhatsApp gateway (free, sends report PDFs). "
-                  "See WHATSAPP_SETUP.md — run it, scan the QR, then put its URL "
-                  "and access token here."),
+            muted("Self-hosted WhatsApp gateway (free, sends report/receipt PDFs). "
+                  "See WHATSAPP_SETUP.md — run it, scan the QR, then put its URL and "
+                  "access token here. Captions accept {lab}, {lab_no}, {name}."),
             w, title="WhatsApp gateway",
         )
 
@@ -295,6 +345,12 @@ class SettingsPage(QWidget):
         for key, le in self.inputs.items():
             le.setText(db.get_setting(self.con, key, ""))
         self.wa_auto.setChecked(db.get_setting(self.con, "whatsapp_auto", "0") == "1")
+        self.wa_auto_receipt.setChecked(db.get_setting(self.con, "whatsapp_auto_receipt", "0") == "1")
+        theme = db.get_setting(self.con, "theme", "light")
+        ti = self.theme_combo.findData(theme)
+        self.theme_combo.blockSignals(True)
+        self.theme_combo.setCurrentIndex(ti if ti >= 0 else 0)
+        self.theme_combo.blockSignals(False)
         cur = db.get_setting(self.con, "default_printer", "")
         i = self.printer_combo.findData(cur)
         self.printer_combo.setCurrentIndex(i if i >= 0 else 0)
@@ -310,13 +366,45 @@ class SettingsPage(QWidget):
         for key, le in self.inputs.items():
             db.set_setting(self.con, key, le.text().strip())
         db.set_setting(self.con, "whatsapp_auto", "1" if self.wa_auto.isChecked() else "0")
+        db.set_setting(self.con, "whatsapp_auto_receipt",
+                       "1" if self.wa_auto_receipt.isChecked() else "0")
+        theme = self.theme_combo.currentData() or "light"
+        db.set_setting(self.con, "theme", theme)
+        self._apply_theme_preview()
         db.set_setting(self.con, "default_printer", self.printer_combo.currentData() or "")
-        QMessageBox.information(self, "Settings", "Saved. Restart to refresh the window title.")
+        QMessageBox.information(self, "Settings", "Saved.")
 
     def _test_whatsapp(self):
-        from ..whatsapp import check_status
-        ok, msg = check_status(self.con)
+        ok, msg = whatsapp.check_status(self.con)
+        self.wa_status.setText(("✓ " if ok else "✗ ") + msg)
         (QMessageBox.information if ok else QMessageBox.warning)(self, "WhatsApp", msg)
+
+    def _open_wa_login(self):
+        url = (self.inputs["whatsapp_url"].text().strip()
+               or db.get_setting(self.con, "whatsapp_url", "")).rstrip("/")
+        if not url:
+            QMessageBox.warning(self, "WhatsApp", "Set the Gateway URL first.")
+            return
+        QDesktopServices.openUrl(QUrl(url + "/login"))
+
+    def _send_test_whatsapp(self):
+        num = self.wa_test_num.text().strip()
+        if not num:
+            QMessageBox.warning(self, "WhatsApp", "Enter a number to send the test to.")
+            return
+        lab = db.get_setting(self.con, "lab_name", "") or "LabDesk"
+        text = f"✅ {lab}: WhatsApp test from LabDesk — your gateway is working."
+
+        def done(work_ok, result):
+            if work_ok and isinstance(result, tuple):
+                success, msg = result
+            else:
+                success, msg = False, (result if isinstance(result, str) else "Failed to send.")
+            self.wa_status.setText(("✓ " if success else "✗ ") + msg)
+            (QMessageBox.information if success else QMessageBox.warning)(self, "WhatsApp", msg)
+
+        tasks.run_in_background(self, lambda con: whatsapp.send_text(con, num, text), done,
+                                clicked=self._wa_test_btn, busy_text="Sending…")
 
     def change_pw(self):
         pw = self.new_pw.text()

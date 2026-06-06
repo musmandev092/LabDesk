@@ -419,6 +419,57 @@ check(db.verify_user(con, "ghost", "x") is None, "unknown user rejected")
 
 
 # ============================================================================
+# 11b) Themes / caption templates / send_text / timeout / new settings
+# ============================================================================
+section("themes / captions / send_text / settings")
+from labdesk.ui.style import build_qss, THEMES                  # noqa: E402
+for t in ("light", "dark"):
+    q = build_qss(t)
+    check(isinstance(q, str) and "QPushButton" in q and len(q) > 1000, f"build_qss({t}) valid")
+check(build_qss("dark") != build_qss("light"), "dark differs from light")
+check("#0f1720" in build_qss("dark"), "dark uses a dark background")
+check({"light", "dark"} <= set(THEMES), "THEMES has light + dark")
+check(build_qss("nonsense") == build_qss("light"), "unknown theme falls back to light")
+
+# caption templating ({lab}/{lab_no}/{name})
+eq(whatsapp._caption(con, "no_such_key", "FB"), "FB", "caption blank -> fallback")
+db.set_setting(con, "whatsapp_report_caption", "{lab}/{lab_no}/{name}")
+eq(whatsapp._caption(con, "whatsapp_report_caption", "FB", lab="L", lab_no="N1", name="Joe"),
+   "L/N1/Joe", "caption renders placeholders")
+db.set_setting(con, "whatsapp_report_caption", "{bogus}")
+eq(whatsapp._caption(con, "whatsapp_report_caption", "FB", lab="L"), "{bogus}",
+   "bad caption placeholder -> sent as-is, no crash")
+db.set_setting(con, "whatsapp_report_caption", "")
+
+# upload timeout clamping in _cfg
+db.set_setting(con, "whatsapp_timeout", "1"); eq(whatsapp._cfg(con)["timeout"], 5, "timeout clamps low->5")
+db.set_setting(con, "whatsapp_timeout", "9999"); eq(whatsapp._cfg(con)["timeout"], 120, "timeout clamps high->120")
+db.set_setting(con, "whatsapp_timeout", "abc"); eq(whatsapp._cfg(con)["timeout"], 40, "timeout bad->default")
+db.set_setting(con, "whatsapp_timeout", "30"); eq(whatsapp._cfg(con)["timeout"], 30, "timeout valid kept")
+
+# send_text across gateway states (the Settings 'send test message' button)
+db.set_setting(con, "whatsapp_url", "http://localhost:8080")
+db.set_setting(con, "whatsapp_api_key", "tok")
+SCN.clear(); SCN["mode"] = "ok"
+ok, m = whatsapp.send_text(con, "03001234567", "hi"); check(ok, "send_text ok")
+has(m, "test message sent", "send_text ok msg")
+SCN["mode"] = "down"
+ok, m = whatsapp.send_text(con, "03001234567", "hi"); check(not ok, "send_text gateway down")
+has(m, "could not reach", "send_text down msg")
+SCN["mode"] = "unauthorized"
+ok, m = whatsapp.send_text(con, "03001234567", "hi"); check(not ok, "send_text bad token")
+SCN.clear(); SCN["mode"] = "ok"
+ok, m = whatsapp.send_text(con, "12", "hi"); check(not ok, "send_text invalid number")
+db.set_setting(con, "whatsapp_url", "")
+ok, m = whatsapp.send_text(con, "03001234567", "hi"); check(not ok, "send_text not configured")
+db.set_setting(con, "whatsapp_url", "http://localhost:8080")
+
+for k in ("theme", "whatsapp_auto_receipt", "whatsapp_report_caption",
+          "whatsapp_receipt_caption", "whatsapp_timeout"):
+    check(k in db.DEFAULT_SETTINGS, f"default setting {k} present")
+
+
+# ============================================================================
 # 11) Background task helper + debounce (Qt)  (~6 cases)
 # ============================================================================
 section("Qt background helper + debounce")
