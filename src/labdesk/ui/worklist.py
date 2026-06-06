@@ -12,7 +12,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtWidgets import QSizePolicy
 
 from .widgets import h1, h2, muted, card, money, page_header
-from .. import db, report, whatsapp
+from . import wa
+from .. import db, report
 
 
 def resolve_ref(param_row, sex: str) -> str:
@@ -335,19 +336,19 @@ class WorklistPage(QWidget):
             (self.current_receipt,),
         )
         c.commit()
-        # optional auto-send on WhatsApp
+        QMessageBox.information(self, "Results", "Results saved.")
+        # optional auto-send on WhatsApp — runs in the background, reports when done
         if db.get_setting(c, "whatsapp_auto", "0") == "1":
-            ok, msg = whatsapp.send_report(c, self.current_receipt, self)
-            QMessageBox.information(self, "Results", f"Results saved.\nWhatsApp: {msg}")
-        else:
-            QMessageBox.information(self, "Results", "Results saved.")
+            wa.send_async(self, c, "report", self.current_receipt,
+                          clicked=self.wa_btn, lock_buttons=(self.wa_btn,))
         self.refresh_list()
 
     def send_whatsapp(self):
         if self.current_receipt is None:
             return
-        ok, msg = whatsapp.send_report(self.con, self.current_receipt, self)
-        (QMessageBox.information if ok else QMessageBox.warning)(self, "WhatsApp", msg)
+        # background send — keeps the window responsive
+        wa.send_async(self, self.con, "report", self.current_receipt,
+                      clicked=self.wa_btn, lock_buttons=(self.wa_btn,))
 
     def _snapshot_static_lines(self, sex):
         """Persist H/L/continuation lines (no editor) so reports render fully."""

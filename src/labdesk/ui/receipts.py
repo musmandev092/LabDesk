@@ -12,7 +12,8 @@ from PySide6.QtWidgets import (
 )
 
 from .widgets import h1, muted, page_header, money
-from .. import db, report, whatsapp
+from . import wa
+from .. import db, report
 
 STATUS_COLORS = {"pending": "#b9770e", "in_progress": "#0e7c86",
                  "reported": "#1f9d55", "delivered": "#6b7280"}
@@ -229,12 +230,10 @@ class ReceiptsPage(QWidget):
         rid = self._selected_id()
         if rid is None:
             return
-        sender = whatsapp.send_receipt if kind == "receipt" else whatsapp.send_report
-        try:
-            ok, msg = sender(self.con, rid, self)
-        except Exception as e:  # noqa: BLE001
-            ok, msg = False, f"Could not send: {e}"
-        (QMessageBox.information if ok else QMessageBox.warning)(self, "WhatsApp", msg)
+        clicked = self.wa_rcpt_btn if kind == "receipt" else self.wa_rpt_btn
+        # runs on a background thread; disables both WhatsApp buttons until done
+        wa.send_async(self, self.con, kind, rid, clicked=clicked,
+                      lock_buttons=(self.wa_rcpt_btn, self.wa_rpt_btn))
 
     def whatsapp_receipt(self):
         self._send_whatsapp("receipt")
