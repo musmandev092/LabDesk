@@ -22,7 +22,8 @@ ACTION_LABELS = {
     "patient_created": ("Patient created", "#0e7c86"),
     "patient_updated": ("Patient updated", "#0e7c86"),
     "receipt_created": ("Receipt created", "#0e7c86"),
-    "discount_approved": ("Discount approved", "#b9770e"),
+    "discount_approved": ("Discount applied", "#b9770e"),
+    "discount_approval_failed": ("Discount approval failed", "#c0392b"),
     # results / microbiology
     "results_saved": ("Results saved", "#0e7c86"),
     "culture_saved": ("Culture saved", "#0e7c86"),
@@ -67,9 +68,11 @@ class LogsPage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(12)
+        verify = QPushButton("Verify integrity"); verify.setObjectName("ghost")
+        verify.clicked.connect(self.verify_integrity)
         clear = QPushButton("Clear old logs…"); clear.setObjectName("ghost")
         clear.clicked.connect(self.clear_old)
-        header, self.sub = page_header("Logs", "Audit trail of activity", clear)
+        header, self.sub = page_header("Logs", "Audit trail of activity", verify, clear)
         root.addWidget(header)
 
         bar = QHBoxLayout()
@@ -133,6 +136,16 @@ class LogsPage(QWidget):
             self.table.setItem(i, 3, QTableWidgetItem(r["detail"] or ""))
         n = len(rows)
         self.summary.setText(f"{n} entr{'y' if n == 1 else 'ies'} shown (newest first, max 1000)")
+
+    def verify_integrity(self):
+        ok, bad = db.verify_audit_chain(self.con)
+        if ok:
+            QMessageBox.information(self, "Logs",
+                                    "Audit log integrity OK — the hash chain is intact.")
+        else:
+            QMessageBox.warning(self, "Logs",
+                                f"Integrity check FAILED near entry #{bad}. "
+                                "The audit log appears to have been altered or truncated.")
 
     def clear_old(self):
         if QMessageBox.question(

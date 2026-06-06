@@ -136,8 +136,11 @@ class SetupWizard(QDialog):
             QMessageBox.warning(self, "Setup", "Please enter the administrator's name.")
             return
         pw = self.pw.text()
-        if len(pw) < 4:
-            QMessageBox.warning(self, "Setup", "Admin password must be at least 4 characters.")
+        if len(pw) < 6:
+            QMessageBox.warning(self, "Setup", "Admin password must be at least 6 characters.")
+            return
+        if pw.lower() == "admin":
+            QMessageBox.warning(self, "Setup", "Please choose a stronger password (not 'admin').")
             return
         if pw != self.pw2.text():
             QMessageBox.warning(self, "Setup", "Passwords do not match.")
@@ -148,8 +151,10 @@ class SetupWizard(QDialog):
         db.set_setting(c, "logo_path", self.logo.text().strip())
         db.set_setting(c, "configured", "1")
         h, salt = db.hash_password(pw)
+        # admin set their own password here → clear the forced-change flag
         c.execute(
-            "UPDATE users SET username=?, full_name=?, pass_hash=?, salt=? WHERE username='admin'",
+            "UPDATE users SET username=?, full_name=?, pass_hash=?, salt=?, "
+            "must_change_password=0 WHERE username='admin'",
             (username, admin_name, h, salt),
         )
         c.commit()

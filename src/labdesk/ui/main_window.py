@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QEvent, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget,
-    QPushButton, QLabel, QButtonGroup,
+    QPushButton, QLabel, QButtonGroup, QApplication, QDialog,
 )
 
 from .. import db
@@ -138,6 +138,47 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Ready")
         self.btn_group.button(0).setChecked(True)
         self.go(0)
+
+        self._locked = False
+        self._idle_ms = 0
+        self._setup_idle_lock()
+
+    # ---- idle auto-lock ----------------------------------------------------
+    def _setup_idle_lock(self):
+        try:
+            mins = int(db.get_setting(self.con, "idle_lock_minutes", "0") or 0)
+        except ValueError:
+            mins = 0
+        self._idle_ms = max(0, mins) * 60_000
+        if self._idle_ms <= 0:
+            return
+        self._idle_timer = QTimer(self)
+        self._idle_timer.setSingleShot(True)
+        self._idle_timer.timeout.connect(self._lock_screen)
+        QApplication.instance().installEventFilter(self)
+        self._idle_timer.start(self._idle_ms)
+
+    def eventFilter(self, obj, event):
+        if self._idle_ms and not self._locked and event.type() in (
+                QEvent.MouseMove, QEvent.KeyPress, QEvent.MouseButtonPress, QEvent.Wheel):
+            self._idle_timer.start(self._idle_ms)   # reset the countdown on activity
+        return super().eventFilter(obj, event)
+
+    def _lock_screen(self):
+        if self._locked:
+            return
+        self._locked = True
+        from .login import LoginDialog
+        db.log_audit(self.con, self.user["username"], "logout", "auto-locked (idle)")
+        dlg = LoginDialog(self.con, self)
+        dlg.setWindowTitle("Locked — sign in to continue")
+        if dlg.exec() == QDialog.Accepted and dlg.user is not None:
+            self.user = dlg.user
+            db.log_audit(self.con, self.user["username"], "login", "unlocked")
+            self._locked = False
+            self._idle_timer.start(self._idle_ms)
+        else:
+            self.close()        # couldn't re-auth → end the session
 
     def closeEvent(self, event):
         # records sign-out (the "Sign out" button calls close()) and window close

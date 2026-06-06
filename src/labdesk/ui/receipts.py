@@ -1,6 +1,7 @@
 """Receipts: history of all saved receipts — search, reprint, take due payment."""
 from __future__ import annotations
 
+import os
 import tempfile
 
 from PySide6.QtCore import Qt, QDate
@@ -223,10 +224,16 @@ class ReceiptsPage(QWidget):
             if not ok:
                 QMessageBox.warning(self, "Preview", f"Could not build the preview:\n{result}")
                 return
-            tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+            tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)  # 0600
             tmp.write(result); tmp.close()
             db.log_audit(self.con, self.user["username"], "previewed_" + kind, labno)
-            _PreviewDialog(tmp.name, self, title).exec()
+            try:
+                _PreviewDialog(tmp.name, self, title).exec()
+            finally:
+                try:
+                    os.remove(tmp.name)        # no patient-PII residue in temp
+                except OSError:
+                    pass
 
         tasks.run_in_background(self, lambda con: build(con, rid), done,
                                 clicked=clicked, busy_text="Opening…")
@@ -283,24 +290,30 @@ class ReceiptsPage(QWidget):
         self._print("report")
 
     def receive_due(self):
+        from PySide6.QtWidgets import QInputDialog
         rid = self._selected_id()
         if rid is None:
             return
-        r = self.con.execute("SELECT lab_no, due FROM receipts WHERE id=?", (rid,)).fetchone()
-        if not r or not r["due"]:
+        r = self.con.execute(
+            "SELECT lab_no, net_amount, paid, due FROM receipts WHERE id=?", (rid,)).fetchone()
+        if not r or not r["due"] or r["due"] <= 0:
             return
         cur = db.get_setting(self.con, "currency", "Rs.")
-        if QMessageBox.question(
+        # prompt for the actual amount received (supports partial payments; cannot exceed due)
+        amount, ok = QInputDialog.getDouble(
             self, "Receive payment",
-            f"Mark {r['lab_no']} due of {money(r['due'], cur)} as fully paid?",
-        ) != QMessageBox.Yes:
+            f"Amount received for {r['lab_no']}  (due {money(r['due'], cur)}):",
+            float(r["due"]), 0.0, float(r["due"]), 2)
+        if not ok or amount <= 0:
             return
+        new_paid = (r["paid"] or 0) + amount
+        new_due = max(0.0, (r["net_amount"] or 0) - new_paid)
         self.con.execute(
             "INSERT INTO ledger(kind,ref_id,detail,credit,date) "
             "VALUES ('due_recovery',?,?,?,date('now','localtime'))",
-            (rid, f"Due recovered {r['lab_no']}", r["due"]))
-        self.con.execute("UPDATE receipts SET paid=net_amount, due=0 WHERE id=?", (rid,))
+            (rid, f"Due recovered {r['lab_no']}", amount))
+        self.con.execute("UPDATE receipts SET paid=?, due=? WHERE id=?", (new_paid, new_due, rid))
         self.con.commit()
         db.log_audit(self.con, self.user["username"], "due_received",
-                     f"{r['lab_no']} — {money(r['due'], cur)}")
+                     f"{r['lab_no']} — {money(amount, cur)} (due now {money(new_due, cur)})")
         self.refresh()

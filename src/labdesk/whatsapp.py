@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import socket
 import urllib.request
 import urllib.error
@@ -40,7 +41,9 @@ def _cfg(con):
     timeout = max(5, min(timeout, 120))            # keep it sane (5-120s)
     return {
         "url": db.get_setting(con, "whatsapp_url", "").rstrip("/"),
-        "token": db.get_setting(con, "whatsapp_api_key", ""),      # wuzapi user token
+        # token lives in the 0600 secret file (not the DB); fall back to a legacy
+        # DB value so existing installs keep working until the next Settings save.
+        "token": db.get_secret("whatsapp_api_key") or db.get_setting(con, "whatsapp_api_key", ""),
         "cc": db.get_setting(con, "whatsapp_country_code", "92") or "92",
         "timeout": timeout,
     }
@@ -51,10 +54,13 @@ def _caption(con, key: str, fallback: str, **vals) -> str:
     tpl = (db.get_setting(con, key, "") or "").strip()
     if not tpl:
         return fallback
-    try:
-        return tpl.format(**vals)
-    except (KeyError, IndexError, ValueError):
-        return tpl  # malformed template → send as-is rather than crash
+    # Plain placeholder substitution — NOT str.format (which would let a crafted
+    # template reach object internals, e.g. {lab.__class__}). Only the known
+    # whole tokens are replaced.
+    out = tpl
+    for k, v in vals.items():
+        out = out.replace("{" + k + "}", str(v))
+    return out
 
 
 def _headers(cfg):
@@ -91,14 +97,51 @@ def _friendly_url_error(e) -> str:
     return f"Could not reach the WhatsApp gateway: {reason}"
 
 
+def validate_url(url: str) -> tuple[bool, str]:
+    """Sanity-check a gateway URL: must be http/https with a host. Guards against
+    pasting garbage or an exfiltration URL into Settings."""
+    import urllib.parse
+    try:
+        p = urllib.parse.urlparse((url or "").strip())
+    except ValueError:
+        return False, "That gateway URL is not valid."
+    if p.scheme not in ("http", "https"):
+        return False, "Gateway URL must start with http:// or https://"
+    if not p.hostname:
+        return False, "Gateway URL is missing a host (e.g. http://localhost:8080)."
+    return True, ""
+
+
+def is_local_url(url: str) -> bool:
+    """True if the URL points at loopback or a private (RFC1918) address — the
+    intended self-hosted deployment. Non-local hosts get a warning before sending."""
+    import ipaddress
+    import urllib.parse
+    host = (urllib.parse.urlparse(url or "").hostname or "").lower()
+    if host in ("localhost", "127.0.0.1", "::1", ""):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_loopback or ip.is_private
+    except ValueError:
+        return False   # a hostname we can't resolve here → treat as non-local
+
+
 def wa_number(raw: str, cc: str) -> str | None:
     """Local phone → wuzapi recipient (digits, country code, no +/@), e.g.
     03001234567 → 923001234567. Returns None if the number isn't plausible."""
     local = normalize_phone(raw, cc)            # canonical 03XXXXXXXXX
     if not local:
         return None
-    num = cc + local.lstrip("0")                # 92 + national
-    return num if num.isdigit() and 10 <= len(num) <= 15 else None
+    national = local.lstrip("0")                # drop the leading 0
+    num = cc + national                         # 92 + national
+    if not num.isdigit():
+        return None
+    if cc == "92":
+        # Pakistan mobile: national is exactly 3XXXXXXXXX (10 digits) — reject
+        # malformed/landline/wrong-length numbers so reports don't mis-send.
+        return num if re.fullmatch(r"3\d{9}", national) else None
+    return num if 9 <= len(national) <= 13 else None
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +186,7 @@ def check_status(con) -> tuple[bool, str]:
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
             return False, "Access token is wrong (gateway returned Unauthorized)."
-        return False, f"HTTP {e.code}: {e.read().decode('utf-8','replace')[:160]}"
+        return False, f"The gateway returned an error (HTTP {e.code})."
     except urllib.error.URLError as e:
         return False, _friendly_url_error(e)
     except OSError as e:   # raw socket timeout / connection / DNS errors (no internet)
@@ -196,7 +239,7 @@ def send_pdf(con, number: str, pdf_path: str, caption: str = "") -> tuple[bool, 
                            "Test connection and scan the QR code, then try again.")
         if status in (401, 403):
             return False, "Access token is wrong (Settings → WhatsApp)."
-        return False, f"The gateway could not send the message (HTTP {status}). {body[:140]}"
+        return False, f"The gateway could not send the message (HTTP {status})."
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace").lower()
         if e.code in (401, 403):
@@ -213,8 +256,10 @@ def send_pdf(con, number: str, pdf_path: str, caption: str = "") -> tuple[bool, 
         return False, f"Could not send on WhatsApp: {e}"
 
 
-def send_report(con, receipt_id: int, parent=None, *, silent: bool = False):
-    """Build the report PDF for a receipt and send it to the patient. Returns (ok,msg)."""
+def _send_built_pdf(con, receipt_id, build_fn, caption_key, label):
+    """Build a PDF into a private 0600 temp file, send it, and always delete it
+    (no patient-PII residue in a shared/world-readable temp dir)."""
+    import os
     import tempfile
     from . import report
 
@@ -223,38 +268,35 @@ def send_report(con, receipt_id: int, parent=None, *, silent: bool = False):
     ).fetchone()
     if not r:
         return False, "Receipt not found."
-    tmp = Path(tempfile.gettempdir()) / f"{r['lab_no'] or 'report'}.pdf"
+    fd, tmp = tempfile.mkstemp(suffix=".pdf")   # mode 0600, unpredictable name
+    os.close(fd)
     try:
-        report.export_report_pdf(con, receipt_id, str(tmp))
-    except Exception as e:  # noqa: BLE001
-        return False, f"Could not build the report PDF: {e}"
-    lab = db.get_setting(con, "lab_name", "")
-    cap = _caption(con, "whatsapp_report_caption",
-                   f"{lab} — Lab report {r['lab_no']} for {r['patient_name']}".strip(" —"),
-                   lab=lab, lab_no=r["lab_no"] or "", name=r["patient_name"] or "")
-    return send_pdf(con, r["telephone"] or "", str(tmp), cap)
+        try:
+            getattr(report, build_fn)(con, receipt_id, tmp)
+        except Exception as e:  # noqa: BLE001
+            return False, f"Could not build the {label} PDF: {e}"
+        lab = db.get_setting(con, "lab_name", "")
+        cap = _caption(con, caption_key,
+                       f"{lab} — {label.capitalize()} {r['lab_no']} for {r['patient_name']}".strip(" —"),
+                       lab=lab, lab_no=r["lab_no"] or "", name=r["patient_name"] or "")
+        return send_pdf(con, r["telephone"] or "", tmp, cap)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def send_report(con, receipt_id: int, parent=None, *, silent: bool = False):
+    """Build the report PDF for a receipt and send it to the patient. Returns (ok,msg)."""
+    return _send_built_pdf(con, receipt_id, "export_report_pdf",
+                           "whatsapp_report_caption", "lab report")
 
 
 def send_receipt(con, receipt_id: int, parent=None, *, silent: bool = False):
     """Build the cash-receipt (bill) PDF for a receipt and send it to the patient."""
-    import tempfile
-    from . import report
-
-    r = con.execute(
-        "SELECT lab_no, patient_name, telephone FROM receipts WHERE id=?", (receipt_id,)
-    ).fetchone()
-    if not r:
-        return False, "Receipt not found."
-    tmp = Path(tempfile.gettempdir()) / f"{(r['lab_no'] or 'receipt')}-bill.pdf"
-    try:
-        report.export_receipt_pdf(con, receipt_id, str(tmp))
-    except Exception as e:  # noqa: BLE001
-        return False, f"Could not build the receipt PDF: {e}"
-    lab = db.get_setting(con, "lab_name", "")
-    cap = _caption(con, "whatsapp_receipt_caption",
-                   f"{lab} — Cash receipt {r['lab_no']} for {r['patient_name']}".strip(" —"),
-                   lab=lab, lab_no=r["lab_no"] or "", name=r["patient_name"] or "")
-    return send_pdf(con, r["telephone"] or "", str(tmp), cap)
+    return _send_built_pdf(con, receipt_id, "export_receipt_pdf",
+                           "whatsapp_receipt_caption", "cash receipt")
 
 
 def send_text(con, raw_number: str, text: str) -> tuple[bool, str]:

@@ -426,7 +426,8 @@ check(True, "log_audit tolerates None args")
 from labdesk.ui.logs import ACTION_LABELS                       # noqa: E402
 EXPECTED_ACTIONS = {
     "login", "login_failed", "logout", "setup_completed", "patient_created",
-    "patient_updated", "receipt_created", "discount_approved", "results_saved",
+    "patient_updated", "receipt_created", "discount_approved",
+    "discount_approval_failed", "results_saved",
     "culture_saved", "due_received", "expense_added", "expense_updated",
     "expense_deleted", "previewed_receipt", "previewed_report", "printed_receipt",
     "printed_report", "exported_pdf", "whatsapp_report", "whatsapp_receipt",
@@ -437,6 +438,75 @@ EXPECTED_ACTIONS = {
 }
 for _a in sorted(EXPECTED_ACTIONS):
     check(_a in ACTION_LABELS, f"Logs page has a label for action '{_a}'")
+
+
+# ============================================================================
+# 10b) Security hardening: hashing, lockout, secrets, audit chain, URL, phone
+# ============================================================================
+section("security: hashing / lockout / secrets / audit-chain / url / phone")
+import hashlib as _hl                                            # noqa: E402
+from labdesk import whatsapp as _wa                              # noqa: E402
+
+# scrypt password hashing (slow KDF, not bare sha256)
+_h, _ = db.hash_password("s3cret-pw")
+check(_h.startswith("scrypt$"), "hash_password uses scrypt KDF")
+check(db._verify_password("s3cret-pw", _h, "") is True, "scrypt verify accepts correct")
+check(db._verify_password("wrong", _h, "") is False, "scrypt verify rejects wrong")
+
+# legacy sha256 row verifies AND is upgraded to scrypt on successful login
+_lsalt = "abc123"
+_legacy = _hl.sha256((_lsalt + "oldpw").encode()).hexdigest()
+check(db._verify_password("oldpw", _legacy, _lsalt) is True, "legacy sha256 still verifies")
+con.execute("INSERT INTO users(username,pass_hash,salt,full_name,role,active) "
+            "VALUES ('legacyuser',?,?,?,'technician',1)", (_legacy, _lsalt, "Legacy"))
+con.commit()
+check(db.verify_user(con, "legacyuser", "oldpw") is not None, "legacy user logs in")
+_nh = con.execute("SELECT pass_hash FROM users WHERE username='legacyuser'").fetchone()[0]
+check(_nh.startswith("scrypt$"), "legacy hash upgraded to scrypt on login")
+
+# brute-force lockout
+con.execute("UPDATE users SET failed_attempts=0, locked_until=NULL WHERE username='legacyuser'")
+con.commit()
+for _ in range(5):
+    db.verify_user(con, "legacyuser", "badpw")
+check(db.lock_remaining(con, "legacyuser") > 0, "account locks after repeated failures")
+check(db.verify_user(con, "legacyuser", "oldpw") is None, "correct password refused while locked")
+con.execute("UPDATE users SET failed_attempts=0, locked_until=NULL WHERE username='legacyuser'")
+con.commit()
+check(db.verify_user(con, "legacyuser", "oldpw") is not None, "unlocks after reset")
+
+# secret store (file, not the DB)
+db.set_secret("unit_k", "topsecret")
+check(db.get_secret("unit_k") == "topsecret", "secret roundtrip")
+check(db.get_secret("nope", "d") == "d", "secret default")
+
+# audit hash-chain tamper detection
+ok_chain, _bad = db.verify_audit_chain(con)
+check(ok_chain, "audit chain intact before tampering")
+_row = con.execute("SELECT id FROM audit_log WHERE hash IS NOT NULL LIMIT 1").fetchone()
+if _row:
+    con.execute("UPDATE audit_log SET detail='TAMPERED' WHERE id=?", (_row[0],)); con.commit()
+    ok2, _b2 = db.verify_audit_chain(con)
+    check(not ok2, "audit chain detects tampering")
+    con.execute("UPDATE audit_log SET detail='unit test entry' WHERE id=?", (_row[0],)); con.commit()
+
+# gateway URL validation + locality
+check(_wa.validate_url("http://localhost:8080")[0], "valid http URL accepted")
+check(not _wa.validate_url("ftp://x")[0], "non-http scheme rejected")
+check(not _wa.validate_url("notaurl")[0], "garbage URL rejected")
+check(_wa.is_local_url("http://127.0.0.1:8080"), "loopback is local")
+check(_wa.is_local_url("http://192.168.1.5:8080"), "RFC1918 is local")
+check(not _wa.is_local_url("http://evil.example.com"), "public host is not local")
+
+# tightened phone (cc 92 → must be a real mobile)
+check(_wa.wa_number("03001234567", "92") == "923001234567", "valid PK mobile accepted")
+check(_wa.wa_number("0421234567", "92") is None, "non-mobile/landline rejected for cc92")
+
+# format-string injection blocked in caption template
+db.set_setting(con, "whatsapp_report_caption", "{lab.__class__}")
+_cap = _wa._caption(con, "whatsapp_report_caption", "fb", lab="L")
+check(_cap == "{lab.__class__}", "format-string injection blocked (template kept literal)")
+db.set_setting(con, "whatsapp_report_caption", "")
 
 
 # ============================================================================
@@ -541,6 +611,10 @@ try:
     _wc = {"n": 0}
     _orig_warn = QMessageBox.warning
     QMessageBox.warning = staticmethod(lambda *a, **k: _wc.__setitem__("n", _wc["n"] + 1))
+    # the seeded admin is forced to change password on first login; clear that +
+    # any lockout so this test exercises the wrong/right-password warning flow.
+    con.execute("UPDATE users SET must_change_password=0, failed_attempts=0, "
+                "locked_until=NULL WHERE username='admin'"); con.commit()
     try:
         d = LoginDialog(con); d.show()
         d.username.setText("admin"); d.password.setText("definitely-wrong")

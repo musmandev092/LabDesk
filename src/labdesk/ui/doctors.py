@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 
 from .widgets import h1, muted, page_header
 from .. import db
+from ..roles import can
 
 
 class DoctorDialog(QDialog):
@@ -148,6 +149,9 @@ class DoctorsPage(QWidget):
     def delete(self):
         did = self._selected_id()
         if did is None:
+            return
+        if not can(self.user["role"], "delete"):
+            QMessageBox.warning(self, "Delete", "You don't have permission to delete doctors.")
             return
         if QMessageBox.question(self, "Delete", "Delete this doctor?") == QMessageBox.Yes:
             row = self.con.execute("SELECT name FROM doctors WHERE id=?", (did,)).fetchone()

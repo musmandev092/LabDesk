@@ -8,10 +8,13 @@ stays read-only while data persists across updates.
 from __future__ import annotations
 
 import hashlib
+import hmac
+import json
 import os
 import secrets
 import shutil
 import sqlite3
+import time
 from pathlib import Path
 
 # Neutral, white-label product identity (per-lab branding is set by the wizard).
@@ -58,6 +61,8 @@ DEFAULT_SETTINGS = {
     "dept_band": "HEMATOLOGY  |  CHEMICAL PATHOLOGY  |  HORMONES  |  MOLECULAR BIOLOGY  |  HISTOPATHOLOGY",
     # Appearance
     "theme": "light",            # "light" | "dark"
+    # security: auto-lock the screen after N minutes idle (0 = off)
+    "idle_lock_minutes": "0",
     # WhatsApp (self-hosted wuzapi gateway, see whatsapp.py)
     "whatsapp_url": "",          # e.g. http://localhost:8080
     "whatsapp_session": "default",
@@ -79,11 +84,25 @@ _EXTRA_COLUMNS = {
     "receipt_items": [("remarks", "TEXT")],
     # hide a parameter row from the printed report (kept in the entry screen)
     "results": [("hidden", "INTEGER NOT NULL DEFAULT 0")],
+    # security: force first-login password change + brute-force lockout
+    "users": [("must_change_password", "INTEGER NOT NULL DEFAULT 0"),
+              ("failed_attempts", "INTEGER NOT NULL DEFAULT 0"),
+              ("locked_until", "TEXT")],
+    # audit tamper-evidence: rolling hash chain
+    "audit_log": [("hash", "TEXT")],
 }
+
+# brute-force lockout policy
+_MAX_FAILS = 5
+_LOCK_SECONDS = 60
+# scrypt work factors (memory-hard; ~tens of ms per hash)
+_SCRYPT_N, _SCRYPT_R, _SCRYPT_P = 16384, 8, 1
+_SCRYPT_MAXMEM = 64 * 1024 * 1024
 
 
 def data_dir() -> Path:
-    """Where the live database + assets are stored (writable)."""
+    """Where the live database + assets are stored (writable). Hardened to 0700 so
+    other OS users can't read the patient data / secrets."""
     override = os.environ.get("LABDESK_DATA_DIR")
     if override:
         d = Path(override)
@@ -91,6 +110,10 @@ def data_dir() -> Path:
         base = os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share")
         d = Path(base) / APP_NAME
     d.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(d, 0o700)
+    except OSError:
+        pass
     return d
 
 
@@ -98,18 +121,85 @@ def db_path() -> Path:
     return data_dir() / "labdesk.sqlite"
 
 
+def _harden_perms(target: Path) -> None:
+    """Restrict the SQLite DB + its WAL/SHM sidecars to the owner (0600)."""
+    for p in (target, Path(str(target) + "-wal"), Path(str(target) + "-shm")):
+        try:
+            if p.exists():
+                os.chmod(p, 0o600)
+        except OSError:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Secrets kept OUT of the SQLite DB (so DB copies/backups don't leak them).
+# Stored in a 0600 JSON file in the data dir. Used for the WhatsApp token.
+# ---------------------------------------------------------------------------
+def _secret_path() -> Path:
+    return data_dir() / ".secrets.json"
+
+
+def get_secret(key: str, default: str = "") -> str:
+    try:
+        data = json.loads(_secret_path().read_text(encoding="utf-8"))
+        return str(data.get(key, default))
+    except (OSError, ValueError):
+        return default
+
+
+def set_secret(key: str, value: str) -> None:
+    p = _secret_path()
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    data[key] = value
+    fd = os.open(str(p), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(data, fh)
+    try:
+        os.chmod(p, 0o600)
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Password hashing — scrypt (memory-hard KDF, stdlib). The stored string is
+# self-describing: "scrypt$N$r$p$salt$hexhash". Legacy sha256 rows are still
+# verified and transparently upgraded on the next successful login.
+# ---------------------------------------------------------------------------
 def hash_password(password: str, salt: str | None = None) -> tuple[str, str]:
     salt = salt or secrets.token_hex(16)
-    h = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
-    return h, salt
+    dk = hashlib.scrypt(password.encode("utf-8"), salt=salt.encode("utf-8"),
+                        n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P,
+                        maxmem=_SCRYPT_MAXMEM, dklen=32)
+    return f"scrypt${_SCRYPT_N}${_SCRYPT_R}${_SCRYPT_P}${salt}${dk.hex()}", ""
+
+
+def _verify_password(password: str, stored: str, legacy_salt: str) -> bool:
+    """Constant-time verification against a scrypt string or a legacy sha256 hash."""
+    stored = stored or ""
+    if stored.startswith("scrypt$"):
+        try:
+            _, n, r, p, salt, hexh = stored.split("$", 5)
+            dk = hashlib.scrypt(password.encode("utf-8"), salt=salt.encode("utf-8"),
+                                n=int(n), r=int(r), p=int(p),
+                                maxmem=_SCRYPT_MAXMEM, dklen=len(hexh) // 2)
+            return hmac.compare_digest(dk.hex(), hexh)
+        except Exception:  # noqa: BLE001
+            return False
+    h = hashlib.sha256(((legacy_salt or "") + password).encode("utf-8")).hexdigest()
+    return hmac.compare_digest(h, stored)
 
 
 def connect(path: Path | None = None) -> sqlite3.Connection:
-    con = sqlite3.connect(path or db_path(), timeout=10)
+    target = path or db_path()
+    con = sqlite3.connect(target, timeout=10)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
     con.execute("PRAGMA journal_mode = WAL")
     con.execute("PRAGMA busy_timeout = 8000")  # let multiple instances share the DB
+    _harden_perms(Path(target))
     return con
 
 
@@ -135,12 +225,23 @@ def init_db(
         n = con.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         if n == 0:
             h, salt = hash_password("admin")
+            # default admin must change its password on first login (the seeded
+            # 'admin' credential is a one-time bootstrap, never a usable account).
             con.execute(
-                "INSERT INTO users(username, full_name, pass_hash, salt, role) "
-                "VALUES (?,?,?,?,?)",
+                "INSERT INTO users(username, full_name, pass_hash, salt, role, "
+                "must_change_password) VALUES (?,?,?,?,?,1)",
                 ("admin", "Administrator", h, salt, "admin"),
             )
+        else:
+            # the shipped seed.sqlite may carry a legacy 'admin'/'admin' account;
+            # if it still uses the default password, force a change on first login.
+            adm = con.execute(
+                "SELECT id, pass_hash, salt FROM users WHERE username='admin'"
+            ).fetchone()
+            if adm and _verify_password("admin", adm["pass_hash"], adm["salt"] or ""):
+                con.execute("UPDATE users SET must_change_password=1 WHERE id=?", (adm["id"],))
     con.commit()
+    _harden_perms(Path(target))
     return con
 
 
@@ -226,17 +327,75 @@ def set_setting(con: sqlite3.Connection, key: str, value: str) -> None:
     con.commit()
 
 
-def log_audit(con: sqlite3.Connection, username: str, action: str, detail: str = "") -> None:
-    """Append one entry to the audit trail (shown on the admin Logs page).
-    Never raises — recording an action must never break the action itself."""
+def _audit_fallback(username, action, detail, err) -> None:
+    """If the audit DB write fails, append to a local file so the gap is visible."""
     try:
-        con.execute(
-            "INSERT INTO audit_log(username, action, detail) VALUES (?,?,?)",
-            ((username or "")[:64], (action or "")[:64], (detail or "")[:500]),
-        )
-        con.commit()
+        with open(data_dir() / "audit_fallback.log", "a", encoding="utf-8") as fh:
+            fh.write(f"{username}\t{action}\t{detail}\t(audit-db-error: {err})\n")
     except Exception:  # noqa: BLE001
         pass
+
+
+def log_audit(con: sqlite3.Connection, username: str, action: str, detail: str = "") -> None:
+    """Append one tamper-evident entry to the audit trail (shown on the admin Logs
+    page). Each row carries a rolling SHA-256 hash of (prev_hash, at, user, action,
+    detail), so any later edit/deletion is detectable. Never raises — recording an
+    action must never break the action itself; on DB failure it falls back to a file."""
+    username = (username or "")[:64]
+    action = (action or "")[:64]
+    detail = (detail or "")[:500]
+    try:
+        prev = con.execute("SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1").fetchone()
+        prev_hash = (prev["hash"] or "") if (prev and "hash" in prev.keys()) else ""
+        ts = con.execute("SELECT datetime('now','localtime')").fetchone()[0]
+        chain = hashlib.sha256(
+            "|".join([prev_hash, ts, username, action, detail]).encode("utf-8")
+        ).hexdigest()
+        con.execute(
+            "INSERT INTO audit_log(at, username, action, detail, hash) VALUES (?,?,?,?,?)",
+            (ts, username, action, detail, chain),
+        )
+        con.commit()
+    except Exception as e:  # noqa: BLE001
+        _audit_fallback(username, action, detail, e)
+
+
+def verify_audit_chain(con: sqlite3.Connection):
+    """Recompute the rolling hash chain. Returns (ok, first_bad_id|None). A
+    mismatch or a missing hash after chaining began means the log was altered."""
+    prev = ""
+    started = False
+    try:
+        rows = con.execute(
+            "SELECT id, at, username, action, detail, hash FROM audit_log ORDER BY id"
+        ).fetchall()
+    except Exception:  # noqa: BLE001
+        return True, None
+    for row in rows:
+        if row["hash"] is None:
+            if started:
+                return False, row["id"]
+            continue  # legacy rows that predate the hash chain
+        started = True
+        expect = hashlib.sha256(
+            "|".join([prev, row["at"] or "", row["username"] or "",
+                      row["action"] or "", row["detail"] or ""]).encode("utf-8")
+        ).hexdigest()
+        if row["hash"] != expect:
+            return False, row["id"]
+        prev = row["hash"]
+    return True, None
+
+
+def lock_remaining(con: sqlite3.Connection, username: str) -> int:
+    """Seconds remaining on a brute-force lockout for this username (0 = none)."""
+    row = con.execute("SELECT locked_until FROM users WHERE username=?", (username,)).fetchone()
+    if not row or "locked_until" not in row.keys() or not row["locked_until"]:
+        return 0
+    try:
+        return max(0, int(float(row["locked_until"]) - time.time()))
+    except (TypeError, ValueError):
+        return 0
 
 
 def verify_user(con: sqlite3.Connection, username: str, password: str):
@@ -245,5 +404,34 @@ def verify_user(con: sqlite3.Connection, username: str, password: str):
     ).fetchone()
     if not row:
         return None
-    h, _ = hash_password(password, row["salt"])
-    return row if h == row["pass_hash"] else None
+    cols = row.keys()
+    # locked out from too many recent failures?
+    if "locked_until" in cols and row["locked_until"]:
+        try:
+            if time.time() < float(row["locked_until"]):
+                return None
+        except (TypeError, ValueError):
+            pass
+    legacy_salt = row["salt"] if "salt" in cols else ""
+    if _verify_password(password, row["pass_hash"], legacy_salt):
+        try:
+            # transparently upgrade legacy sha256 hashes to scrypt
+            if not (row["pass_hash"] or "").startswith("scrypt$"):
+                newh, _ = hash_password(password)
+                con.execute("UPDATE users SET pass_hash=?, salt='' WHERE id=?", (newh, row["id"]))
+            con.execute("UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id=?",
+                        (row["id"],))
+            con.commit()
+        except Exception:  # noqa: BLE001
+            pass
+        return row
+    # wrong password → count the failure, lock after _MAX_FAILS
+    try:
+        fa = (row["failed_attempts"] if "failed_attempts" in cols and row["failed_attempts"] else 0) + 1
+        lock = str(time.time() + _LOCK_SECONDS) if fa >= _MAX_FAILS else None
+        con.execute("UPDATE users SET failed_attempts=?, locked_until=? WHERE id=?",
+                    (fa, lock, row["id"]))
+        con.commit()
+    except Exception:  # noqa: BLE001
+        pass
+    return None

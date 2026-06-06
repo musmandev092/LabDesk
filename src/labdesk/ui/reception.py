@@ -197,6 +197,9 @@ class ReceptionPage(QWidget):
             return
         approver = db.verify_user(self.con, u.strip(), p)
         if not approver or not roles.can(approver["role"], "apply_discount"):
+            # audit the failed approval attempt (brute-force of a manager password)
+            db.log_audit(self.con, self.user["username"], "discount_approval_failed",
+                         f"attempted approver: {u.strip() or '(blank)'}")
             QMessageBox.warning(self, "Approval",
                                 "Invalid credentials, or that user can't approve discounts.")
             return
@@ -416,6 +419,14 @@ class ReceptionPage(QWidget):
         if not self.cart:
             QMessageBox.warning(self, "Reception", "Add at least one test.")
             return
+        # Re-validate the discount at save (defence-in-depth — don't trust only the
+        # widget's enabled state). A discount ABOVE the auto-applied promo needs the
+        # apply_discount capability or a recorded manager approval.
+        if self.discount.value() > self._promo_pct() + 1e-9 and not (
+                roles.can(self.user["role"], "apply_discount") or self._discount_approved_by):
+            QMessageBox.warning(self, "Discount",
+                                "A discount above the promo needs manager/admin approval.")
+            return
         c = self.con
         title = self.title.currentText().strip()
         mr_no = self.mr_no.text().strip()
@@ -474,13 +485,6 @@ class ReceptionPage(QWidget):
              doc_name, specimen, sub, disc_pct,
              0, net, paid, due, "pending", self.user["username"]),
         ).lastrowid
-        # audit trail when a cashier's discount was manager-approved
-        if disc_pct and self._discount_approved_by and self._discount_approved_by != self.user["username"]:
-            c.execute(
-                "INSERT INTO audit_log(username,action,detail) VALUES (?,?,?)",
-                (self.user["username"], "discount_approved",
-                 f"{disc_pct:g}% on receipt {rid} approved by {self._discount_approved_by}"),
-            )
         # number as PREFIX_YYYYMMDD_NNN with a daily-resetting sequence, e.g. LAB_20260606_006
         datestr = c.execute("SELECT strftime('%Y%m%d','now','localtime')").fetchone()[0]
         seq = c.execute(
@@ -507,6 +511,11 @@ class ReceptionPage(QWidget):
                      f"{name} ({mr_no})")
         db.log_audit(c, self.user["username"], "receipt_created",
                      f"{lab_no} — {name}, net {net:.0f}, paid {paid:.0f}, due {due:.0f}")
+        if disc_pct > 0:  # always record any discount (promo, self-applied, or approved)
+            who = (self._discount_approved_by
+                   or ("promo" if disc_pct <= self._promo_pct() + 1e-9 else self.user["username"]))
+            db.log_audit(c, self.user["username"], "discount_approved",
+                         f"{disc_pct:g}% on {lab_no} (by {who})")
         QMessageBox.information(self, "Saved", f"Receipt {lab_no} saved.")
         if do_print:
             # build the receipt PDF off the UI thread, then print — never blocks

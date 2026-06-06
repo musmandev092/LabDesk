@@ -37,6 +37,8 @@ def _acquire_single_instance():
         return None
     QLocalServer.removeServer(name)      # clear a stale socket from a crash
     server = QLocalServer()
+    # only let the SAME OS user connect to the single-instance socket
+    server.setSocketOptions(QLocalServer.UserAccessOption)
     server.listen(name)                  # if this fails we still run (fail-open)
     return server
 
@@ -163,8 +165,13 @@ def run(argv: list[str]) -> int:
     if server is not None:
         def _raise_existing():
             conn = server.nextPendingConnection()
-            if conn is not None:
-                conn.readAll(); conn.disconnectFromServer()
+            if conn is None:
+                return
+            conn.waitForReadyRead(200)
+            payload = bytes(conn.readAll()).strip()
+            conn.disconnectFromServer()
+            if payload != b"raise":          # only act on the expected command
+                return
             from PySide6.QtCore import Qt
             win.setWindowState((win.windowState() & ~Qt.WindowMinimized) | Qt.WindowActive)
             win.show(); win.raise_(); win.activateWindow()

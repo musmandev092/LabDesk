@@ -10,6 +10,7 @@ offline. Printing rasterises the WeasyPrint PDF onto the chosen QPrinter.
 from __future__ import annotations
 
 import html
+import os
 import re
 import tempfile
 from datetime import datetime
@@ -678,23 +679,29 @@ def print_bytes(pdf: bytes, parent, title: str, printer_name: str = "") -> None:
     if printer.outputFormat() == QPrinter.PdfFormat and printer.outputFileName():
         Path(printer.outputFileName()).write_bytes(pdf)
         return
-    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)  # 0600
     tmp.write(pdf)
     tmp.close()
-    doc = QPdfDocument(parent)
-    doc.load(tmp.name)
-    dpi = min(printer.resolution(), _PRINT_DPI)
-    painter = QPainter(printer)
-    page_rect = printer.pageRect(QPrinter.DevicePixel)
-    for i in range(doc.pageCount()):
-        if i:
-            printer.newPage()
-        pt = doc.pagePointSize(i)
-        w = max(1, int(pt.width() / 72.0 * dpi))
-        h = max(1, int(pt.height() / 72.0 * dpi))
-        img = doc.render(i, QSize(w, h))
-        painter.drawImage(QRectF(page_rect), img)
-    painter.end()
+    try:
+        doc = QPdfDocument(parent)
+        doc.load(tmp.name)
+        dpi = min(printer.resolution(), _PRINT_DPI)
+        painter = QPainter(printer)
+        page_rect = printer.pageRect(QPrinter.DevicePixel)
+        for i in range(doc.pageCount()):
+            if i:
+                printer.newPage()
+            pt = doc.pagePointSize(i)
+            w = max(1, int(pt.width() / 72.0 * dpi))
+            h = max(1, int(pt.height() / 72.0 * dpi))
+            img = doc.render(i, QSize(w, h))
+            painter.drawImage(QRectF(page_rect), img)
+        painter.end()
+    finally:
+        try:
+            os.remove(tmp.name)               # don't leave patient-PII PDF in temp
+        except OSError:
+            pass
 
 
 def print_report(con, receipt_id: int, parent=None) -> None:

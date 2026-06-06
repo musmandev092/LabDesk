@@ -20,10 +20,13 @@ CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT UNIQUE NOT NULL,
     full_name     TEXT,
-    pass_hash     TEXT NOT NULL,        -- sha256(salt + password)
-    salt          TEXT NOT NULL,
+    pass_hash     TEXT NOT NULL,        -- scrypt$N$r$p$salt$hash (legacy: sha256)
+    salt          TEXT NOT NULL,        -- legacy salt column (scrypt embeds its own)
     role          TEXT NOT NULL DEFAULT 'operator',  -- admin | operator | viewer
     active        INTEGER NOT NULL DEFAULT 1,
+    must_change_password INTEGER NOT NULL DEFAULT 0,
+    failed_attempts INTEGER NOT NULL DEFAULT 0,
+    locked_until  TEXT,
     created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
@@ -263,7 +266,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
     at        TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     username  TEXT,
     action    TEXT,
-    detail    TEXT
+    detail    TEXT,
+    hash      TEXT                       -- rolling tamper-evidence chain
 );
 
 -- Schema version marker

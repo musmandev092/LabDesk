@@ -308,15 +308,17 @@ class SettingsPage(QWidget):
         d = UserDialog(self)
         if d.exec() == QDialog.Accepted:
             v = d.values()
-            if not v["username"] or len(v["password"]) < 4:
-                QMessageBox.warning(self, "User", "Username and a 4+ char password are required.")
+            if not v["username"] or len(v["password"]) < 6:
+                QMessageBox.warning(self, "User", "Username and a 6+ char password are required.")
                 return
             if self.con.execute("SELECT 1 FROM users WHERE username=?", (v["username"],)).fetchone():
                 QMessageBox.warning(self, "User", "That username already exists.")
                 return
             h, salt = db.hash_password(v["password"])
+            # new staff must set their own password on first login
             self.con.execute(
-                "INSERT INTO users(username,full_name,pass_hash,salt,role) VALUES (?,?,?,?,?)",
+                "INSERT INTO users(username,full_name,pass_hash,salt,role,must_change_password) "
+                "VALUES (?,?,?,?,?,1)",
                 (v["username"], v["full_name"], h, salt, v["role"]))
             self.con.commit()
             db.log_audit(self.con, self.user["username"], "user_created",
@@ -342,8 +344,9 @@ class SettingsPage(QWidget):
 
     def _security_card(self):
         form = self._form()
+        self._add_field(form, ("idle_lock_minutes", "Auto-lock after (minutes)", "0 = off"))
         self.new_pw = QLineEdit(); self.new_pw.setEchoMode(QLineEdit.Password)
-        self.new_pw.setPlaceholderText("at least 4 characters")
+        self.new_pw.setPlaceholderText("at least 6 characters")
         form.addRow(self._flbl("New password"), self.new_pw)
         chpw = QPushButton("Change my password"); chpw.setObjectName("ghost")
         chpw.clicked.connect(self.change_pw)
@@ -354,7 +357,12 @@ class SettingsPage(QWidget):
     # ---- behaviour ----
     def on_show(self):
         for key, le in self.inputs.items():
-            le.setText(db.get_setting(self.con, key, ""))
+            if key == "whatsapp_api_key":
+                # token is kept in the private secret file, not the DB
+                le.setText(db.get_secret("whatsapp_api_key")
+                           or db.get_setting(self.con, key, ""))
+            else:
+                le.setText(db.get_setting(self.con, key, ""))
         self.wa_auto.setChecked(db.get_setting(self.con, "whatsapp_auto", "0") == "1")
         self.wa_auto_receipt.setChecked(db.get_setting(self.con, "whatsapp_auto_receipt", "0") == "1")
         theme = db.get_setting(self.con, "theme", "light")
@@ -374,8 +382,27 @@ class SettingsPage(QWidget):
             self.inputs[key].setText(path)
 
     def save(self):
+        # validate the gateway URL (SSRF / mis-send guard) before persisting
+        wa_url = self.inputs["whatsapp_url"].text().strip()
+        if wa_url:
+            ok, why = whatsapp.validate_url(wa_url)
+            if not ok:
+                QMessageBox.warning(self, "WhatsApp", why)
+                return
+            if not whatsapp.is_local_url(wa_url):
+                if QMessageBox.question(
+                    self, "WhatsApp",
+                    "The gateway URL is not a local/loopback address. Patient PDFs and "
+                    "your access token would be sent to that host. Save anyway?",
+                ) != QMessageBox.Yes:
+                    return
         for key, le in self.inputs.items():
+            if key == "whatsapp_api_key":
+                continue  # handled separately (secret file, never the DB)
             db.set_setting(self.con, key, le.text().strip())
+        # WhatsApp token → private 0600 secret file; purge any legacy plaintext DB copy
+        db.set_secret("whatsapp_api_key", self.inputs["whatsapp_api_key"].text().strip())
+        db.set_setting(self.con, "whatsapp_api_key", "")
         db.set_setting(self.con, "whatsapp_auto", "1" if self.wa_auto.isChecked() else "0")
         db.set_setting(self.con, "whatsapp_auto_receipt",
                        "1" if self.wa_auto_receipt.isChecked() else "0")
@@ -424,11 +451,12 @@ class SettingsPage(QWidget):
 
     def change_pw(self):
         pw = self.new_pw.text()
-        if len(pw) < 4:
-            QMessageBox.warning(self, "Password", "Password must be at least 4 characters.")
+        if len(pw) < 6:
+            QMessageBox.warning(self, "Password", "Password must be at least 6 characters.")
             return
         h, salt = db.hash_password(pw)
-        self.con.execute("UPDATE users SET pass_hash=?, salt=? WHERE id=?", (h, salt, self.user["id"]))
+        self.con.execute("UPDATE users SET pass_hash=?, salt=?, must_change_password=0 WHERE id=?",
+                         (h, salt, self.user["id"]))
         self.con.commit()
         db.log_audit(self.con, self.user["username"], "password_changed", "own password")
         self.new_pw.clear()

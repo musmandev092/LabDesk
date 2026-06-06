@@ -72,14 +72,56 @@ class LoginDialog(QDialog):
     def try_login(self):
         u = self.username.text().strip()
         p = self.password.text()
+        rem = db.lock_remaining(self.con, u)
+        if rem:
+            QMessageBox.warning(self, "Sign in",
+                                f"Too many failed attempts. Try again in {rem} second(s).")
+            return
         user = db.verify_user(self.con, u, p)
         if user:
             db.log_audit(self.con, user["username"], "login", "signed in")
+            if "must_change_password" in user.keys() and user["must_change_password"]:
+                if not self._force_password_change(user):
+                    return                       # cancelled → stay on the login screen
             self.user = user
             self.accept()
         else:
-            db.log_audit(self.con, u or "(blank)", "login_failed",
-                         "wrong username or password")
-            QMessageBox.warning(self, "Sign in", "Invalid username or password.")
+            # store the attacker-controlled username in DETAIL, not the username
+            # column (log-injection / misleading actor), and surface lockout.
+            db.log_audit(self.con, "(unauthenticated)", "login_failed",
+                         f"attempted username: {u or '(blank)'}")
+            rem2 = db.lock_remaining(self.con, u)
+            if rem2:
+                QMessageBox.warning(self, "Sign in",
+                                    f"Too many failed attempts. Locked for {rem2} second(s).")
+            else:
+                QMessageBox.warning(self, "Sign in", "Invalid username or password.")
             self.password.clear()
             self.password.setFocus()
+
+    def _force_password_change(self, user) -> bool:
+        """Make a user with must_change_password set a new one before entering."""
+        from PySide6.QtWidgets import QInputDialog
+        QMessageBox.information(self, "Set a new password",
+                               "For security, please set a new password before continuing.")
+        while True:
+            pw, ok = QInputDialog.getText(self, "New password",
+                                          "New password (at least 6 characters):",
+                                          QLineEdit.Password)
+            if not ok:
+                return False
+            pw = pw.strip()
+            if len(pw) < 6:
+                QMessageBox.warning(self, "Password", "Password must be at least 6 characters.")
+                continue
+            if pw.lower() == "admin":
+                QMessageBox.warning(self, "Password", "Please choose a different password.")
+                continue
+            h, salt = db.hash_password(pw)
+            self.con.execute(
+                "UPDATE users SET pass_hash=?, salt=?, must_change_password=0 WHERE id=?",
+                (h, salt, user["id"]))
+            self.con.commit()
+            db.log_audit(self.con, user["username"], "password_changed",
+                         "forced first-login change")
+            return True

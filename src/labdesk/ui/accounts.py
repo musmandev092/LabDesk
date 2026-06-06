@@ -171,19 +171,30 @@ class AccountsPage(QWidget):
         self.recover_btn.setEnabled(False)
 
     def recover_due(self):
+        from PySide6.QtWidgets import QInputDialog
         r = self.due_table.currentRow()
         if not (0 <= r < len(self._due_ids)):
             return
         rid = self._due_ids[r]
         rec = self.con.execute("SELECT * FROM receipts WHERE id=?", (rid,)).fetchone()
+        if not rec or not rec["due"] or rec["due"] <= 0:
+            return
+        amount, ok = QInputDialog.getDouble(
+            self, "Recover due",
+            f"Amount received for {rec['lab_no']}  (due {money(rec['due'])}):",
+            float(rec["due"]), 0.0, float(rec["due"]), 2)
+        if not ok or amount <= 0:
+            return
+        new_paid = (rec["paid"] or 0) + amount
+        new_due = max(0.0, (rec["net_amount"] or 0) - new_paid)
         self.con.execute(
-            "UPDATE receipts SET paid=net_amount, due=0 WHERE id=?", (rid,))
+            "UPDATE receipts SET paid=?, due=? WHERE id=?", (new_paid, new_due, rid))
         self.con.execute(
             "INSERT INTO ledger(kind,ref_id,detail,credit) VALUES ('due_recovery',?,?,?)",
-            (rid, f"Due recovered {rec['lab_no']}", rec["due"]))
+            (rid, f"Due recovered {rec['lab_no']}", amount))
         self.con.commit()
         db.log_audit(self.con, self.user["username"], "due_received",
-                     f"{rec['lab_no']} — {money(rec['due'] or 0)}")
+                     f"{rec['lab_no']} — {money(amount)} (due now {money(new_due)})")
         self.refresh_dues(); self.refresh_summary()
 
     def on_show(self):
