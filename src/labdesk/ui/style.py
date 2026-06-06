@@ -1,6 +1,12 @@
 """Application-wide palette and stylesheet (light + dark themes)."""
 from __future__ import annotations
 
+from pathlib import Path
+
+# checkmark glyph for ticked checkboxes (white check, reads on the teal fill in
+# both themes). Path is injected into the QSS; falls back gracefully if missing.
+_CHECK = Path(__file__).resolve().parent.parent / "assets" / "checkmark.png"
+
 # Product (white-label) identity. The *lab's* own name is configured per-install
 # via the first-run wizard; this is only the neutral product brand.
 PRODUCT_NAME = "LabDesk"
@@ -51,6 +57,7 @@ THEMES = {"light": _LIGHT, "dark": _DARK}
 
 def build_qss(theme: str = "light") -> str:
     p = THEMES.get(theme, _LIGHT)
+    _check_line = (f"image: url({_CHECK.as_posix()});" if _CHECK.exists() else "")
     return f"""
 * {{
     font-family: "Segoe UI", "Inter", "Noto Sans", "DejaVu Sans", sans-serif;
@@ -128,6 +135,28 @@ QComboBox QAbstractItemView {{
 QSpinBox::up-button, QSpinBox::down-button,
 QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{ width: 0; height: 0; border: none; }}
 QSpinBox, QDoubleSpinBox {{ padding-right: 10px; }}
+
+/* Checkboxes / radios — explicitly themed so they're clearly visible on dark
+   (the default indicator washes out). Empty = outlined box; ticked = teal fill
+   with a white check. */
+QCheckBox, QRadioButton {{ spacing: 8px; color: {p['text']}; }}
+QCheckBox::indicator, QRadioButton::indicator {{
+    width: 18px; height: 18px; border: 1.5px solid {p['muted']};
+    background: {p['input_bg']};
+}}
+QCheckBox::indicator {{ border-radius: 4px; }}
+QRadioButton::indicator {{ border-radius: 9px; }}
+QCheckBox::indicator:hover, QRadioButton::indicator:hover {{ border-color: {p['primary']}; }}
+QCheckBox::indicator:checked {{
+    background: {p['primary']}; border-color: {p['primary']}; {_check_line}
+}}
+QRadioButton::indicator:checked {{
+    background: {p['primary']}; border-color: {p['primary']};
+}}
+QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {{
+    border-color: {p['border']}; background: {p['bg']};
+}}
+QCheckBox:disabled, QRadioButton:disabled {{ color: {p['muted']}; }}
 
 /* Tables */
 QTableView, QTableWidget, QTreeView, QListWidget {{
