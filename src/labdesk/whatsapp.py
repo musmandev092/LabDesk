@@ -195,7 +195,14 @@ def check_status(con) -> tuple[bool, str]:
         return False, f"Error: {e}"
 
 
-def send_pdf(con, number: str, pdf_path: str, caption: str = "") -> tuple[bool, str]:
+def _safe_filename(name: str, fallback: str = "report") -> str:
+    """A friendly, filesystem-safe PDF name for the WhatsApp attachment."""
+    base = "".join(c for c in (name or "") if c.isalnum() or c in "-_") or fallback
+    return base + ".pdf"
+
+
+def send_pdf(con, number: str, pdf_path: str, caption: str = "",
+             filename: str = "") -> tuple[bool, str]:
     cfg = _cfg(con)
     if not cfg["url"] or not cfg["token"]:
         return False, "WhatsApp isn't set up yet (Settings → WhatsApp)."
@@ -209,7 +216,8 @@ def send_pdf(con, number: str, pdf_path: str, caption: str = "") -> tuple[bool, 
     payload = {
         "Phone": phone,
         "Document": document,
-        "FileName": p.name,
+        # show a meaningful name to the recipient, not the random temp filename
+        "FileName": filename or p.name,
         "Caption": caption or "Your laboratory report",
     }
     try:
@@ -256,7 +264,7 @@ def send_pdf(con, number: str, pdf_path: str, caption: str = "") -> tuple[bool, 
         return False, f"Could not send on WhatsApp: {e}"
 
 
-def _send_built_pdf(con, receipt_id, build_fn, caption_key, label):
+def _send_built_pdf(con, receipt_id, build_fn, caption_key, label, fname_suffix=""):
     """Build a PDF into a private 0600 temp file, send it, and always delete it
     (no patient-PII residue in a shared/world-readable temp dir)."""
     import os
@@ -279,7 +287,8 @@ def _send_built_pdf(con, receipt_id, build_fn, caption_key, label):
         cap = _caption(con, caption_key,
                        f"{lab} — {label.capitalize()} {r['lab_no']} for {r['patient_name']}".strip(" —"),
                        lab=lab, lab_no=r["lab_no"] or "", name=r["patient_name"] or "")
-        return send_pdf(con, r["telephone"] or "", tmp, cap)
+        fname = _safe_filename((r["lab_no"] or label) + fname_suffix, label)
+        return send_pdf(con, r["telephone"] or "", tmp, cap, filename=fname)
     finally:
         try:
             os.remove(tmp)
@@ -296,7 +305,7 @@ def send_report(con, receipt_id: int, parent=None, *, silent: bool = False):
 def send_receipt(con, receipt_id: int, parent=None, *, silent: bool = False):
     """Build the cash-receipt (bill) PDF for a receipt and send it to the patient."""
     return _send_built_pdf(con, receipt_id, "export_receipt_pdf",
-                           "whatsapp_receipt_caption", "cash receipt")
+                           "whatsapp_receipt_caption", "cash receipt", fname_suffix="-receipt")
 
 
 def send_text(con, raw_number: str, text: str) -> tuple[bool, str]:

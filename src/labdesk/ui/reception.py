@@ -485,8 +485,8 @@ class ReceptionPage(QWidget):
              doc_name, specimen, sub, disc_pct,
              0, net, paid, due, "pending", self.user["username"]),
         ).lastrowid
-        # number as PREFIX_YYYYMMDD_NNN with a daily-resetting sequence, e.g. LAB_20260606_006
-        datestr = c.execute("SELECT strftime('%Y%m%d','now','localtime')").fetchone()[0]
+        # number as PREFIX_YYYY-MM-DD_NNN with a daily-resetting sequence, e.g. LAB_2026-06-06_006
+        datestr = c.execute("SELECT strftime('%Y-%m-%d','now','localtime')").fetchone()[0]
         seq = c.execute(
             "SELECT COUNT(*) FROM receipts WHERE date(received_at)=date('now','localtime')"
         ).fetchone()[0]

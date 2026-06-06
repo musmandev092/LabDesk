@@ -529,6 +529,22 @@ _vis = con.execute("SELECT COUNT(*) FROM receipts WHERE (COALESCE(patient_name,'
                    "OR COALESCE(lab_no,'') LIKE '%')").fetchone()[0]
 check(_vis == _tot, "NULL name/lab_no receipt visible on empty search (COALESCE)")
 
+# WhatsApp attachment uses a friendly lab_no filename, not the random temp name
+eq(_wa._safe_filename("LAB_2026-06-06_003"), "LAB_2026-06-06_003.pdf", "safe filename keeps lab_no")
+eq(_wa._safe_filename("../etc/passwd"), "etcpasswd.pdf", "safe filename strips path chars")
+_cap = []
+_orig_post = _wa._post
+_wa._post = lambda cfg, path, payload, timeout=None: (_cap.append(payload), (200, '{"success":true}'))[1]
+db.set_setting(con, "whatsapp_url", "http://localhost:8080"); db.set_secret("whatsapp_api_key", "tok")
+_wa.send_report(con, R_VALID)
+_wa._post = _orig_post
+check(_cap and _cap[0].get("FileName", "").endswith(".pdf")
+      and "tmp" not in _cap[0]["FileName"].lower(),
+      "WhatsApp FileName is the lab_no PDF, not a temp name")
+# new lab_no format uses hyphenated date (verify the strftime the app uses)
+_ds = con.execute("SELECT strftime('%Y-%m-%d','now','localtime')").fetchone()[0]
+check(len(_ds) == 10 and _ds[4] == "-" and _ds[7] == "-", "lab_no date format is YYYY-MM-DD")
+
 
 # ============================================================================
 # 11b) Themes / caption templates / send_text / timeout / new settings
