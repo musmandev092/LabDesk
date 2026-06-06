@@ -1,0 +1,480 @@
+#!/usr/bin/env python3
+"""Comprehensive OFFLINE test suite for LabDesk (~2000 use-cases).
+
+Safety guarantees:
+  * urllib is monkeypatched — **no WhatsApp message is ever actually sent**, and
+    every network failure mode (no internet, gateway down, not logged in, bad
+    token, timeout, DNS failure …) is simulated locally.
+  * LABDESK_DATA_DIR points at a throwaway temp dir, so the **live database is
+    never touched**.
+
+Run:  QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_all.py
+"""
+from __future__ import annotations
+
+import io
+import json
+import os
+import socket
+import sys
+import tempfile
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+# ---- isolation: throwaway data dir BEFORE importing labdesk.db --------------
+_TMP = tempfile.mkdtemp(prefix="labdesk_test_")
+os.environ["LABDESK_DATA_DIR"] = _TMP
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from labdesk import db, whatsapp, report                      # noqa: E402
+from labdesk.constants import normalize_phone                 # noqa: E402
+
+# ---- tiny assertion framework ----------------------------------------------
+PASS = 0
+FAIL = 0
+FAILS: list[str] = []
+
+
+def check(cond, name):
+    global PASS, FAIL
+    if cond:
+        PASS += 1
+    else:
+        FAIL += 1
+        if len(FAILS) < 80:
+            FAILS.append(name)
+
+
+def eq(a, b, name):
+    check(a == b, f"{name}: got {a!r} want {b!r}")
+
+
+def has(hay, needle, name):
+    check(needle.lower() in (hay or "").lower(), f"{name}: msg={hay!r}")
+
+
+def section(title):
+    print(f"  …{title}")
+
+
+# ============================================================================
+# Fake WhatsApp gateway — patched over urllib so nothing leaves the machine
+# ============================================================================
+SCN: dict = {"mode": "ok"}
+
+
+class _Resp:
+    def __init__(self, status, body):
+        self.status = status
+        self._b = body.encode() if isinstance(body, str) else body
+
+    def read(self):
+        return self._b
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _http_error(code, body=b""):
+    return urllib.error.HTTPError("http://gw/x", code, "err", {}, io.BytesIO(body))
+
+
+def fake_urlopen(req, timeout=None):
+    url = req.full_url if hasattr(req, "full_url") else str(req)
+    mode = SCN["mode"]
+    if mode == "down":
+        raise urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
+    if mode == "no_internet":
+        raise urllib.error.URLError(socket.gaierror(-2, "Name or service not known"))
+    if mode == "timeout_wrapped":
+        raise urllib.error.URLError(socket.timeout("timed out"))
+    if mode == "timeout_raw":
+        raise socket.timeout("timed out")
+    if mode == "refused_raw":
+        raise ConnectionRefusedError(111, "Connection refused")
+    if mode == "unauthorized":
+        raise _http_error(401, b'{"error":"bad token"}')
+    if mode == "forbidden":
+        raise _http_error(403, b'{"error":"forbidden"}')
+    if mode == "notfound":
+        raise _http_error(404, b"not found")
+    if mode == "server_error_session":
+        raise _http_error(500, b'{"error":"user is not logged in"}')
+    # normal responses ------------------------------------------------------
+    if url.endswith("/session/status"):
+        data = SCN.get("status", {"connected": True, "loggedIn": True})
+        return _Resp(200, json.dumps({"success": True, "data": data}))
+    # POST /chat/send/document
+    return _Resp(SCN.get("send_status", 200),
+                 SCN.get("send_body", '{"success":true,"data":{"Id":"X"}}'))
+
+
+urllib.request.urlopen = fake_urlopen   # global patch — no real network, ever
+
+
+# ============================================================================
+# Throwaway DB with a couple of receipts
+# ============================================================================
+print("Setting up isolated test database…")
+con = db.init_db()
+
+
+def _make_receipt(phone, *, sub=1000.0, paid=1000.0, with_results=True, status="reported"):
+    pid = con.execute(
+        "INSERT INTO patients(name,age,age_desc,sex,telephone,mr_no) VALUES (?,?,?,?,?,?)",
+        ("Test Patient", 30, "Years", "Male", phone, None),
+    ).lastrowid
+    test_id = con.execute(
+        "SELECT test_id FROM test_parameters GROUP BY test_id LIMIT 1"
+    ).fetchone()[0]
+    tname = con.execute("SELECT name FROM tests WHERE id=?", (test_id,)).fetchone()[0]
+    due = max(0.0, sub - paid)
+    rid = con.execute(
+        """INSERT INTO receipts(lab_no,patient_id,patient_name,age,age_desc,sex,telephone,
+                                dr_name,specimen,subtotal,net_amount,paid,due,status,mr_no)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        ("LAB_TEST_001", pid, "Test Patient", 30, "Years", "Male", phone,
+         "Dr. Test", "3cc EDTA", sub, sub, paid, due, status, None),
+    ).lastrowid
+    item_id = con.execute(
+        "INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) VALUES (?,?,?,?)",
+        (rid, test_id, tname, sub),
+    ).lastrowid
+    if with_results:
+        params = con.execute(
+            "SELECT * FROM test_parameters WHERE test_id=? ORDER BY seq LIMIT 4", (test_id,)
+        ).fetchall()
+        for p in params:
+            con.execute(
+                """INSERT INTO results(receipt_item_id,parameter_id,seq,part_type,name,units,
+                                       ref_text,value,hidden)
+                   VALUES (?,?,?,?,?,?,?,?,0)""",
+                (item_id, p["id"], p["seq"], p["part_type"] or "N", p["name"], p["units"],
+                 p["ref_male"], "1"),
+            )
+    con.commit()
+    return rid
+
+
+R_VALID = _make_receipt("03001234567")               # good phone, has results
+R_NOPHONE = _make_receipt("", with_results=False)     # no phone at all
+R_BADPHONE = _make_receipt("12", with_results=False)  # too short to be valid
+
+# a tiny dummy PDF so send_pdf never invokes WeasyPrint in the network matrix
+_DUMMY = Path(_TMP) / "dummy.pdf"
+_DUMMY.write_bytes(b"%PDF-1.4\n% dummy\n")
+
+
+# ============================================================================
+# 1) Phone normalization + WhatsApp number derivation  (~1000 cases)
+# ============================================================================
+section("phone normalization + wa_number")
+_OPERATORS = [f"3{a}{b}" for a in range(0, 5) for b in range(0, 10)]  # 300..349 (50)
+_SUBS = ["1234567", "0000001", "9999999", "1122334", "7654321"]       # 5
+for op in _OPERATORS:
+    for sub in _SUBS:
+        canon = "0" + op + sub                 # 03XX XXXXXXX (11 digits)
+        national = op + sub                    # 3XX XXXXXXX (10 digits)
+        wa = "92" + national
+        variants = [
+            canon,                              # 03001234567
+            "+92" + national,                   # +923001234567
+            "0092" + national,                  # 0092...
+            "92" + national,                    # 92...
+            national,                           # bare national
+            f"0{op}-{sub}",                     # dashed
+            f"0{op} {sub}",                     # spaced
+            f" +92 {op} {sub} ",                # messy with +92
+        ]
+        for v in variants:
+            eq(normalize_phone(v), canon, f"normalize({v!r})")
+            eq(whatsapp.wa_number(v, "92"), wa, f"wa_number({v!r})")
+
+# invalid / garbage phones → wa_number must reject (None)
+for bad in ["", "   ", "abc", "12", "12345", "0", "00", "++", "9-2", "phone", "0300abc",
+            "1", "92", "920", "+", "()-", "....", "0000000"]:
+    check(whatsapp.wa_number(bad, "92") is None, f"wa_number rejects {bad!r}")
+
+
+# ============================================================================
+# 2) Reference-range abnormal flags  (~500 cases)
+# ============================================================================
+section("reference-range flags (high/low/normal)")
+for lo in range(1, 60):                         # 59 ranges
+    hi = lo + 10
+    ref = f"{lo} - {hi}"
+    eq(report._flag(lo - 3, ref)[0], "Low", f"flag {lo-3} in {ref}")
+    eq(report._flag(lo, ref)[0], "Normal", f"flag lo-bound {lo} in {ref}")
+    eq(report._flag((lo + hi) / 2, ref)[0], "Normal", f"flag mid in {ref}")
+    eq(report._flag(hi, ref)[0], "Normal", f"flag hi-bound {hi} in {ref}")
+    eq(report._flag(hi + 3, ref)[0], "High", f"flag {hi+3} in {ref}")
+# upper-bound-only ("<= n") and lower-bound-only ("> n") forms
+for n in range(1, 40):
+    eq(report._flag(n + 5, f"<= {n}")[0], "High", f"flag >upper {n}")
+    eq(report._flag(n - 0.5, f"<= {n}")[0], "Normal", f"flag <=upper {n}")
+    eq(report._flag(n - 5, f"> {n}")[0], "Low", f"flag <lower {n}")
+    eq(report._flag(n + 0.5, f"> {n}")[0], "Normal", f"flag >lower {n}")
+# non-numeric values never crash → None
+for v in ["positive", "Trace", "Nil", "", None, "++", "seen"]:
+    check(report._flag(v, "10 - 20") is None, f"flag non-numeric {v!r}")
+
+
+# ============================================================================
+# 3) Amount-in-words  (~300 cases)
+# ============================================================================
+section("amount in words")
+eq(report._amount_in_words(0), "Zero Rupees Only", "words(0)")
+for exact, want in [
+    (1, "One Rupees Only"), (21, "Twenty One Rupees Only"),
+    (100, "One Hundred Rupees Only"), (1500, "One Thousand Five Hundred Rupees Only"),
+    (100000, "One Lakh Rupees Only"), (1000000, "Ten Lakh Rupees Only"),
+    (10000000, "One Crore Rupees Only"),
+]:
+    eq(report._amount_in_words(exact), want, f"words({exact})")
+for n in list(range(0, 250)) + [999, 12345, 99999, 250000, 7500000, 12345678]:
+    w = report._amount_in_words(n)
+    check(bool(w) and w.endswith("Rupees Only"), f"words({n}) well-formed -> {w!r}")
+
+
+# ============================================================================
+# 4) Billing math: discount / net / due / change  (~200 cases)
+# ============================================================================
+section("billing math (discount/net/due/change)")
+for sub in [0, 100, 250, 800, 1250, 5000, 99999]:
+    for disc in [0, 10, 20, 30, 50, 100]:
+        for paid in [0, sub / 2, sub, sub + 500]:
+            net = max(0.0, sub - sub * disc / 100.0)
+            due = max(0.0, net - paid)
+            change = max(0.0, paid - net)
+            check(net <= sub + 1e-9, f"net<=sub sub={sub} disc={disc}")
+            check(due >= 0 and change >= 0, f"due/change >=0 sub={sub}")
+            check(not (due > 1e-9 and change > 1e-9),
+                  f"never due AND change sub={sub} disc={disc} paid={paid}")
+            if paid >= net:
+                check(abs(change - (paid - net)) < 1e-9 and due < 1e-9,
+                      f"overpaid change sub={sub} disc={disc} paid={paid}")
+
+
+# ============================================================================
+# 5) WhatsApp pre-flight (instant, no network)  (~30 cases)
+# ============================================================================
+section("WhatsApp pre-flight (config/recipient)")
+# config_ready across url/token presence
+for url, tok, ok_expect in [("", "", False), ("http://x", "", False),
+                            ("", "t", False), ("http://x", "t", True)]:
+    db.set_setting(con, "whatsapp_url", url)
+    db.set_setting(con, "whatsapp_api_key", tok)
+    ok, msg = whatsapp.config_ready(con)
+    eq(ok, ok_expect, f"config_ready url={url!r} tok={tok!r}")
+    if not ok_expect:
+        check(bool(msg), "config_ready gives a message")
+# recipient_ready
+db.set_setting(con, "whatsapp_url", "http://localhost:8080")
+db.set_setting(con, "whatsapp_api_key", "tok")
+ok, _ = whatsapp.recipient_ready(con, R_VALID); check(ok, "recipient_ready valid phone")
+ok, m = whatsapp.recipient_ready(con, R_NOPHONE); check(not ok, "recipient_ready no phone")
+has(m, "no valid", "recipient_ready no-phone message")
+ok, _ = whatsapp.recipient_ready(con, R_BADPHONE); check(not ok, "recipient_ready bad phone")
+ok, m = whatsapp.recipient_ready(con, 999999); check(not ok, "recipient_ready missing receipt")
+has(m, "not found", "recipient_ready missing message")
+
+
+# ============================================================================
+# 6) WhatsApp status check across every gateway state  (~20 cases)
+# ============================================================================
+section("WhatsApp check_status across gateway states")
+db.set_setting(con, "whatsapp_url", "http://localhost:8080")
+db.set_setting(con, "whatsapp_api_key", "tok")
+
+SCN.clear(); SCN["mode"] = "ok"; SCN["status"] = {"connected": True, "loggedIn": True}
+ok, m = whatsapp.check_status(con); check(ok, "status: logged in -> ok"); has(m, "ready", "status ready msg")
+
+SCN["status"] = {"connected": True, "loggedIn": False}
+ok, m = whatsapp.check_status(con); check(not ok, "status: connected not linked")
+has(m, "scan", "status not-linked mentions scan")
+
+SCN["status"] = {"connected": False, "loggedIn": False}
+ok, m = whatsapp.check_status(con); check(not ok, "status: not connected")
+
+for mode, needle in [("down", "could not reach"), ("no_internet", "host not found"),
+                     ("timeout_wrapped", "timed out"), ("timeout_raw", "timed out"),
+                     ("unauthorized", "token"), ("forbidden", "token")]:
+    SCN["mode"] = mode
+    ok, m = whatsapp.check_status(con)
+    check(not ok, f"status {mode} -> not ok")
+    has(m, needle, f"status {mode} message")
+SCN["mode"] = "ok"
+
+# missing config short-circuits before any network
+db.set_setting(con, "whatsapp_url", "")
+ok, m = whatsapp.check_status(con); check(not ok, "status: no url"); has(m, "url", "status no-url msg")
+db.set_setting(con, "whatsapp_url", "http://localhost:8080")
+db.set_setting(con, "whatsapp_api_key", "")
+ok, m = whatsapp.check_status(con); check(not ok, "status: no token")
+db.set_setting(con, "whatsapp_api_key", "tok")
+
+
+# ============================================================================
+# 7) WhatsApp send_pdf across every failure mode  (~60 cases)
+# ============================================================================
+section("WhatsApp send_pdf across failure modes")
+NUM = "03001234567"
+# (mode, send_status, send_body) -> (ok_expect, needle)
+CASES = [
+    (dict(mode="ok"), True, "sent to"),
+    (dict(mode="down"), False, "could not reach"),
+    (dict(mode="refused_raw"), False, "could not reach"),
+    (dict(mode="no_internet"), False, "host not found"),
+    (dict(mode="timeout_wrapped"), False, "timed out"),
+    (dict(mode="timeout_raw"), False, "timed out"),
+    (dict(mode="unauthorized"), False, "token"),
+    (dict(mode="forbidden"), False, "token"),
+    (dict(mode="notfound"), False, "error (http 404)"),
+    (dict(mode="server_error_session"), False, "isn't linked"),
+    (dict(mode="ok", send_status=200, send_body='{"success":false,"error":"x"}'),
+     False, "could not send"),
+    (dict(mode="ok", send_status=200, send_body='{"error":"user not logged in"}'),
+     False, "isn't linked"),
+    (dict(mode="ok", send_status=500, send_body='{"error":"boom"}'),
+     False, "could not send"),
+]
+for scn, ok_expect, needle in CASES:
+    SCN.clear(); SCN.update(scn)
+    ok, m = whatsapp.send_pdf(con, NUM, str(_DUMMY), "caption")
+    eq(ok, ok_expect, f"send_pdf {scn.get('mode')} body={scn.get('send_body')!r}")
+    has(m, needle, f"send_pdf {scn.get('mode')} message")
+SCN.clear(); SCN["mode"] = "ok"
+
+# send_pdf guards: bad phone, missing file, not configured
+ok, m = whatsapp.send_pdf(con, "12", str(_DUMMY), ""); check(not ok, "send_pdf bad phone")
+ok, m = whatsapp.send_pdf(con, NUM, str(Path(_TMP) / "nope.pdf"), ""); check(not ok, "send_pdf missing file")
+has(m, "could not be created", "send_pdf missing-file message")
+db.set_setting(con, "whatsapp_url", "")
+ok, m = whatsapp.send_pdf(con, NUM, str(_DUMMY), ""); check(not ok, "send_pdf not configured")
+db.set_setting(con, "whatsapp_url", "http://localhost:8080")
+
+
+# ============================================================================
+# 8) send_report / send_receipt end-to-end (real PDF build)  (~12 cases)
+# ============================================================================
+section("send_report / send_receipt (builds real PDF)")
+SCN.clear(); SCN["mode"] = "ok"
+ok, m = whatsapp.send_report(con, R_VALID); check(ok, "send_report ok"); has(m, "sent to", "send_report msg")
+ok, m = whatsapp.send_receipt(con, R_VALID); check(ok, "send_receipt ok")
+# gateway down during a real send
+SCN["mode"] = "down"
+ok, m = whatsapp.send_report(con, R_VALID); check(not ok, "send_report gateway down")
+has(m, "could not reach", "send_report down msg")
+SCN["mode"] = "ok"
+# no phone / missing receipt
+ok, m = whatsapp.send_report(con, R_NOPHONE); check(not ok, "send_report no phone")
+ok, m = whatsapp.send_receipt(con, 999999); check(not ok, "send_receipt missing receipt")
+has(m, "not found", "send_receipt missing msg")
+
+
+# ============================================================================
+# 9) PDF generation variety  (~20 cases)
+# ============================================================================
+section("PDF generation (report + receipt variants)")
+variants = [
+    _make_receipt("03007654321", sub=500, paid=500),                 # exact
+    _make_receipt("03007654322", sub=1250, paid=2000),               # overpaid (change)
+    _make_receipt("03007654323", sub=800, paid=300),                 # underpaid (due)
+    _make_receipt("03007654324", sub=0, paid=0, with_results=False),  # empty/zero
+    _make_receipt("", sub=999, paid=999),                            # no phone
+]
+for rid in [R_VALID] + variants:
+    rb = report.build_report_bytes(con, rid)
+    check(rb[:4] == b"%PDF" and len(rb) > 1000, f"report PDF rid={rid} ({len(rb)}B)")
+    cb = report.build_receipt_bytes(con, rid)
+    check(cb[:4] == b"%PDF" and len(cb) > 1000, f"receipt PDF rid={rid} ({len(cb)}B)")
+tb = report.build_test_page_bytes("Some Printer")
+check(tb[:4] == b"%PDF", "test-page PDF builds")
+
+
+# ============================================================================
+# 10) DB / settings / catalog integrity  (~15 cases)
+# ============================================================================
+section("DB / settings / catalog")
+check(con.execute("SELECT COUNT(*) FROM tests").fetchone()[0] > 100, "catalog has tests")
+check(con.execute("SELECT COUNT(*) FROM test_parameters").fetchone()[0] > 100, "catalog has params")
+db.set_setting(con, "k_roundtrip", "v1"); eq(db.get_setting(con, "k_roundtrip"), "v1", "setting roundtrip")
+db.set_setting(con, "k_roundtrip", "v2"); eq(db.get_setting(con, "k_roundtrip"), "v2", "setting update")
+eq(db.get_setting(con, "missing_key", "def"), "def", "setting default")
+# hidden results excluded from report; column present
+cols = [r[1] for r in con.execute("PRAGMA table_info(results)")]
+check("hidden" in cols, "results.hidden column exists")
+icols = [r[1] for r in con.execute("PRAGMA table_info(receipt_items)")]
+check("remarks" in icols, "receipt_items.remarks column exists")
+# auth
+check(db.verify_user(con, "admin", "admin") is not None, "admin login works")
+check(db.verify_user(con, "admin", "wrong") is None, "wrong password rejected")
+check(db.verify_user(con, "ghost", "x") is None, "unknown user rejected")
+
+
+# ============================================================================
+# 11) Background task helper + debounce (Qt)  (~6 cases)
+# ============================================================================
+section("Qt background helper + debounce")
+try:
+    import time
+    from PySide6.QtWidgets import QApplication, QPushButton, QWidget
+    app = QApplication.instance() or QApplication([])
+    from labdesk.ui import tasks
+
+    parent = QWidget(); btn = QPushButton("Go")
+    res = {}
+    tasks.run_in_background(parent, lambda c: report.build_report_bytes(c, R_VALID),
+                            lambda ok, r: res.update(ok=ok, n=(len(r) if ok else r)),
+                            clicked=btn, busy_text="Working…")
+    check(btn.text() == "Working…" and not btn.isEnabled(), "task: busy state shown")
+    for _ in range(200):
+        app.processEvents(); time.sleep(0.02)
+        if "ok" in res:
+            break
+    check(res.get("ok") is True and res.get("n", 0) > 1000, "task: completed with PDF")
+    check(btn.text() == "Go" and btn.isEnabled(), "task: button restored")
+
+    hits = {"n": 0}
+    trig = tasks.debounce(parent, lambda: hits.__setitem__("n", hits["n"] + 1), ms=100)
+    for _ in range(5):
+        trig("x")
+    for _ in range(40):
+        app.processEvents(); time.sleep(0.02)
+        if hits["n"]:
+            break
+    eq(hits["n"], 1, "debounce: 5 calls -> 1 fire")
+
+    # error path: work raises -> on_done(ok=False, message)
+    res2 = {}
+    tasks.run_in_background(parent, lambda c: (_ for _ in ()).throw(RuntimeError("boom")),
+                            lambda ok, r: res2.update(ok=ok, r=r))
+    for _ in range(50):
+        app.processEvents(); time.sleep(0.02)
+        if "ok" in res2:
+            break
+    check(res2.get("ok") is False and "boom" in str(res2.get("r")), "task: error surfaced safely")
+except Exception as e:  # pragma: no cover
+    check(False, f"Qt section crashed: {e}")
+
+
+# ============================================================================
+# Summary
+# ============================================================================
+print("\n" + "=" * 60)
+total = PASS + FAIL
+print(f"  TOTAL CASES : {total}")
+print(f"  PASSED      : {PASS}")
+print(f"  FAILED      : {FAIL}")
+if FAILS:
+    print("\n  First failures:")
+    for f in FAILS:
+        print("   ✗", f)
+print("=" * 60)
+sys.exit(1 if FAIL else 0)

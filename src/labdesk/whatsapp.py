@@ -129,6 +129,8 @@ def check_status(con) -> tuple[bool, str]:
         return False, f"HTTP {e.code}: {e.read().decode('utf-8','replace')[:160]}"
     except urllib.error.URLError as e:
         return False, _friendly_url_error(e)
+    except OSError as e:   # raw socket timeout / connection / DNS errors (no internet)
+        return False, _friendly_url_error(e)
     except Exception as e:  # noqa: BLE001
         return False, f"Error: {e}"
 
@@ -152,15 +154,27 @@ def send_pdf(con, number: str, pdf_path: str, caption: str = "") -> tuple[bool, 
     }
     try:
         status, body = _post(cfg, "/chat/send/document", payload)
-        ok = True
+        low = body.lower()
+        not_linked = any(s in low for s in
+                         ("logged in", "loggedin", "no session", "not connected"))
+        # Decide success: explicit "success" wins; an "error" field (or a 2xx body
+        # that says "not logged in") means failure even on HTTP 200; otherwise a
+        # 2xx with no error signal is treated as sent.
+        success = None
         try:
-            ok = json.loads(body).get("success", True)
+            j = json.loads(body)
+            if isinstance(j, dict):
+                if "success" in j:
+                    success = bool(j["success"])
+                elif "error" in j:
+                    success = False
         except json.JSONDecodeError:
             pass
-        if 200 <= status < 300 and ok:
+        if success is None:
+            success = (200 <= status < 300) and not not_linked
+        if success and 200 <= status < 300:
             return True, f"Sent to {number} on WhatsApp."
-        low = body.lower()
-        if "logged in" in low or "no session" in low or "not connected" in low or "loggedin" in low:
+        if not_linked:
             return False, ("WhatsApp isn't linked. Open Settings → WhatsApp → "
                            "Test connection and scan the QR code, then try again.")
         if status in (401, 403):
@@ -175,6 +189,8 @@ def send_pdf(con, number: str, pdf_path: str, caption: str = "") -> tuple[bool, 
                            "Test connection and scan the QR code, then try again.")
         return False, f"The gateway returned an error (HTTP {e.code})."
     except urllib.error.URLError as e:
+        return False, _friendly_url_error(e)
+    except OSError as e:   # raw socket timeout / connection / DNS errors (no internet)
         return False, _friendly_url_error(e)
     except Exception as e:  # noqa: BLE001
         return False, f"Could not send on WhatsApp: {e}"
