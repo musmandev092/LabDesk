@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 from .widgets import h1, muted, page_header, money
 from . import wa, tasks
 from .. import db, report
+from ..roles import can
 
 STATUS_COLORS = {"pending": "#b9770e", "in_progress": "#0e7c86",
                  "reported": "#1f9d55", "delivered": "#6b7280"}
@@ -70,6 +71,8 @@ class ReceiptsPage(QWidget):
         self.print_rpt_btn = _btn("Print report", self.print_report)
         self.wa_rpt_btn = _btn("WhatsApp report", self.whatsapp_report)
         self.pay_btn = _btn("Receive due", self.receive_due)
+        self.deliver_btn = _btn("Mark delivered", self.mark_delivered)
+        self.void_btn = _btn("Void", self.void_receipt)
         self._report_btns = (self.prev_rpt_btn, self.print_rpt_btn, self.wa_rpt_btn)
         self._receipt_btns = (self.prev_rcpt_btn, self.print_rcpt_btn, self.wa_rcpt_btn)
 
@@ -85,6 +88,11 @@ class ReceiptsPage(QWidget):
         sep2 = QFrame(); sep2.setFrameShape(QFrame.VLine); sep2.setFrameShadow(QFrame.Sunken)
         tb.addWidget(sep2)
         tb.addWidget(self.pay_btn)
+        tb.addWidget(self.deliver_btn)
+        if can(self.user["role"], "delete"):
+            tb.addWidget(self.void_btn)   # voiding a bill is a manager/admin action
+        else:
+            self.void_btn.hide()
         tb.addStretch(1)
         root.addLayout(tb)
 
@@ -100,10 +108,13 @@ class ReceiptsPage(QWidget):
         self.status.currentIndexChanged.connect(self.refresh)
         self.today_only = QCheckBox("Today only"); self.today_only.toggled.connect(self.refresh)
         self.dues_only = QCheckBox("Dues only"); self.dues_only.toggled.connect(self.refresh)
+        export = QPushButton("Export CSV"); export.setObjectName("ghost")
+        export.clicked.connect(self.export_csv)
         bar.addWidget(self.search, 1)
         bar.addWidget(self.status)
         bar.addWidget(self.today_only)
         bar.addWidget(self.dues_only)
+        bar.addWidget(export)
         root.addLayout(bar)
 
         self.table = QTableWidget(0, 8)
@@ -154,7 +165,7 @@ class ReceiptsPage(QWidget):
             sql += (" AND received_at >= date('now','localtime')"
                     " AND received_at < date('now','localtime','+1 day')")
         if self.dues_only.isChecked():
-            sql += " AND due>0"
+            sql += " AND due>0 AND COALESCE(voided,0)=0"
         sql += " ORDER BY id DESC LIMIT 1000"
         rows = self.con.execute(sql, args).fetchall()
         cur = db.get_setting(self.con, "currency", "Rs.")
@@ -170,13 +181,18 @@ class ReceiptsPage(QWidget):
             self.table.setItem(i, 4, self._num(f"{r['net_amount']:,.0f}"))
             self.table.setItem(i, 5, self._num(f"{r['paid']:,.0f}"))
             self.table.setItem(i, 6, self._num(f"{r['due']:,.0f}", "#c0392b" if r["due"] else None))
-            st_item = QTableWidgetItem((r["status"] or "").replace("_", " ").title())
-            col = STATUS_COLORS.get(r["status"] or "")
+            voided = ("voided" in r.keys() and r["voided"])
+            st_item = QTableWidgetItem(
+                "Voided" if voided else (r["status"] or "").replace("_", " ").title())
+            col = "#c0392b" if voided else STATUS_COLORS.get(r["status"] or "")
             if col:
                 st_item.setForeground(QColor(col))
                 fnt = st_item.font(); fnt.setBold(True); st_item.setFont(fnt)
             self.table.setItem(i, 7, st_item)
-            tot_net += r["net_amount"] or 0; tot_paid += r["paid"] or 0; tot_due += r["due"] or 0
+            if not voided:   # voided bills don't count toward the money totals
+                tot_net += r["net_amount"] or 0
+                tot_paid += r["paid"] or 0
+                tot_due += r["due"] or 0
         self.sub.setText(f"{len(rows)} receipt(s)")
         self.sub.show()
         self.summary.setText(
@@ -197,19 +213,24 @@ class ReceiptsPage(QWidget):
     def _update_buttons(self):
         rid = self._selected_id()
         on = rid is not None
-        # receipt (bill) actions are available as soon as a row is selected
-        for b in self._receipt_btns:
-            b.setEnabled(on)
+        voided = False
         if on:
             row = self.con.execute(
-                "SELECT due, status FROM receipts WHERE id=?", (rid,)).fetchone()
+                "SELECT due, status, voided FROM receipts WHERE id=?", (rid,)).fetchone()
+            voided = bool("voided" in row.keys() and row["voided"])
+        active = on and not voided   # a voided bill is read-only
+        for b in self._receipt_btns:
+            b.setEnabled(active)
+        if active:
             ready = (row["status"] or "") in REPORT_READY   # report only when results are in
             for b in self._report_btns:
                 b.setEnabled(ready)
                 b.setToolTip("" if ready else "Report not ready yet (results pending)")
             self.pay_btn.setEnabled(bool(row["due"] and row["due"] > 0))
+            self.deliver_btn.setEnabled(ready and (row["status"] or "") != "delivered")
+            self.void_btn.setEnabled(True)
         else:
-            for b in (*self._report_btns, self.pay_btn):
+            for b in (*self._report_btns, self.pay_btn, self.deliver_btn, self.void_btn):
                 b.setEnabled(False)
 
     # ---------------------------------------------------------------
@@ -325,3 +346,68 @@ class ReceiptsPage(QWidget):
         db.log_audit(self.con, self.user["username"], "due_received",
                      f"{r['lab_no']} — {money(amount, cur)} (due now {money(new_due, cur)})")
         self.refresh()
+
+    def mark_delivered(self):
+        rid = self._selected_id()
+        if rid is None:
+            return
+        r = self.con.execute("SELECT lab_no, status FROM receipts WHERE id=?", (rid,)).fetchone()
+        if not r or r["status"] not in REPORT_READY:
+            return
+        self.con.execute(
+            "UPDATE receipts SET status='delivered', delivered_at=datetime('now','localtime'), "
+            "delivered_by=? WHERE id=?", (self.user["username"], rid))
+        self.con.commit()
+        db.log_audit(self.con, self.user["username"], "report_delivered", r["lab_no"] or f"#{rid}")
+        self.refresh()
+
+    def void_receipt(self):
+        from PySide6.QtWidgets import QInputDialog
+        rid = self._selected_id()
+        if rid is None:
+            return
+        r = self.con.execute("SELECT lab_no, paid, voided FROM receipts WHERE id=?", (rid,)).fetchone()
+        if not r or r["voided"]:
+            return
+        reason, ok = QInputDialog.getText(self, "Void receipt", f"Reason for voiding {r['lab_no']}:")
+        if not ok or not reason.strip():
+            return
+        if QMessageBox.question(
+            self, "Void receipt",
+            f"Void {r['lab_no']}? It will be excluded from income, dues and the worklist. "
+            "This cannot be undone.") != QMessageBox.Yes:
+            return
+        self.con.execute(
+            "UPDATE receipts SET voided=1, void_reason=?, voided_at=datetime('now','localtime'), "
+            "voided_by=?, due=0 WHERE id=?", (reason.strip(), self.user["username"], rid))
+        if r["paid"]:  # reversing ledger entry keeps ledger-based accounting balanced
+            self.con.execute(
+                "INSERT INTO ledger(kind,ref_id,detail,debit,date) "
+                "VALUES ('void',?,?,?,date('now','localtime'))",
+                (rid, f"Void {r['lab_no']} — {reason.strip()[:60]}", r["paid"]))
+        self.con.commit()
+        db.log_audit(self.con, self.user["username"], "receipt_voided",
+                     f"{r['lab_no']} — {reason.strip()[:80]}")
+        self.refresh()
+
+    def export_csv(self):
+        from PySide6.QtWidgets import QFileDialog
+        import csv
+        path, _ = QFileDialog.getSaveFileName(self, "Export receipts to CSV", "receipts.csv",
+                                              "CSV (*.csv)")
+        if not path:
+            return
+        try:
+            cols = self.table.columnCount()
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow([self.table.horizontalHeaderItem(c).text() for c in range(cols)])
+                for r in range(self.table.rowCount()):
+                    w.writerow([(self.table.item(r, c).text() if self.table.item(r, c) else "")
+                                for c in range(cols)])
+            db.log_audit(self.con, self.user["username"], "exported_csv",
+                         f"receipts ({self.table.rowCount()} rows) → {path}")
+            QMessageBox.information(self, "Export",
+                                   f"Exported {self.table.rowCount()} rows to:\n{path}")
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.warning(self, "Export", f"Could not export:\n{e}")

@@ -273,5 +273,21 @@ CREATE TABLE IF NOT EXISTS audit_log (
     hash      TEXT                       -- rolling tamper-evidence chain
 );
 
+-- ---------------------------------------------------------------------------
+-- WhatsApp delivery log (what was sent, to whom, and the outcome)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS wa_messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    at          TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    receipt_id  INTEGER,
+    kind        TEXT,                  -- report | receipt | text
+    number      TEXT,
+    filename    TEXT,
+    ok          INTEGER NOT NULL DEFAULT 0,
+    message     TEXT,                  -- gateway/result message
+    username    TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_wa_messages_at ON wa_messages(at);
+
 -- Schema version marker
 INSERT OR IGNORE INTO settings(key, value) VALUES ('schema_version', '1');

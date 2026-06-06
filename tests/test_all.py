@@ -590,6 +590,49 @@ if _ct:
     check("E. coli" in _chtml and "Ciprofloxacin" in _chtml and "Sensitiv" in _chtml,
           "report renders microbiology culture & sensitivity")
 
+# ---- deferred-features batch ----
+section("deferred features: void / opt-out / wa-log / retire / payment")
+# void exclusion from income + dues
+_vr = _make_receipt("03001234567", sub=500, paid=500, status="reported")
+_before = con.execute("SELECT COALESCE(SUM(paid),0) FROM receipts WHERE COALESCE(voided,0)=0").fetchone()[0]
+con.execute("UPDATE receipts SET voided=1, due=0 WHERE id=?", (_vr,)); con.commit()
+_after = con.execute("SELECT COALESCE(SUM(paid),0) FROM receipts WHERE COALESCE(voided,0)=0").fetchone()[0]
+check(_after == _before - 500, "voided receipt excluded from income sum")
+check(con.execute("SELECT COUNT(*) FROM receipts WHERE due>0 AND COALESCE(voided,0)=0 AND id=?",
+                  (_vr,)).fetchone()[0] == 0, "voided receipt not counted in dues")
+# WhatsApp opt-out honored by recipient_ready
+con.execute("UPDATE patients SET wa_optout=1 WHERE id=(SELECT patient_id FROM receipts WHERE id=?)",
+            (R_VALID,)); con.commit()
+_ok, _m = _wa.recipient_ready(con, R_VALID)
+check(not _ok and "opted out" in _m.lower(), "recipient_ready honors WhatsApp opt-out")
+con.execute("UPDATE patients SET wa_optout=0 WHERE id=(SELECT patient_id FROM receipts WHERE id=?)",
+            (R_VALID,)); con.commit()
+# WhatsApp delivery log written on send
+db.set_setting(con, "whatsapp_url", "http://localhost:8080"); db.set_secret("whatsapp_api_key", "tok")
+_op2 = _wa._post
+_wa._post = lambda cfg, path, payload, timeout=None: (200, '{"success":true}')
+_n0 = con.execute("SELECT COUNT(*) FROM wa_messages").fetchone()[0]
+_wa.send_report(con, R_VALID)
+_wa._post = _op2
+_n1 = con.execute("SELECT COUNT(*) FROM wa_messages").fetchone()[0]
+check(_n1 == _n0 + 1, "wa_messages logs a send")
+check(con.execute("SELECT ok FROM wa_messages ORDER BY id DESC LIMIT 1").fetchone()[0] == 1,
+      "wa_messages records success")
+# payment method persists
+con.execute("UPDATE receipts SET payment_method='Card' WHERE id=?", (R_VALID,)); con.commit()
+check(con.execute("SELECT payment_method FROM receipts WHERE id=?", (R_VALID,)).fetchone()[0] == "Card",
+      "payment_method stored")
+# catalog retire/restore (active flag)
+_tt = con.execute("SELECT id FROM tests WHERE active=1 LIMIT 1").fetchone()[0]
+con.execute("UPDATE tests SET active=0 WHERE id=?", (_tt,)); con.commit()
+check(con.execute("SELECT active FROM tests WHERE id=?", (_tt,)).fetchone()[0] == 0,
+      "test can be retired (active=0)")
+con.execute("UPDATE tests SET active=1 WHERE id=?", (_tt,)); con.commit()
+# new action labels exist
+for _a in ("receipt_voided", "report_delivered", "exported_csv",
+           "test_deactivated", "test_activated"):
+    check(_a in ACTION_LABELS, f"Logs has a label for '{_a}'")
+
 
 # ============================================================================
 # 11b) Themes / caption templates / send_text / timeout / new settings

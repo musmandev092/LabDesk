@@ -78,9 +78,13 @@ DEFAULT_SETTINGS = {
 
 # Columns added after v1 — created on existing databases if missing.
 _EXTRA_COLUMNS = {
-    "patients": [("title", "TEXT"), ("mr_no", "TEXT")],
+    "patients": [("title", "TEXT"), ("mr_no", "TEXT"),
+                 ("wa_optout", "INTEGER NOT NULL DEFAULT 0")],
     "receipts": [("title", "TEXT"), ("mr_no", "TEXT"), ("case_no", "TEXT"),
-                 ("reported_at", "TEXT")],
+                 ("reported_at", "TEXT"), ("payment_method", "TEXT"),
+                 ("voided", "INTEGER NOT NULL DEFAULT 0"), ("void_reason", "TEXT"),
+                 ("voided_at", "TEXT"), ("voided_by", "TEXT"),
+                 ("delivered_at", "TEXT"), ("delivered_by", "TEXT")],
     # per-test free-text remarks printed under the results table
     "receipt_items": [("remarks", "TEXT")],
     # hide a parameter row from the printed report (kept in the entry screen)

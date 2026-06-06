@@ -57,15 +57,18 @@ class DashboardPage(QWidget):
         lab = db.get_setting(c, "lab_name", "") or "your laboratory"
         self.sub.setText(f"Welcome back — {lab}")
         n_rec = c.execute(
-            "SELECT COUNT(*) FROM receipts WHERE received_at >= date('now','localtime') "
+            "SELECT COUNT(*) FROM receipts WHERE COALESCE(voided,0)=0 "
+            "AND received_at >= date('now','localtime') "
             "AND received_at < date('now','localtime','+1 day')"
         ).fetchone()[0]
         income = c.execute(
-            "SELECT COALESCE(SUM(paid),0) FROM receipts WHERE received_at >= date('now','localtime') "
+            "SELECT COALESCE(SUM(paid),0) FROM receipts WHERE COALESCE(voided,0)=0 "
+            "AND received_at >= date('now','localtime') "
             "AND received_at < date('now','localtime','+1 day')"
         ).fetchone()[0]
         pending = c.execute(
-            "SELECT COUNT(*) FROM receipts WHERE status IN ('pending','in_progress')"
+            "SELECT COUNT(*) FROM receipts WHERE status IN ('pending','in_progress') "
+            "AND COALESCE(voided,0)=0"
         ).fetchone()[0]
         n_tests = c.execute("SELECT COUNT(*) FROM tests WHERE active=1").fetchone()[0]
         self.c_receipts.value_label.setText(str(n_rec))

@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QEvent, QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget,
     QPushButton, QLabel, QButtonGroup, QApplication, QDialog,
@@ -133,6 +133,10 @@ class MainWindow(QMainWindow):
         cl.setContentsMargins(22, 18, 22, 18)
         cl.addWidget(self.stack)
         root.addWidget(content, 1)
+
+        # Alt+1..9 jump straight to a sidebar page
+        for i in range(min(9, len(self.pages))):
+            QShortcut(QKeySequence(f"Alt+{i + 1}"), self, activated=lambda idx=i: self.go(idx))
 
         self.statusBar().setSizeGripEnabled(False)
         self.statusBar().showMessage("Ready")

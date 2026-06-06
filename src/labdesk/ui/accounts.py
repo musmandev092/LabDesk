@@ -58,12 +58,15 @@ class AccountsPage(QWidget):
         f = self.from_date.date().toString("yyyy-MM-dd")
         t = self.to_date.date().toString("yyyy-MM-dd")
         income = c.execute(
-            "SELECT COALESCE(SUM(paid),0) FROM receipts WHERE date(received_at) BETWEEN ? AND ?",
+            "SELECT COALESCE(SUM(paid),0) FROM receipts "
+            "WHERE COALESCE(voided,0)=0 AND date(received_at) BETWEEN ? AND ?",
             (f, t)).fetchone()[0]
         expense = c.execute(
             "SELECT COALESCE(SUM(amount),0) FROM expenses WHERE date BETWEEN ? AND ?",
             (f, t)).fetchone()[0]
-        due = c.execute("SELECT COALESCE(SUM(due),0) FROM receipts WHERE due>0").fetchone()[0]
+        due = c.execute(
+            "SELECT COALESCE(SUM(due),0) FROM receipts WHERE due>0 AND COALESCE(voided,0)=0"
+        ).fetchone()[0]
         self.c_income.value_label.setText(money(income, cur))
         self.c_expense.value_label.setText(money(expense, cur))
         net = income - expense
@@ -158,7 +161,9 @@ class AccountsPage(QWidget):
         return w
 
     def refresh_dues(self):
-        rows = self.con.execute("SELECT * FROM receipts WHERE due>0 ORDER BY id DESC").fetchall()
+        rows = self.con.execute(
+            "SELECT * FROM receipts WHERE due>0 AND COALESCE(voided,0)=0 ORDER BY id DESC"
+        ).fetchall()
         self.due_table.setRowCount(0); self._due_ids = []
         for r in rows:
             i = self.due_table.rowCount(); self.due_table.insertRow(i)

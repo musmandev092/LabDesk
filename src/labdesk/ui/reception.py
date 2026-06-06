@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit, QComboBox,
     QSpinBox, QDoubleSpinBox, QPushButton, QTableWidget, QTableWidgetItem,
     QHeaderView, QLabel, QCompleter, QMessageBox, QListWidget, QListWidgetItem,
-    QInputDialog,
+    QInputDialog, QCheckBox,
 )
 
 from PySide6.QtWidgets import QSizePolicy
@@ -94,7 +94,9 @@ class ReceptionPage(QWidget):
         self.find_results.itemClicked.connect(self.pick_patient)
         self.linked_lbl = muted("")
         self.linked_lbl.hide()
-        patient_card = card(self.find, self.find_results, self.linked_lbl, pform, title="Patient")
+        self.wa_optout = QCheckBox("Patient opted out of WhatsApp (don't send reports)")
+        patient_card = card(self.find, self.find_results, self.linked_lbl, pform,
+                            self.wa_optout, title="Patient")
         patient_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         left.addWidget(patient_card)
 
@@ -158,8 +160,11 @@ class ReceptionPage(QWidget):
         tgrid.addWidget(field_label("Discount"), 1, 0); tgrid.addWidget(dwrap, 1, 1)
         tgrid.addWidget(field_label("Net payable"), 2, 0); tgrid.addWidget(self.net, 2, 1, Qt.AlignRight)
         tgrid.addWidget(field_label("Paid"), 3, 0); tgrid.addWidget(self.paid, 3, 1)
-        tgrid.addWidget(field_label("Due"), 4, 0); tgrid.addWidget(self.due, 4, 1, Qt.AlignRight)
-        tgrid.addWidget(self.change_lbl, 5, 0); tgrid.addWidget(self.change, 5, 1, Qt.AlignRight)
+        self.payment_method = QComboBox()
+        self.payment_method.addItems(["Cash", "Card", "Easypaisa", "JazzCash", "Bank", "Other"])
+        tgrid.addWidget(field_label("Payment method"), 4, 0); tgrid.addWidget(self.payment_method, 4, 1)
+        tgrid.addWidget(field_label("Due"), 5, 0); tgrid.addWidget(self.due, 5, 1, Qt.AlignRight)
+        tgrid.addWidget(self.change_lbl, 6, 0); tgrid.addWidget(self.change, 6, 1, Qt.AlignRight)
         tw = QWidget(); tw.setLayout(tgrid)
         pay_card = card(tw, title="Payment")
         pay_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
@@ -177,6 +182,14 @@ class ReceptionPage(QWidget):
         body.addLayout(right, 2)
 
         root.addLayout(body, 1)
+
+        # keyboard shortcuts: Ctrl+S save & print, Ctrl+Enter save (no print)
+        from PySide6.QtGui import QShortcut, QKeySequence
+        QShortcut(QKeySequence("Ctrl+S"), self, activated=lambda: self.save(do_print=True))
+        QShortcut(QKeySequence("Ctrl+Return"), self, activated=lambda: self.save(do_print=False))
+        QShortcut(QKeySequence("Ctrl+Enter"), self, activated=lambda: self.save(do_print=False))
+        # Enter in the test search adds the top match
+        self.test_search.returnPressed.connect(self._add_top_test)
 
     # ---------------------------------------------------------------
     def on_show(self):
@@ -302,6 +315,7 @@ class ReceptionPage(QWidget):
         self.tel.setText(r["telephone"] or "")
         self.address.setText(r["address"] or "")
         self.mr_no.setText(r["mr_no"] or "")
+        self.wa_optout.setChecked(bool("wa_optout" in r.keys() and r["wa_optout"]))
         self.linked_lbl.setText(
             f"✓ Linked to existing patient {r['mr_no'] or ''} — new visit will join their history")
         self.linked_lbl.show()
@@ -355,6 +369,15 @@ class ReceptionPage(QWidget):
             it = QListWidgetItem(f"{r['name']}   —   {cur} {r['charges']:,.0f}")
             it.setData(Qt.UserRole, (r["id"], r["name"], r["charges"]))
             self.results.addItem(it)
+
+    def _add_top_test(self):
+        """Enter in the test search box adds the first matching test."""
+        for i in range(self.results.count()):
+            it = self.results.item(i)
+            if it.data(Qt.UserRole):
+                self.add_from_list(it)
+                self.test_search.clear()
+                return
 
     def add_from_list(self, item):
         data = item.data(Qt.UserRole)
@@ -458,6 +481,8 @@ class ReceptionPage(QWidget):
         net = max(0.0, sub - sub * disc_pct / 100.0)
         paid = self.paid.value()
         due = max(0.0, net - paid)
+        pay_method = self.payment_method.currentText()
+        optout = 1 if self.wa_optout.isChecked() else 0
         prefix = db.get_setting(c, "lab_no_prefix", "LAB")
         datestr = c.execute("SELECT strftime('%Y-%m-%d','now','localtime')").fetchone()[0]
         # The whole write is one transaction: if anything fails we roll back so a
@@ -468,13 +493,13 @@ class ReceptionPage(QWidget):
                 mr_no = mr_no or (row["mr_no"] if row else "") or f"MR{pid:05d}"
                 c.execute(
                     "UPDATE patients SET title=?,name=?,age=?,age_desc=?,sex=?,telephone=?,"
-                    "address=?,mr_no=? WHERE id=?",
-                    (title, name, age, age_desc, sex, tel, addr, mr_no, pid))
+                    "address=?,mr_no=?,wa_optout=? WHERE id=?",
+                    (title, name, age, age_desc, sex, tel, addr, mr_no, optout, pid))
             else:    # new patient
                 pid = c.execute(
-                    "INSERT INTO patients(title,mr_no,name,age,age_desc,sex,telephone,address) "
-                    "VALUES (?,?,?,?,?,?,?,?)",
-                    (title, mr_no, name, age, age_desc, sex, tel, addr)).lastrowid
+                    "INSERT INTO patients(title,mr_no,name,age,age_desc,sex,telephone,address,wa_optout) "
+                    "VALUES (?,?,?,?,?,?,?,?,?)",
+                    (title, mr_no, name, age, age_desc, sex, tel, addr, optout)).lastrowid
                 if not mr_no:
                     mr_no = f"MR{pid:05d}"
                     c.execute("UPDATE patients SET mr_no=? WHERE id=?", (mr_no, pid))
@@ -482,11 +507,11 @@ class ReceptionPage(QWidget):
                 """INSERT INTO receipts
                    (patient_id,doctor_id,title,mr_no,patient_name,age,age_desc,sex,telephone,address,
                     dr_name,specimen,subtotal,discount_pct,less,net_amount,paid,due,
-                    status,created_by,received_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'))""",
+                    payment_method,status,created_by,received_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'))""",
                 (pid, doc_id, title, mr_no, name, age, age_desc, sex, tel, addr,
                  doc_name, specimen, sub, disc_pct, 0, net, paid, due,
-                 "pending", self.user["username"])).lastrowid
+                 pay_method, "pending", self.user["username"])).lastrowid
             # atomic lab number: try the next daily serial, retry on the UNIQUE guard
             # (ux_receipts_labno) so two terminals can't mint the same number.
             base = c.execute(
@@ -565,6 +590,8 @@ class ReceptionPage(QWidget):
         self.title.setCurrentIndex(0)
         self.specimen.setCurrentIndex(0)
         self.age.setValue(0); self.paid.setValue(0)
+        self.wa_optout.setChecked(False)
+        self.payment_method.setCurrentIndex(0)
         # reset the discount-approval lock for cashiers, then re-apply any promo
         self._discount_approved_by = None
         if not self._can_discount:

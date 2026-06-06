@@ -159,14 +159,29 @@ def config_ready(con) -> tuple[bool, str]:
 
 def recipient_ready(con, receipt_id: int) -> tuple[bool, str]:
     row = con.execute(
-        "SELECT telephone FROM receipts WHERE id=?", (receipt_id,)
+        "SELECT r.telephone, p.wa_optout FROM receipts r "
+        "LEFT JOIN patients p ON p.id = r.patient_id WHERE r.id=?", (receipt_id,)
     ).fetchone()
     if not row:
         return False, "Receipt not found."
+    if "wa_optout" in row.keys() and row["wa_optout"]:
+        return False, "This patient has opted out of WhatsApp messages."
     if wa_number(row["telephone"] or "", _cfg(con)["cc"]) is None:
         return (False, "This patient has no valid WhatsApp number. "
                        "Add or correct the phone (03XXXXXXXXX) in Reception.")
     return True, ""
+
+
+def _log_wa(con, receipt_id, kind, number, filename, ok, message) -> None:
+    """Record a WhatsApp send attempt in the delivery log (best-effort)."""
+    try:
+        con.execute(
+            "INSERT INTO wa_messages(receipt_id,kind,number,filename,ok,message) "
+            "VALUES (?,?,?,?,?,?)",
+            (receipt_id, kind, number, filename, 1 if ok else 0, (message or "")[:200]))
+        con.commit()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def check_status(con) -> tuple[bool, str]:
@@ -288,7 +303,10 @@ def _send_built_pdf(con, receipt_id, build_fn, caption_key, label, fname_suffix=
                        f"{lab} — {label.capitalize()} {r['lab_no']} for {r['patient_name']}".strip(" —"),
                        lab=lab, lab_no=r["lab_no"] or "", name=r["patient_name"] or "")
         fname = _safe_filename((r["lab_no"] or label) + fname_suffix, label)
-        return send_pdf(con, r["telephone"] or "", tmp, cap, filename=fname)
+        ok, msg = send_pdf(con, r["telephone"] or "", tmp, cap, filename=fname)
+        _log_wa(con, receipt_id, "receipt" if "receipt" in build_fn else "report",
+                r["telephone"] or "", fname, ok, msg)
+        return ok, msg
     finally:
         try:
             os.remove(tmp)

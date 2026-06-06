@@ -5,8 +5,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTableWidget, QTableWidgetItem,
     QLineEdit, QPushButton, QHeaderView, QDialog, QFormLayout, QDoubleSpinBox,
-    QComboBox, QPlainTextEdit, QLabel, QMessageBox, QSizePolicy,
+    QComboBox, QPlainTextEdit, QLabel, QMessageBox, QSizePolicy, QCheckBox,
 )
+from PySide6.QtGui import QColor
 
 from .widgets import h1, muted, page_header, like_term
 from . import tasks
@@ -71,16 +72,22 @@ class CatalogPage(QWidget):
 
         add = QPushButton("+ Add test"); add.clicked.connect(self.add)
         edit = QPushButton("Edit"); edit.setObjectName("ghost"); edit.clicked.connect(self.edit)
+        self.retire_btn = QPushButton("Retire / Restore"); self.retire_btn.setObjectName("ghost")
+        self.retire_btn.clicked.connect(self.toggle_retire)
         if not can(user["role"], "edit_catalog"):
-            add.hide(); edit.hide()  # read-only for lower roles
+            add.hide(); edit.hide(); self.retire_btn.hide()  # read-only for lower roles
             self.tests_readonly = True
-        header, self.sub = page_header("Test Catalog", "", add, edit)
+        header, self.sub = page_header("Test Catalog", "", add, edit, self.retire_btn)
         lay.addWidget(header)
 
+        bar = QHBoxLayout()
         self.search = QLineEdit(); self.search.setPlaceholderText("Search tests by name…")
         self.search.setMinimumHeight(40)
         self.search.textChanged.connect(tasks.debounce(self, self.refresh))
-        lay.addWidget(self.search)
+        self.show_retired = QCheckBox("Show retired")
+        self.show_retired.toggled.connect(self.refresh)
+        bar.addWidget(self.search, 1); bar.addWidget(self.show_retired)
+        lay.addLayout(bar)
 
         split = QSplitter()
         split.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -116,20 +123,25 @@ class CatalogPage(QWidget):
 
     def refresh(self):
         q = like_term(self.search.text())
+        active_clause = "" if self.show_retired.isChecked() else "active=1 AND "
         rows = self.con.execute(
-            "SELECT * FROM tests WHERE active=1 AND name LIKE ? ESCAPE '\\' "
+            f"SELECT * FROM tests WHERE {active_clause}name LIKE ? ESCAPE '\\' "
             "ORDER BY name LIMIT 1000",
             (q,),
         ).fetchall()
         total = self.con.execute("SELECT COUNT(*) FROM tests WHERE active=1").fetchone()[0]
-        self.sub.setText(f"{total} tests in catalog")
+        self.sub.setText(f"{total} active tests in catalog")
         self.sub.show()
         self.tests.setRowCount(0)
         self._ids = []
         for r in rows:
             i = self.tests.rowCount(); self.tests.insertRow(i)
             self._ids.append(r["id"])
-            self.tests.setItem(i, 0, QTableWidgetItem(r["name"]))
+            name = r["name"] + ("  (retired)" if not r["active"] else "")
+            item = QTableWidgetItem(name)
+            if not r["active"]:
+                item.setForeground(QColor("#c0392b"))
+            self.tests.setItem(i, 0, item)
             charge = QTableWidgetItem(f"{(r['charges'] or 0):,.0f}")
             charge.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.tests.setItem(i, 1, charge)
@@ -196,3 +208,23 @@ class CatalogPage(QWidget):
             self.con.commit()
             db.log_audit(self.con, self.user["username"], "test_updated", v["name"])
             self.refresh()
+
+    def toggle_retire(self):
+        if not can(self.user["role"], "edit_catalog"):
+            return
+        tid = self._selected_id()
+        if tid is None:
+            return
+        row = self.con.execute("SELECT name, active FROM tests WHERE id=?", (tid,)).fetchone()
+        if not row:
+            return
+        new_active = 0 if row["active"] else 1
+        verb = "restore" if new_active else "retire"
+        if QMessageBox.question(self, "Catalog",
+                                f"{verb.capitalize()} test “{row['name']}”?") != QMessageBox.Yes:
+            return
+        self.con.execute("UPDATE tests SET active=? WHERE id=?", (new_active, tid))
+        self.con.commit()
+        db.log_audit(self.con, self.user["username"],
+                     "test_activated" if new_active else "test_deactivated", row["name"])
+        self.refresh()

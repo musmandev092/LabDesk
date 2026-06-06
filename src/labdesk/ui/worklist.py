@@ -146,8 +146,8 @@ class WorklistPage(QWidget):
     def refresh_list(self):
         q = f"%{self.search.text().strip()}%"
         st = self.status_filter.currentData() or "All"
-        sql = ("SELECT * FROM receipts WHERE (COALESCE(patient_name,'') LIKE ? "
-               "OR COALESCE(lab_no,'') LIKE ?)")
+        sql = ("SELECT * FROM receipts WHERE COALESCE(voided,0)=0 "
+               "AND (COALESCE(patient_name,'') LIKE ? OR COALESCE(lab_no,'') LIKE ?)")
         args = [q, q]
         if st != "All":
             sql += " AND status=?"; args.append(st)
