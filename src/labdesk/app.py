@@ -1,0 +1,157 @@
+"""Application bootstrap: init DB, run first-run setup, login, main window."""
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
+
+from . import db
+from .ui.style import QSS, PRODUCT_NAME
+from .ui.login import LoginDialog
+from .ui.setup_wizard import SetupWizard
+from .ui.main_window import MainWindow
+
+# product icon (the microscope logo) — shown in the title bar + taskbar/dock
+APP_ICON = Path(__file__).resolve().parent / "assets" / "app_icon_256.png"
+
+
+def _acquire_single_instance():
+    """Allow only one LabDesk window per user. Returns the QLocalServer when this
+    process is the primary, or None when another instance is already running
+    (after poking it to come to the front)."""
+    from PySide6.QtNetwork import QLocalServer, QLocalSocket
+    try:
+        name = f"LabDesk-{os.getuid()}"
+    except AttributeError:               # non-POSIX fallback
+        name = "LabDesk-instance"
+    probe = QLocalSocket()
+    probe.connectToServer(name)
+    if probe.waitForConnected(250):      # someone is already listening → that's the app
+        probe.write(b"raise\n"); probe.flush(); probe.waitForBytesWritten(250)
+        probe.disconnectFromServer()
+        return None
+    QLocalServer.removeServer(name)      # clear a stale socket from a crash
+    server = QLocalServer()
+    server.listen(name)                  # if this fails we still run (fail-open)
+    return server
+
+
+def _integrate_appimage(con) -> str | None:
+    """When launched as an AppImage, register a menu entry + logo on first run
+    (so it appears in the apps menu/dock) and detect version changes. Returns a
+    one-line notice ('installed' / 'updated to vX') or None. No-op for dev runs."""
+    appimage = os.environ.get("APPIMAGE")
+    if not appimage or not Path(appimage).exists():
+        return None
+    prev_ver = db.get_setting(con, "installed_version", "")
+    apps = Path.home() / ".local/share/applications"
+    icons = Path.home() / ".local/share/icons/hicolor/256x256/apps"
+    desktop = apps / "labdesk.desktop"
+    try:
+        apps.mkdir(parents=True, exist_ok=True)
+        icons.mkdir(parents=True, exist_ok=True)
+        if APP_ICON.exists():
+            shutil.copyfile(APP_ICON, icons / "labdesk.png")
+        entry = (
+            "[Desktop Entry]\nType=Application\nName=LabDesk\n"
+            "Comment=Laboratory Management System\n"
+            f'Exec="{appimage}" %U\nIcon=labdesk\n'
+            "Categories=Office;MedicalSoftware;\nTerminal=false\n"
+            "StartupWMClass=LabDesk\n"
+        )
+        if not desktop.exists() or desktop.read_text(encoding="utf-8") != entry:
+            desktop.write_text(entry, encoding="utf-8")
+        for cmd in (["update-desktop-database", str(apps)],
+                    ["gtk-update-icon-cache", str(Path.home() / ".local/share/icons/hicolor")]):
+            try:
+                subprocess.run(cmd, capture_output=True, timeout=10)
+            except Exception:
+                pass
+    except Exception:
+        return None
+    db.set_setting(con, "installed_version", db.APP_VERSION)
+    if not prev_ver:
+        return ("LabDesk has been added to your applications menu.\n"
+                "Launch it from the menu (or pin it to your dock) next time.")
+    if prev_ver != db.APP_VERSION:
+        return f"Updated to v{db.APP_VERSION} successfully."
+    return None
+
+
+def run(argv: list[str]) -> int:
+    app = QApplication(argv)
+    app.setApplicationName(PRODUCT_NAME)
+    app.setOrganizationName(PRODUCT_NAME)
+    # associate running windows with the .desktop entry (dock icon on GNOME/Wayland)
+    app.setDesktopFileName("LabDesk")
+    if APP_ICON.exists():
+        app.setWindowIcon(QIcon(str(APP_ICON)))
+    app.setStyleSheet(QSS)
+
+    # Single instance: if LabDesk is already open, focus it and quit this launch.
+    server = None
+    if os.environ.get("LABDESK_SELFTEST") != "1":
+        server = _acquire_single_instance()
+        if server is None:
+            return 0
+        app._labdesk_server = server     # keep the listener alive
+
+    con = db.init_db()
+
+    # First-run / update: integrate into the desktop (menu entry + logo) and
+    # show a one-time "installed" / "updated" notice when run as an AppImage.
+    notice = _integrate_appimage(con)
+    if notice and os.environ.get("LABDESK_SELFTEST") != "1":
+        QMessageBox.information(None, "LabDesk", notice)
+
+    # Self-test: build the main window for an admin user, visit every page, exit.
+    # Used to validate a packaged build launches without a real display/login.
+    if os.environ.get("LABDESK_SELFTEST") == "1":
+        user = con.execute("SELECT * FROM users WHERE username='admin'").fetchone()
+        win = MainWindow(con, user)
+        win.show()
+        for i in range(win.stack.count()):
+            win.go(i)
+        n = con.execute("SELECT COUNT(*) FROM tests").fetchone()[0]
+        print(f"SELFTEST OK — {win.stack.count()} pages, {n} tests in catalog")
+        return 0
+
+    # First-run setup wizard (white-label: each lab enters its own branding).
+    if db.get_setting(con, "configured", "0") != "1":
+        wizard = SetupWizard(con)
+        if wizard.exec() != QDialog.Accepted:
+            return 0
+
+    login = LoginDialog(con)
+    if login.exec() != QDialog.Accepted:
+        return 0
+
+    win = MainWindow(con, login.user)
+    win.show()
+
+    # a later launch pokes the local server → bring this window to the front
+    if server is not None:
+        def _raise_existing():
+            conn = server.nextPendingConnection()
+            if conn is not None:
+                conn.readAll(); conn.disconnectFromServer()
+            from PySide6.QtCore import Qt
+            win.setWindowState((win.windowState() & ~Qt.WindowMinimized) | Qt.WindowActive)
+            win.show(); win.raise_(); win.activateWindow()
+        server.newConnection.connect(_raise_existing)
+
+    return app.exec()
+
+
+def run_cli() -> int:
+    """GUI entry point (used by the installed launcher script)."""
+    return run(sys.argv)
+
+
+if __name__ == "__main__":
+    sys.exit(run(sys.argv))

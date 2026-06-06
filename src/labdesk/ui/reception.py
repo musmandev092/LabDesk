@@ -1,0 +1,531 @@
+"""Reception / Billing: register a patient visit, pick tests, take payment."""
+from __future__ import annotations
+
+from PySide6.QtCore import Qt, QDate
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit, QComboBox,
+    QSpinBox, QDoubleSpinBox, QPushButton, QTableWidget, QTableWidgetItem,
+    QHeaderView, QLabel, QCompleter, QMessageBox, QListWidget, QListWidgetItem,
+    QInputDialog,
+)
+
+from PySide6.QtWidgets import QSizePolicy
+
+from .widgets import h1, h2, muted, card, money, page_header, field_label
+from .. import db
+from ..constants import TITLES, AGE_UNITS, SEXES, SPECIMEN_PRESETS, normalize_phone
+from ..report import print_receipt
+from .. import roles
+
+
+def _clean_specimen(s: str) -> str:
+    """Tidy a legacy `sample_required` value for the specimen dropdown."""
+    s = (s or "").strip()
+    if not s:
+        return ""
+    low = s.lower()
+    if low.startswith("phay") or low.startswith("phys"):   # "Phaysically"/"Physcially"
+        return "Physical (no sample)"
+    return s
+
+
+class ReceptionPage(QWidget):
+    def __init__(self, con, user):
+        super().__init__()
+        self.con = con
+        self.user = user
+        self.cart = []  # list of dicts: {test_id, name, charge}
+        self._existing_patient_id = None  # set when a returning patient is picked
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(12)
+        header, _ = page_header("Reception / Billing", "Register a patient and create an invoice")
+        root.addWidget(header)
+
+        body = QHBoxLayout()
+        body.setSpacing(14)
+
+        # ---- left: patient + test picker ----
+        left = QVBoxLayout()
+        left.setSpacing(12)
+
+        # patient form
+        pgrid = QGridLayout(); pgrid.setSpacing(8)
+        pgrid.setColumnStretch(1, 1); pgrid.setColumnStretch(3, 1)
+        self.title = QComboBox(); self.title.addItems(TITLES)
+        self.name = QLineEdit(); self.name.setPlaceholderText("Patient name *")
+        self.mr_no = QLineEdit(); self.mr_no.setPlaceholderText("auto if blank")
+        self.age = QSpinBox(); self.age.setMaximum(150)
+        self.age_desc = QComboBox(); self.age_desc.addItems(AGE_UNITS)
+        self.sex = QComboBox(); self.sex.addItems(SEXES)
+        self.tel = QLineEdit(); self.tel.setPlaceholderText("Telephone / WhatsApp")
+        self.address = QLineEdit(); self.address.setPlaceholderText("Address")
+        self.doctor = QComboBox(); self.doctor.setEditable(True)
+        self.specimen = QComboBox(); self.specimen.setEditable(True)
+        self.update_specimen_options()  # presets (no cart yet)
+        # editing identity fields by hand breaks any "returning patient" link
+        self.name.textEdited.connect(self._unlink)
+        self.tel.textEdited.connect(self._unlink)
+        self.mr_no.textEdited.connect(self._unlink)
+        age_box = QHBoxLayout(); age_box.setContentsMargins(0, 0, 0, 0)
+        age_box.addWidget(self.age); age_box.addWidget(self.age_desc)
+        age_w = QWidget(); age_w.setLayout(age_box)
+        pgrid.addWidget(field_label("Title"), 0, 0); pgrid.addWidget(self.title, 0, 1)
+        pgrid.addWidget(field_label("Name"), 0, 2); pgrid.addWidget(self.name, 0, 3)
+        pgrid.addWidget(field_label("Age"), 1, 0); pgrid.addWidget(age_w, 1, 1)
+        pgrid.addWidget(field_label("Sex"), 1, 2); pgrid.addWidget(self.sex, 1, 3)
+        pgrid.addWidget(field_label("MR No"), 2, 0); pgrid.addWidget(self.mr_no, 2, 1)
+        pgrid.addWidget(field_label("Phone"), 2, 2); pgrid.addWidget(self.tel, 2, 3)
+        pgrid.addWidget(field_label("Address"), 3, 0); pgrid.addWidget(self.address, 3, 1, 1, 3)
+        pgrid.addWidget(field_label("Doctor"), 4, 0); pgrid.addWidget(self.doctor, 4, 1, 1, 3)
+        pgrid.addWidget(field_label("Specimen"), 5, 0); pgrid.addWidget(self.specimen, 5, 1, 1, 3)
+        pform = QWidget(); pform.setLayout(pgrid)
+        # returning-patient lookup (phone is the practical key patients remember)
+        self.find = QLineEdit()
+        self.find.setPlaceholderText("🔍  Returning patient? search phone / MR No / name")
+        self.find.setClearButtonEnabled(True)
+        self.find.textChanged.connect(self.search_patients)
+        self.find_results = QListWidget()
+        self.find_results.setMaximumHeight(0)
+        self.find_results.hide()
+        self.find_results.itemActivated.connect(self.pick_patient)
+        self.find_results.itemClicked.connect(self.pick_patient)
+        self.linked_lbl = muted("")
+        self.linked_lbl.hide()
+        patient_card = card(self.find, self.find_results, self.linked_lbl, pform, title="Patient")
+        patient_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        left.addWidget(patient_card)
+
+        # test search
+        self.test_search = QLineEdit()
+        self.test_search.setPlaceholderText("Search test to add… (type, then double-click)")
+        self.test_search.setMinimumHeight(38)
+        self.test_search.textChanged.connect(self.search_tests)
+        self.results = QListWidget()
+        self.results.itemActivated.connect(self.add_from_list)
+        self.results.itemDoubleClicked.connect(self.add_from_list)
+        add_card = card(self.test_search, self.results, title="Add tests")
+        # let the results list grow to fill the card and the column
+        add_card.layout().setStretch(add_card.layout().count() - 1, 1)
+        left.addWidget(add_card, 1)
+        body.addLayout(left, 3)
+
+        # ---- right: cart + totals ----
+        right = QVBoxLayout()
+        right.setSpacing(12)
+        self.cart_table = QTableWidget(0, 3)
+        self.cart_table.setHorizontalHeaderLabels(["Test", "Charge", ""])
+        ch = self.cart_table.horizontalHeader()
+        ch.setSectionResizeMode(0, QHeaderView.Stretch)             # test name grows
+        ch.setSectionResizeMode(1, QHeaderView.ResizeToContents)    # charge
+        ch.setSectionResizeMode(2, QHeaderView.Fixed)
+        self.cart_table.setColumnWidth(2, 42)
+        self.cart_table.verticalHeader().setVisible(False)
+        self.cart_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        cart_card = card(self.cart_table, title="Selected tests")
+        cart_card.layout().setStretch(cart_card.layout().count() - 1, 1)
+        right.addWidget(cart_card, 1)
+
+        # totals
+        tgrid = QGridLayout(); tgrid.setSpacing(9)
+        tgrid.setColumnStretch(1, 1)
+        self.subtotal = QLabel("—"); self.subtotal.setStyleSheet("font-weight:700;")
+        self.discount = QDoubleSpinBox(); self.discount.setMaximum(100); self.discount.setSuffix(" %")
+        self.discount.valueChanged.connect(self.recompute)
+        # A discount needs manager/admin rights; a cashier must get it approved.
+        self._can_discount = roles.can(self.user["role"], "apply_discount")
+        self._discount_approved_by = None
+        self.discount_lock = QPushButton("🔒 Approve"); self.discount_lock.setObjectName("ghost")
+        self.discount_lock.setToolTip("A discount needs manager/admin approval")
+        self.discount_lock.clicked.connect(self._request_discount_approval)
+        drow = QHBoxLayout(); drow.setContentsMargins(0, 0, 0, 0); drow.setSpacing(6)
+        drow.addWidget(self.discount, 1)
+        if not self._can_discount:
+            drow.addWidget(self.discount_lock)
+            self.discount.setEnabled(False)
+        dwrap = QWidget(); dwrap.setLayout(drow)
+        self.net = QLabel("—"); self.net.setStyleSheet("font-weight:800;font-size:18px;color:#0a5f67;")
+        self.paid = QDoubleSpinBox(); self.paid.setMaximum(1_000_000); self.paid.setPrefix("Rs. ")
+        self.paid.valueChanged.connect(self.recompute)
+        self.due = QLabel("—"); self.due.setStyleSheet("font-weight:800;font-size:15px;color:#c0392b;")
+        # change to hand back when the customer overpays (paid > net)
+        self.change = QLabel("—"); self.change.setStyleSheet("font-weight:800;font-size:15px;color:#1f9d55;")
+        self.change_lbl = field_label("Change to return")
+        self.change.setVisible(False); self.change_lbl.setVisible(False)
+        tgrid.addWidget(field_label("Subtotal"), 0, 0); tgrid.addWidget(self.subtotal, 0, 1, Qt.AlignRight)
+        tgrid.addWidget(field_label("Discount"), 1, 0); tgrid.addWidget(dwrap, 1, 1)
+        tgrid.addWidget(field_label("Net payable"), 2, 0); tgrid.addWidget(self.net, 2, 1, Qt.AlignRight)
+        tgrid.addWidget(field_label("Paid"), 3, 0); tgrid.addWidget(self.paid, 3, 1)
+        tgrid.addWidget(field_label("Due"), 4, 0); tgrid.addWidget(self.due, 4, 1, Qt.AlignRight)
+        tgrid.addWidget(self.change_lbl, 5, 0); tgrid.addWidget(self.change, 5, 1, Qt.AlignRight)
+        tw = QWidget(); tw.setLayout(tgrid)
+        pay_card = card(tw, title="Payment")
+        pay_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        right.addWidget(pay_card)
+
+        btns = QHBoxLayout()
+        # NB: clicked(checked) passes a bool — wrap so do_print stays True
+        save = QPushButton("Save && Print receipt"); save.setMinimumHeight(42)
+        save.clicked.connect(lambda: self.save(do_print=True))
+        save_only = QPushButton("Save (no print)"); save_only.setObjectName("ghost")
+        save_only.clicked.connect(lambda: self.save(do_print=False))
+        clear = QPushButton("Clear"); clear.setObjectName("ghost"); clear.clicked.connect(self.clear_form)
+        btns.addWidget(clear); btns.addStretch(1); btns.addWidget(save_only); btns.addWidget(save)
+        right.addLayout(btns)
+        body.addLayout(right, 2)
+
+        root.addLayout(body, 1)
+
+    # ---------------------------------------------------------------
+    def on_show(self):
+        self.load_doctors()
+        if self.results.count() == 0:
+            self.search_tests("")
+        if not self.cart:
+            self._apply_promo()
+            self.recompute()
+
+    # ---- discount approval + special-day promo --------------------
+    def _request_discount_approval(self):
+        """A cashier asks a manager/admin to approve a discount on this bill."""
+        u, ok = QInputDialog.getText(self, "Manager approval", "Manager / Admin username:")
+        if not ok or not u.strip():
+            return
+        p, ok = QInputDialog.getText(
+            self, "Manager approval", f"Password for {u.strip()}:", QLineEdit.Password)
+        if not ok:
+            return
+        approver = db.verify_user(self.con, u.strip(), p)
+        if not approver or not roles.can(approver["role"], "apply_discount"):
+            QMessageBox.warning(self, "Approval",
+                                "Invalid credentials, or that user can't approve discounts.")
+            return
+        self._discount_approved_by = approver["username"]
+        self.discount.setEnabled(True)
+        self.discount_lock.setText(f"✓ {roles.role_label(approver['role'])}")
+        self.discount_lock.setEnabled(False)
+        self.discount.setFocus()
+
+    def _promo_pct(self) -> float:
+        """Active special-day discount %, honouring the optional end date."""
+        try:
+            pct = float(db.get_setting(self.con, "promo_discount_pct", "0") or 0)
+        except ValueError:
+            pct = 0.0
+        until = db.get_setting(self.con, "promo_until", "").strip()
+        if until:
+            import datetime
+            try:
+                if datetime.date.today() > datetime.date.fromisoformat(until):
+                    return 0.0
+            except ValueError:
+                pass
+        return max(0.0, min(100.0, pct))
+
+    def _apply_promo(self):
+        pct = self._promo_pct()
+        self.discount.blockSignals(True)
+        self.discount.setValue(pct)            # auto-apply the special-day discount
+        self.discount.blockSignals(False)
+
+    def load_doctors(self):
+        cur = self.doctor.currentText()
+        self.doctor.clear()
+        self.doctor.addItem("", None)
+        self._doctors = self.con.execute(
+            "SELECT id, name FROM doctors WHERE active=1 ORDER BY name"
+        ).fetchall()
+        for d in self._doctors:
+            self.doctor.addItem(d["name"], d["id"])
+        self.doctor.setCurrentText(cur)
+
+    def _hint_item(self, text):
+        it = QListWidgetItem(text)
+        it.setFlags(Qt.NoItemFlags)
+        it.setForeground(Qt.gray)
+        return it
+
+    # ---- returning-patient lookup ---------------------------------
+    def _unlink(self, *_):
+        """Hand-editing identity fields detaches any picked patient."""
+        if self._existing_patient_id is not None:
+            self._existing_patient_id = None
+            self.linked_lbl.hide()
+
+    def search_patients(self, text):
+        text = text.strip()
+        self.find_results.clear()
+        if len(text) < 2:
+            self.find_results.hide()
+            return
+        like = f"%{text}%"
+        rows = self.con.execute(
+            """SELECT id,title,name,age,age_desc,sex,telephone,address,mr_no
+               FROM patients
+               WHERE id IN (
+                 SELECT MAX(id) FROM patients
+                 WHERE name LIKE ? OR telephone LIKE ? OR mr_no LIKE ?
+                 GROUP BY COALESCE(NULLIF(telephone,''), mr_no, id))
+               ORDER BY id DESC LIMIT 8""",
+            (like, like, like),
+        ).fetchall()
+        if not rows:
+            self.find_results.hide()
+            return
+        for r in rows:
+            who = f"{(r['title'] or '').strip()} {r['name']}".strip()
+            meta = "  ·  ".join(x for x in [r["mr_no"], r["telephone"]] if x)
+            it = QListWidgetItem(f"{who}    —    {meta}" if meta else who)
+            it.setData(Qt.UserRole, r["id"])
+            self.find_results.addItem(it)
+        self.find_results.setMaximumHeight(min(self.find_results.count(), 5) * 36 + 8)
+        self.find_results.show()
+
+    def pick_patient(self, item):
+        pid = item.data(Qt.UserRole)
+        if pid is None:
+            return
+        r = self.con.execute("SELECT * FROM patients WHERE id=?", (pid,)).fetchone()
+        if not r:
+            return
+        self._existing_patient_id = pid
+        self.title.setCurrentText((r["title"] or "").strip())
+        self.name.setText(r["name"] or "")
+        self.age.setValue(r["age"] or 0)
+        self.age_desc.setCurrentText(r["age_desc"] or "Years")
+        self.sex.setCurrentText(r["sex"] or "Male")
+        self.tel.setText(r["telephone"] or "")
+        self.address.setText(r["address"] or "")
+        self.mr_no.setText(r["mr_no"] or "")
+        self.linked_lbl.setText(
+            f"✓ Linked to existing patient {r['mr_no'] or ''} — new visit will join their history")
+        self.linked_lbl.show()
+        self.find.clear()
+        self.find_results.hide()
+
+    # ---- specimen options driven by the chosen tests --------------
+    def update_specimen_options(self):
+        """Offer each cart test's `sample_required` as a specimen option (plus the
+        standard presets); auto-select when there is a single specimen."""
+        cur = self.specimen.currentText().strip()
+        ids = [c["test_id"] for c in self.cart]
+        cart_specs = []
+        if ids:
+            q = ("SELECT DISTINCT sample_required FROM tests WHERE id IN (%s) "
+                 "AND sample_required<>''" % ",".join("?" * len(ids)))
+            for row in self.con.execute(q, ids):
+                s = _clean_specimen(row[0])
+                if s and s not in cart_specs:
+                    cart_specs.append(s)
+        self.specimen.blockSignals(True)
+        self.specimen.clear()
+        self.specimen.addItem("")
+        for s in cart_specs:
+            self.specimen.addItem(s)
+        if cart_specs:
+            self.specimen.insertSeparator(self.specimen.count())
+        for s in SPECIMEN_PRESETS:
+            self.specimen.addItem(s)
+        self.specimen.blockSignals(False)
+        if cur:
+            self.specimen.setCurrentText(cur)
+        elif len(cart_specs) == 1:
+            self.specimen.setCurrentText(cart_specs[0])
+
+    def search_tests(self, text):
+        text = text.strip()
+        self.results.clear()
+        cur = db.get_setting(self.con, "currency", "Rs.")
+        if len(text) < 1:
+            self.results.addItem(self._hint_item("Start typing a test name above to see matches…"))
+            return
+        rows = self.con.execute(
+            "SELECT id,name,charges FROM tests WHERE active=1 AND name LIKE ? "
+            "ORDER BY name LIMIT 40", (f"%{text}%",),
+        ).fetchall()
+        if not rows:
+            self.results.addItem(self._hint_item(f"No tests match “{text}”."))
+            return
+        for r in rows:
+            it = QListWidgetItem(f"{r['name']}   —   {cur} {r['charges']:,.0f}")
+            it.setData(Qt.UserRole, (r["id"], r["name"], r["charges"]))
+            self.results.addItem(it)
+
+    def add_from_list(self, item):
+        data = item.data(Qt.UserRole)
+        if not data:
+            return  # hint / empty-state row
+        tid, name, charge = data
+        if any(c["test_id"] == tid for c in self.cart):
+            return  # no duplicates
+        self.cart.append({"test_id": tid, "name": name, "charge": charge})
+        self.test_search.clear()
+        self.search_tests("")
+        self.refresh_cart()
+
+    def remove_cart(self, idx):
+        del self.cart[idx]
+        self.refresh_cart()
+
+    def refresh_cart(self):
+        self.cart_table.setRowCount(0)
+        for i, c in enumerate(self.cart):
+            r = self.cart_table.rowCount(); self.cart_table.insertRow(r)
+            self.cart_table.setItem(r, 0, QTableWidgetItem(c["name"]))
+            charge_it = QTableWidgetItem(f"{c['charge']:,.0f}")
+            charge_it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.cart_table.setItem(r, 1, charge_it)
+            btn = QPushButton("✕")
+            btn.setToolTip("Remove this test")
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFixedSize(28, 26)
+            btn.setStyleSheet(
+                "QPushButton{background:transparent;color:#c0392b;border:1px solid #e3b4ae;"
+                "border-radius:6px;font-weight:bold;padding:0;}"
+                "QPushButton:hover{background:#c0392b;color:white;border-color:#c0392b;}"
+            )
+            btn.clicked.connect(lambda _=False, idx=i: self.remove_cart(idx))
+            self.cart_table.setCellWidget(r, 2, btn)
+        self.update_specimen_options()
+        self.recompute()
+
+    def recompute(self):
+        cur = db.get_setting(self.con, "currency", "Rs.")
+        sub = sum(c["charge"] for c in self.cart)
+        disc = sub * self.discount.value() / 100.0
+        net = max(0.0, sub - disc)
+        paid = self.paid.value()
+        due = max(0.0, net - paid)
+        change = max(0.0, paid - net)
+        self.subtotal.setText(money(sub, cur))
+        self.net.setText(money(net, cur))
+        self.due.setText(money(due, cur))
+        # show the change-to-return row only when the customer overpaid (due == 0)
+        self.change.setText(money(change, cur))
+        self.change_lbl.setVisible(change > 0)
+        self.change.setVisible(change > 0)
+        self._net = net
+        self._sub = sub
+
+    # ---------------------------------------------------------------
+    def save(self, do_print=True):
+        name = self.name.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Reception", "Patient name is required.")
+            return
+        if not self.cart:
+            QMessageBox.warning(self, "Reception", "Add at least one test.")
+            return
+        c = self.con
+        title = self.title.currentText().strip()
+        mr_no = self.mr_no.text().strip()
+        specimen = self.specimen.currentText().strip()
+        cc = db.get_setting(c, "whatsapp_country_code", "92") or "92"
+        tel = normalize_phone(self.tel.text(), cc)
+        age = self.age.value(); age_desc = self.age_desc.currentText(); sex = self.sex.currentText()
+        addr = self.address.text().strip()
+        # Resolve the patient identity:
+        #  1) an explicitly picked "returning patient", else
+        #  2) auto-match on (canonical phone + same name), else
+        #  3) a brand-new patient with an auto-assigned MR No.
+        pid = self._existing_patient_id
+        if not pid and tel:
+            m = c.execute(
+                "SELECT id FROM patients WHERE telephone=? AND lower(name)=lower(?) "
+                "ORDER BY id DESC LIMIT 1", (tel, name),
+            ).fetchone()
+            if m:
+                pid = m["id"]
+        if pid:  # returning patient → reuse row + its permanent MR, refresh details
+            row = c.execute("SELECT mr_no FROM patients WHERE id=?", (pid,)).fetchone()
+            mr_no = mr_no or (row["mr_no"] if row else "") or f"MR{pid:05d}"
+            c.execute(
+                "UPDATE patients SET title=?,name=?,age=?,age_desc=?,sex=?,telephone=?,"
+                "address=?,mr_no=? WHERE id=?",
+                (title, name, age, age_desc, sex, tel, addr, mr_no, pid),
+            )
+        else:    # new patient
+            pid = c.execute(
+                "INSERT INTO patients(title,mr_no,name,age,age_desc,sex,telephone,address) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (title, mr_no, name, age, age_desc, sex, tel, addr),
+            ).lastrowid
+            if not mr_no:
+                mr_no = f"MR{pid:05d}"
+                c.execute("UPDATE patients SET mr_no=? WHERE id=?", (mr_no, pid))
+        doc_id = self.doctor.currentData()
+        doc_name = self.doctor.currentText().strip()
+        # compute totals directly (don't depend on cached recompute state)
+        sub = sum(c["charge"] for c in self.cart)
+        disc_pct = self.discount.value()
+        net = max(0.0, sub - sub * disc_pct / 100.0)
+        paid = self.paid.value()
+        due = max(0.0, net - paid)
+        prefix = db.get_setting(c, "lab_no_prefix", "LAB")
+        rid = c.execute(
+            """INSERT INTO receipts
+               (patient_id,doctor_id,title,mr_no,patient_name,age,age_desc,sex,telephone,address,
+                dr_name,specimen,subtotal,discount_pct,less,net_amount,paid,due,
+                status,created_by,received_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'))""",
+            (pid, doc_id, title, mr_no, name, age, age_desc,
+             sex, tel, addr,
+             doc_name, specimen, sub, disc_pct,
+             0, net, paid, due, "pending", self.user["username"]),
+        ).lastrowid
+        # audit trail when a cashier's discount was manager-approved
+        if disc_pct and self._discount_approved_by and self._discount_approved_by != self.user["username"]:
+            c.execute(
+                "INSERT INTO audit_log(username,action,detail) VALUES (?,?,?)",
+                (self.user["username"], "discount_approved",
+                 f"{disc_pct:g}% on receipt {rid} approved by {self._discount_approved_by}"),
+            )
+        # number as PREFIX_YYYYMMDD_NNN with a daily-resetting sequence, e.g. LAB_20260606_006
+        datestr = c.execute("SELECT strftime('%Y%m%d','now','localtime')").fetchone()[0]
+        seq = c.execute(
+            "SELECT COUNT(*) FROM receipts WHERE date(received_at)=date('now','localtime')"
+        ).fetchone()[0]
+        lab_no = f"{prefix}_{datestr}_{seq:03d}"
+        c.execute("UPDATE receipts SET lab_no=?, case_no=? WHERE id=?", (lab_no, lab_no, rid))
+        for item in self.cart:
+            c.execute(
+                "INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) VALUES (?,?,?,?)",
+                (rid, item["test_id"], item["name"], item["charge"]),
+            )
+        # ledger income entry
+        if paid:
+            c.execute(
+                "INSERT INTO ledger(kind,ref_id,detail,credit,date) "
+                "VALUES ('income',?,?,?,date('now','localtime'))",
+                (rid, f"Receipt {lab_no} — {name}", paid),
+            )
+        c.commit()
+        self._last_receipt = rid
+        if do_print:
+            try:
+                print_receipt(self.con, rid, self)
+            except Exception as e:  # printing must never lose the saved data
+                QMessageBox.warning(self, "Print", f"Saved as {lab_no}, but printing failed:\n{e}")
+        QMessageBox.information(self, "Saved", f"Receipt {lab_no} saved.")
+        self.clear_form()
+
+    def clear_form(self):
+        self.cart = []
+        self._existing_patient_id = None
+        self.linked_lbl.hide()
+        for w in (self.name, self.tel, self.address, self.mr_no, self.test_search, self.find):
+            w.clear()
+        self.find_results.hide()
+        self.title.setCurrentIndex(0)
+        self.specimen.setCurrentIndex(0)
+        self.age.setValue(0); self.paid.setValue(0)
+        # reset the discount-approval lock for cashiers, then re-apply any promo
+        self._discount_approved_by = None
+        if not self._can_discount:
+            self.discount.setEnabled(False)
+            self.discount_lock.setText("🔒 Approve")
+            self.discount_lock.setEnabled(True)
+        self._apply_promo()
+        self.search_tests("")
+        self.refresh_cart()

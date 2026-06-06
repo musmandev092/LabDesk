@@ -1,0 +1,17 @@
+[project]
+name = "labdesk"
+version = "0.1.0"
+description = "LabDesk — laboratory management system"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pyside6>=6.7,<6.12",
+    "weasyprint>=69.0",
+]
+
+[project.gui-scripts]
+labdesk = "labdesk.app:run_cli"
+
+[build-system]
+requires = ["uv_build>=0.11.18,<0.12.0"]
+build-backend = "uv_build"
