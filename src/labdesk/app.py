@@ -93,7 +93,40 @@ def _integrate_appimage(con) -> str | None:
     return None
 
 
+def _setup_crash_logging() -> None:
+    """Log uncaught exceptions to a rotating file under the data dir and show the
+    user where to find the details, instead of the app vanishing silently."""
+    import logging
+    from logging.handlers import RotatingFileHandler
+    logdir = db.data_dir() / "logs"
+    try:
+        logdir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+    handler = RotatingFileHandler(logdir / "labdesk.log", maxBytes=1_000_000, backupCount=5)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    logger = logging.getLogger("labdesk")
+    logger.setLevel(logging.INFO)
+    logger.addHandler(handler)
+    logger.info("LabDesk v%s starting", db.APP_VERSION)
+
+    def _hook(exc_type, exc, tb):
+        import traceback
+        logger.error("Uncaught exception:\n%s", "".join(traceback.format_exception(exc_type, exc, tb)))
+        if os.environ.get("LABDESK_SELFTEST") != "1":
+            try:
+                QMessageBox.critical(None, "LabDesk",
+                                     "Something went wrong. The details were saved to:\n"
+                                     f"{logdir / 'labdesk.log'}")
+            except Exception:  # noqa: BLE001
+                pass
+        sys.__excepthook__(exc_type, exc, tb)
+
+    sys.excepthook = _hook
+
+
 def run(argv: list[str]) -> int:
+    _setup_crash_logging()
     app = QApplication(argv)
     app.setApplicationName(PRODUCT_NAME)
     app.setOrganizationName(PRODUCT_NAME)
@@ -125,6 +158,13 @@ def run(argv: list[str]) -> int:
         app.processEvents()
 
     con = db.init_db()
+    # automatic timestamped backup on launch (rotated) — the safety net for the
+    # "one bad disk loses everything" gap. Best-effort; never blocks startup.
+    if os.environ.get("LABDESK_SELFTEST") != "1":
+        try:
+            db.backup_db("launch")
+        except Exception:  # noqa: BLE001
+            pass
 
     # First-run / update: integrate into the desktop (menu entry + logo) and
     # show a one-time "installed" / "updated" notice when run as an AppImage.

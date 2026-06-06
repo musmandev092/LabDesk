@@ -201,28 +201,38 @@ class MicrobiologyPage(QWidget):
             QMessageBox.warning(self, "Microbiology", "Select a culture order first.")
             return
         c = self.con
-        c.execute("DELETE FROM cultures WHERE receipt_item_id=?", (self.current_item,))
-        cid = c.execute(
-            """INSERT INTO cultures
-               (receipt_item_id,specimen,growth,organism,colony_count,gram_stain,
-                zn_stain,remarks,reported_at)
-               VALUES (?,?,?,?,?,?,?,?,datetime('now','localtime'))""",
-            (self.current_item, self.specimen.currentText(), self.growth.currentText(),
-             self.organism.text().strip(), self.colony.text().strip(),
-             self.gram.currentText(), self.zn.currentText(),
-             self.remarks.toPlainText().strip()),
-        ).lastrowid
-        for i in range(self.sens.rowCount()):
-            ab = self.sens.cellWidget(i, 0).currentText().strip()
-            res = self.sens.cellWidget(i, 1).currentText()
-            if ab:
-                c.execute(
-                    "INSERT INTO culture_sensitivity(culture_id,antibiotic,result) VALUES (?,?,?)",
-                    (cid, ab, res),
-                )
-        c.execute("UPDATE receipt_items SET reported=1, reported_at=datetime('now','localtime') WHERE id=?",
-                  (self.current_item,))
-        c.commit()
+        try:
+            c.execute("DELETE FROM cultures WHERE receipt_item_id=?", (self.current_item,))
+            cid = c.execute(
+                """INSERT INTO cultures
+                   (receipt_item_id,specimen,growth,organism,colony_count,gram_stain,
+                    zn_stain,remarks,reported_at)
+                   VALUES (?,?,?,?,?,?,?,?,datetime('now','localtime'))""",
+                (self.current_item, self.specimen.currentText(), self.growth.currentText(),
+                 self.organism.text().strip(), self.colony.text().strip(),
+                 self.gram.currentText(), self.zn.currentText(),
+                 self.remarks.toPlainText().strip()),
+            ).lastrowid
+            for i in range(self.sens.rowCount()):
+                ab = self.sens.cellWidget(i, 0).currentText().strip()
+                res = self.sens.cellWidget(i, 1).currentText()
+                if ab:
+                    c.execute(
+                        "INSERT INTO culture_sensitivity(culture_id,antibiotic,result) VALUES (?,?,?)",
+                        (cid, ab, res),
+                    )
+            c.execute(
+                "UPDATE receipt_items SET reported=1, reported_at=datetime('now','localtime') WHERE id=?",
+                (self.current_item,))
+            c.commit()
+        except Exception as e:  # noqa: BLE001
+            try:
+                c.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+            QMessageBox.warning(self, "Save failed",
+                                f"The culture report was NOT saved — please try again.\n\n{e}")
+            return
         info = c.execute(
             "SELECT r.lab_no, ri.test_name FROM receipt_items ri "
             "JOIN receipts r ON r.id=ri.receipt_id WHERE ri.id=?", (self.current_item,)

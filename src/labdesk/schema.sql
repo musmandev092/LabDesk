@@ -152,11 +152,14 @@ CREATE TABLE IF NOT EXISTS receipts (
     paid          REAL NOT NULL DEFAULT 0,
     due           REAL NOT NULL DEFAULT 0,
     status        TEXT NOT NULL DEFAULT 'pending', -- pending|in_progress|reported|delivered
+    reported_at   TEXT,                 -- first time results were finalised (stable across reprints)
     created_by    TEXT,
     created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS ix_receipts_date ON receipts(received_at);
 CREATE INDEX IF NOT EXISTS ix_receipts_status ON receipts(status);
+-- (the unique lab_no index + hot-path indexes that depend on post-v1 columns are
+--  created in db._ensure_indexes after _ensure_columns has run.)
 
 -- ---------------------------------------------------------------------------
 -- Tests ordered on a receipt (line items)

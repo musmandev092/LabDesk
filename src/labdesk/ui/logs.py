@@ -48,6 +48,9 @@ ACTION_LABELS = {
     "user_enabled": ("User enabled", "#1f9d55"),
     "user_disabled": ("User disabled", "#c0392b"),
     "password_changed": ("Password changed", "#b9770e"),
+    "password_reset": ("Password reset (admin)", "#b9770e"),
+    "backup_created": ("Backup created", "#1f9d55"),
+    "db_restored": ("Database restored", "#c0392b"),
     "settings_saved": ("Settings updated", "#64727d"),
     "doctor_created": ("Doctor added", "#0e7c86"),
     "doctor_updated": ("Doctor edited", "#0e7c86"),
@@ -156,4 +159,6 @@ class LogsPage(QWidget):
         self.con.commit()
         db.log_audit(self.con, self.user["username"], "logs_cleared",
                      "removed entries older than 90 days")
+        # re-anchor the hash chain so 'Verify integrity' stays valid after the purge
+        db.rechain_audit(self.con)
         self.refresh()

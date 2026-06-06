@@ -79,7 +79,8 @@ DEFAULT_SETTINGS = {
 # Columns added after v1 — created on existing databases if missing.
 _EXTRA_COLUMNS = {
     "patients": [("title", "TEXT"), ("mr_no", "TEXT")],
-    "receipts": [("title", "TEXT"), ("mr_no", "TEXT"), ("case_no", "TEXT")],
+    "receipts": [("title", "TEXT"), ("mr_no", "TEXT"), ("case_no", "TEXT"),
+                 ("reported_at", "TEXT")],
     # per-test free-text remarks printed under the results table
     "receipt_items": [("remarks", "TEXT")],
     # hide a parameter row from the printed report (kept in the entry screen)
@@ -214,6 +215,7 @@ def init_db(
     con = connect(path)
     con.executescript(SCHEMA_FILE.read_text(encoding="utf-8"))
     _ensure_columns(con)
+    _ensure_indexes(con)           # after columns exist (some indexes depend on them)
     _sync_catalog_from_seed(con)   # pull updated tests/ranges into existing installs
     # seed default settings (only missing keys)
     for k, v in DEFAULT_SETTINGS.items():
@@ -313,6 +315,28 @@ def _ensure_columns(con: sqlite3.Connection) -> None:
                 con.execute(f'ALTER TABLE "{table}" ADD COLUMN {name} {decl}')
 
 
+def _ensure_indexes(con: sqlite3.Connection) -> None:
+    """Create hot-path indexes (some depend on post-v1 columns, so this runs after
+    _ensure_columns) and the unique lab_no guard. Each is independent + guarded so
+    a pre-existing duplicate lab_no can't block startup."""
+    for ddl in (
+        "CREATE INDEX IF NOT EXISTS ix_patients_tel ON patients(telephone)",
+        "CREATE INDEX IF NOT EXISTS ix_patients_mr ON patients(mr_no)",
+        "CREATE INDEX IF NOT EXISTS ix_items_test ON receipt_items(test_id)",
+        "CREATE INDEX IF NOT EXISTS ix_results_param ON results(parameter_id)",
+        "CREATE INDEX IF NOT EXISTS ix_expenses_date ON expenses(date)",
+        "CREATE INDEX IF NOT EXISTS ix_ledger_date ON ledger(date)",
+        "CREATE INDEX IF NOT EXISTS ix_audit_at ON audit_log(at)",
+        # one lab number can never be issued twice (guards the daily-serial race)
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_receipts_labno ON receipts(lab_no) "
+        "WHERE lab_no IS NOT NULL",
+    ):
+        try:
+            con.execute(ddl)
+        except sqlite3.OperationalError:
+            pass   # e.g. duplicate lab_no already present on a legacy DB
+
+
 def get_setting(con: sqlite3.Connection, key: str, default: str = "") -> str:
     row = con.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
     return row[0] if row and row[0] is not None else default
@@ -385,6 +409,78 @@ def verify_audit_chain(con: sqlite3.Connection):
             return False, row["id"]
         prev = row["hash"]
     return True, None
+
+
+def rechain_audit(con: sqlite3.Connection) -> None:
+    """Recompute the rolling hash chain over all current rows. Used after an
+    authorised purge (Clear old logs) so verify_audit_chain stays valid instead of
+    reporting tampering at the new first row."""
+    rows = con.execute(
+        "SELECT id, at, username, action, detail FROM audit_log ORDER BY id"
+    ).fetchall()
+    prev = ""
+    for r in rows:
+        h = hashlib.sha256(
+            "|".join([prev, r["at"] or "", r["username"] or "",
+                      r["action"] or "", r["detail"] or ""]).encode("utf-8")
+        ).hexdigest()
+        con.execute("UPDATE audit_log SET hash=? WHERE id=?", (h, r["id"]))
+        prev = h
+    con.commit()
+
+
+# ---------------------------------------------------------------------------
+# Backups — SQLite online backup (safe while the app is running)
+# ---------------------------------------------------------------------------
+def backup_db(reason: str = "auto", keep: int = 14) -> Path | None:
+    """Write a timestamped 0600 copy of the live DB to <data>/backups and prune to
+    the newest `keep`. Returns the path, or None on failure / no DB yet."""
+    src = db_path()
+    if not src.exists():
+        return None
+    bdir = data_dir() / "backups"
+    bdir.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(bdir, 0o700)
+    except OSError:
+        pass
+    dest = bdir / f"labdesk-{time.strftime('%Y%m%d-%H%M%S')}-{reason}.sqlite"
+    try:
+        sc = sqlite3.connect(src)
+        dc = sqlite3.connect(dest)
+        with dc:
+            sc.backup(dc)
+        sc.close(); dc.close()
+        os.chmod(dest, 0o600)
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        for old in sorted(bdir.glob("labdesk-*.sqlite"))[:-keep]:
+            old.unlink()
+    except Exception:  # noqa: BLE001
+        pass
+    return dest
+
+
+def restore_db(path: str) -> bool:
+    """Replace the live DB with a backup file (caller should close connections and
+    restart the app afterwards). A safety copy of the current DB is taken first."""
+    src = Path(path)
+    if not src.exists():
+        return False
+    try:
+        cur = db_path()
+        if cur.exists():
+            shutil.copyfile(cur, str(cur) + ".pre-restore")
+        shutil.copyfile(src, cur)
+        for sidecar in ("-wal", "-shm"):
+            p = Path(str(cur) + sidecar)
+            if p.exists():
+                p.unlink()
+        os.chmod(cur, 0o600)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def lock_remaining(con: sqlite3.Connection, username: str) -> int:

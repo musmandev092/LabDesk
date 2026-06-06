@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
 
 from PySide6.QtWidgets import QSizePolicy
 
+import sqlite3
+
 from .widgets import h1, h2, muted, card, money, page_header, field_label
 from . import tasks, wa
 from .. import db, report, roles, whatsapp
@@ -448,63 +450,78 @@ class ReceptionPage(QWidget):
             if m:
                 pid = m["id"]
         new_patient = not pid
-        if pid:  # returning patient → reuse row + its permanent MR, refresh details
-            row = c.execute("SELECT mr_no FROM patients WHERE id=?", (pid,)).fetchone()
-            mr_no = mr_no or (row["mr_no"] if row else "") or f"MR{pid:05d}"
-            c.execute(
-                "UPDATE patients SET title=?,name=?,age=?,age_desc=?,sex=?,telephone=?,"
-                "address=?,mr_no=? WHERE id=?",
-                (title, name, age, age_desc, sex, tel, addr, mr_no, pid),
-            )
-        else:    # new patient
-            pid = c.execute(
-                "INSERT INTO patients(title,mr_no,name,age,age_desc,sex,telephone,address) "
-                "VALUES (?,?,?,?,?,?,?,?)",
-                (title, mr_no, name, age, age_desc, sex, tel, addr),
-            ).lastrowid
-            if not mr_no:
-                mr_no = f"MR{pid:05d}"
-                c.execute("UPDATE patients SET mr_no=? WHERE id=?", (mr_no, pid))
         doc_id = self.doctor.currentData()
         doc_name = self.doctor.currentText().strip()
         # compute totals directly (don't depend on cached recompute state)
-        sub = sum(c["charge"] for c in self.cart)
+        sub = sum(it["charge"] for it in self.cart)
         disc_pct = self.discount.value()
         net = max(0.0, sub - sub * disc_pct / 100.0)
         paid = self.paid.value()
         due = max(0.0, net - paid)
         prefix = db.get_setting(c, "lab_no_prefix", "LAB")
-        rid = c.execute(
-            """INSERT INTO receipts
-               (patient_id,doctor_id,title,mr_no,patient_name,age,age_desc,sex,telephone,address,
-                dr_name,specimen,subtotal,discount_pct,less,net_amount,paid,due,
-                status,created_by,received_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'))""",
-            (pid, doc_id, title, mr_no, name, age, age_desc,
-             sex, tel, addr,
-             doc_name, specimen, sub, disc_pct,
-             0, net, paid, due, "pending", self.user["username"]),
-        ).lastrowid
-        # number as PREFIX_YYYY-MM-DD_NNN with a daily-resetting sequence, e.g. LAB_2026-06-06_006
         datestr = c.execute("SELECT strftime('%Y-%m-%d','now','localtime')").fetchone()[0]
-        seq = c.execute(
-            "SELECT COUNT(*) FROM receipts WHERE date(received_at)=date('now','localtime')"
-        ).fetchone()[0]
-        lab_no = f"{prefix}_{datestr}_{seq:03d}"
-        c.execute("UPDATE receipts SET lab_no=?, case_no=? WHERE id=?", (lab_no, lab_no, rid))
-        for item in self.cart:
-            c.execute(
-                "INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) VALUES (?,?,?,?)",
-                (rid, item["test_id"], item["name"], item["charge"]),
-            )
-        # ledger income entry
-        if paid:
-            c.execute(
-                "INSERT INTO ledger(kind,ref_id,detail,credit,date) "
-                "VALUES ('income',?,?,?,date('now','localtime'))",
-                (rid, f"Receipt {lab_no} — {name}", paid),
-            )
-        c.commit()
+        # The whole write is one transaction: if anything fails we roll back so a
+        # half-saved bill can never exist (nothing charged), and we surface it.
+        try:
+            if pid:  # returning patient → reuse row + permanent MR, refresh details
+                row = c.execute("SELECT mr_no FROM patients WHERE id=?", (pid,)).fetchone()
+                mr_no = mr_no or (row["mr_no"] if row else "") or f"MR{pid:05d}"
+                c.execute(
+                    "UPDATE patients SET title=?,name=?,age=?,age_desc=?,sex=?,telephone=?,"
+                    "address=?,mr_no=? WHERE id=?",
+                    (title, name, age, age_desc, sex, tel, addr, mr_no, pid))
+            else:    # new patient
+                pid = c.execute(
+                    "INSERT INTO patients(title,mr_no,name,age,age_desc,sex,telephone,address) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (title, mr_no, name, age, age_desc, sex, tel, addr)).lastrowid
+                if not mr_no:
+                    mr_no = f"MR{pid:05d}"
+                    c.execute("UPDATE patients SET mr_no=? WHERE id=?", (mr_no, pid))
+            rid = c.execute(
+                """INSERT INTO receipts
+                   (patient_id,doctor_id,title,mr_no,patient_name,age,age_desc,sex,telephone,address,
+                    dr_name,specimen,subtotal,discount_pct,less,net_amount,paid,due,
+                    status,created_by,received_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'))""",
+                (pid, doc_id, title, mr_no, name, age, age_desc, sex, tel, addr,
+                 doc_name, specimen, sub, disc_pct, 0, net, paid, due,
+                 "pending", self.user["username"])).lastrowid
+            # atomic lab number: try the next daily serial, retry on the UNIQUE guard
+            # (ux_receipts_labno) so two terminals can't mint the same number.
+            base = c.execute(
+                "SELECT COUNT(*) FROM receipts WHERE date(received_at)=date('now','localtime')"
+            ).fetchone()[0]
+            lab_no = None
+            for bump in range(0, 500):
+                cand = f"{prefix}_{datestr}_{base + bump:03d}"
+                try:
+                    c.execute("UPDATE receipts SET lab_no=?, case_no=? WHERE id=?", (cand, cand, rid))
+                    lab_no = cand
+                    break
+                except sqlite3.IntegrityError:
+                    continue
+            if lab_no is None:
+                raise RuntimeError("could not allocate a unique lab number")
+            for item in self.cart:
+                c.execute(
+                    "INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) VALUES (?,?,?,?)",
+                    (rid, item["test_id"], item["name"], item["charge"]))
+            if paid:
+                c.execute(
+                    "INSERT INTO ledger(kind,ref_id,detail,credit,date) "
+                    "VALUES ('income',?,?,?,date('now','localtime'))",
+                    (rid, f"Receipt {lab_no} — {name}", paid))
+            c.commit()
+        except Exception as e:  # noqa: BLE001
+            try:
+                c.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+            QMessageBox.warning(self, "Save failed",
+                                "The receipt was NOT saved — nothing has been charged. "
+                                f"Please try again.\n\n{e}")
+            return
         self._last_receipt = rid
         db.log_audit(c, self.user["username"],
                      "patient_created" if new_patient else "patient_updated",

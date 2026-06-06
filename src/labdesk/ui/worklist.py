@@ -279,6 +279,18 @@ class WorklistPage(QWidget):
                 grid.addWidget(QLabel(name), row_i, 1)
                 le = QLineEdit(); le.setText(existing.get(p["id"], "") or "")
                 le.setMaximumWidth(160)
+                # live out-of-range cue: red (high) / amber (low) as you type
+
+                def _flagit(text, le=le, ref=ref):
+                    fl = report._flag(text, ref)
+                    if fl and fl[0] == "High":
+                        le.setStyleSheet("color:#dc2626; font-weight:700;")
+                    elif fl and fl[0] == "Low":
+                        le.setStyleSheet("color:#d97706; font-weight:700;")
+                    else:
+                        le.setStyleSheet("")
+                le.textChanged.connect(_flagit)
+                _flagit(le.text())
                 grid.addWidget(le, row_i, 2)
                 grid.addWidget(QLabel(p["units"] or ""), row_i, 3)
                 grid.addWidget(QLabel(ref), row_i, 4)
@@ -308,45 +320,57 @@ class WorklistPage(QWidget):
         c = self.con
         r = c.execute("SELECT sex FROM receipts WHERE id=?", (self.current_receipt,)).fetchone()
         sex = r["sex"]
-        for (item_id, param_id), editor in self._editors.items():
-            value = editor.text().strip()
-            cb = self._show.get((item_id, param_id))
-            hidden = 0 if (cb is None or cb.isChecked()) else 1
-            if param_id is None:
-                # single-line free result
+        try:
+            for (item_id, param_id), editor in self._editors.items():
+                value = editor.text().strip()
+                cb = self._show.get((item_id, param_id))
+                hidden = 0 if (cb is None or cb.isChecked()) else 1
+                if param_id is None:
+                    # single-line free result
+                    c.execute(
+                        "DELETE FROM results WHERE receipt_item_id=? AND parameter_id IS NULL",
+                        (item_id,),
+                    )
+                    c.execute(
+                        "INSERT INTO results(receipt_item_id,parameter_id,seq,part_type,name,value,hidden)"
+                        " VALUES (?,?,?,?,?,?,?)",
+                        (item_id, None, 0, "N", "Result", value, hidden),
+                    )
+                    continue
+                p = c.execute("SELECT * FROM test_parameters WHERE id=?", (param_id,)).fetchone()
+                ref = resolve_ref(p, sex)
                 c.execute(
-                    "DELETE FROM results WHERE receipt_item_id=? AND parameter_id IS NULL",
-                    (item_id,),
+                    """INSERT INTO results
+                       (receipt_item_id,parameter_id,seq,part_type,group_head,name,units,
+                        superscript,ref_text,value,hidden)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                       ON CONFLICT(receipt_item_id,parameter_id) DO UPDATE SET
+                         value=excluded.value, ref_text=excluded.ref_text, hidden=excluded.hidden""",
+                    (item_id, param_id, p["seq"], p["part_type"], p["group_head"], p["name"],
+                     p["units"], p["superscript"], ref, value, hidden),
                 )
-                c.execute(
-                    "INSERT INTO results(receipt_item_id,parameter_id,seq,part_type,name,value,hidden)"
-                    " VALUES (?,?,?,?,?,?,?)",
-                    (item_id, None, 0, "N", "Result", value, hidden),
-                )
-                continue
-            p = c.execute("SELECT * FROM test_parameters WHERE id=?", (param_id,)).fetchone()
-            ref = resolve_ref(p, sex)
+            # per-test remarks
+            for item_id, rem in self._remarks.items():
+                txt = rem.toPlainText().strip()
+                c.execute("UPDATE receipt_items SET remarks=? WHERE id=?", (txt or None, item_id))
+            # also persist continuation/heading lines so the printed report is complete
+            self._snapshot_static_lines(sex)
+            # stamp reported_at on first finalisation so reprints keep the original date
             c.execute(
-                """INSERT INTO results
-                   (receipt_item_id,parameter_id,seq,part_type,group_head,name,units,
-                    superscript,ref_text,value,hidden)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)
-                   ON CONFLICT(receipt_item_id,parameter_id) DO UPDATE SET
-                     value=excluded.value, ref_text=excluded.ref_text, hidden=excluded.hidden""",
-                (item_id, param_id, p["seq"], p["part_type"], p["group_head"], p["name"],
-                 p["units"], p["superscript"], ref, value, hidden),
+                "UPDATE receipts SET status='reported', "
+                "reported_at=datetime('now','localtime') "
+                "WHERE id=? AND status IN ('pending','in_progress')",
+                (self.current_receipt,),
             )
-        # per-test remarks
-        for item_id, rem in self._remarks.items():
-            txt = rem.toPlainText().strip()
-            c.execute("UPDATE receipt_items SET remarks=? WHERE id=?", (txt or None, item_id))
-        # also persist continuation/heading lines so the printed report is complete
-        self._snapshot_static_lines(sex)
-        c.execute(
-            "UPDATE receipts SET status='reported' WHERE id=? AND status IN ('pending','in_progress')",
-            (self.current_receipt,),
-        )
-        c.commit()
+            c.commit()
+        except Exception as e:  # noqa: BLE001
+            try:
+                c.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+            QMessageBox.warning(self, "Save failed",
+                                f"Results were NOT saved — please try again.\n\n{e}")
+            return
         lab_no = c.execute("SELECT lab_no FROM receipts WHERE id=?",
                            (self.current_receipt,)).fetchone()[0]
         db.log_audit(c, self.user["username"], "results_saved", f"{lab_no or self.current_receipt}")

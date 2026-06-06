@@ -119,6 +119,7 @@ class SettingsPage(QWidget):
         col.addWidget(self._text_card("Report footer", REPORT_FIELDS))
         col.addWidget(self._whatsapp_card())
         col.addWidget(self._security_card())
+        col.addWidget(self._backup_card())
         if can(self.user["role"], "manage_users"):
             col.addWidget(self._users_card())
         col.addStretch(1)
@@ -269,9 +270,11 @@ class SettingsPage(QWidget):
     def _users_card(self):
         bar = QHBoxLayout()
         add = QPushButton("+ Add user"); add.clicked.connect(self._add_user)
+        reset = QPushButton("Reset password"); reset.setObjectName("ghost")
+        reset.clicked.connect(self._reset_user_pw)
         disable = QPushButton("Enable / Disable"); disable.setObjectName("ghost")
         disable.clicked.connect(self._toggle_user)
-        bar.addStretch(1); bar.addWidget(add); bar.addWidget(disable)
+        bar.addStretch(1); bar.addWidget(add); bar.addWidget(reset); bar.addWidget(disable)
         barw = QWidget(); barw.setLayout(bar)
         self.users_table = QTableWidget(0, 4)
         self.users_table.setHorizontalHeaderLabels(["Username", "Full name", "Role", "Active"])
@@ -341,6 +344,65 @@ class SettingsPage(QWidget):
                      "user_enabled" if now_active else "user_disabled",
                      (row["username"] if row else str(uid)))
         self.refresh_users()
+
+    def _backup_card(self):
+        now = QPushButton("Back up now"); now.setObjectName("ghost"); now.clicked.connect(self._backup_now)
+        restore = QPushButton("Restore from file…"); restore.setObjectName("ghost")
+        restore.clicked.connect(self._restore_db)
+        row = QHBoxLayout(); row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(now); row.addWidget(restore); row.addStretch(1)
+        w = QWidget(); w.setLayout(row)
+        return card(
+            muted("Automatic timestamped backups run on every launch (kept in the data "
+                  "folder). You can also back up now or restore from a backup file."),
+            w, title="Backup & restore",
+        )
+
+    def _backup_now(self):
+        p = db.backup_db("manual")
+        if p:
+            db.log_audit(self.con, self.user["username"], "backup_created", str(p))
+            QMessageBox.information(self, "Backup", f"Backup saved:\n{p}")
+        else:
+            QMessageBox.warning(self, "Backup", "Could not create a backup.")
+
+    def _restore_db(self):
+        bdir = str(db.data_dir() / "backups")
+        path, _ = QFileDialog.getOpenFileName(self, "Restore from backup", bdir, "SQLite (*.sqlite)")
+        if not path:
+            return
+        if QMessageBox.question(
+            self, "Restore",
+            "This REPLACES the current database with the selected backup (a safety copy of "
+            "the current data is kept). You must close and reopen LabDesk afterwards. Continue?",
+        ) != QMessageBox.Yes:
+            return
+        if db.restore_db(path):
+            db.log_audit(self.con, self.user["username"], "db_restored", path)
+            QMessageBox.information(self, "Restore",
+                                   "Database restored. Please close and reopen LabDesk now.")
+        else:
+            QMessageBox.warning(self, "Restore", "Restore failed (file unreadable?).")
+
+    def _reset_user_pw(self):
+        import secrets as _secrets
+        r = self.users_table.currentRow()
+        if not (0 <= r < len(self._user_ids)):
+            QMessageBox.warning(self, "Reset password", "Select a user first.")
+            return
+        uid = self._user_ids[r]
+        uname = self.con.execute("SELECT username FROM users WHERE id=?", (uid,)).fetchone()[0]
+        temp = "Temp-" + _secrets.token_hex(3)   # e.g. Temp-9af3c1
+        h, salt = db.hash_password(temp)
+        self.con.execute(
+            "UPDATE users SET pass_hash=?, salt=?, must_change_password=1, "
+            "failed_attempts=0, locked_until=NULL WHERE id=?", (h, salt, uid))
+        self.con.commit()
+        db.log_audit(self.con, self.user["username"], "password_reset", uname)
+        QMessageBox.information(
+            self, "Reset password",
+            f"Temporary password for {uname}:\n\n    {temp}\n\n"
+            "They must set a new password at next login.")
 
     def _security_card(self):
         form = self._form()

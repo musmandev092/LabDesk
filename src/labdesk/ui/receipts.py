@@ -151,7 +151,8 @@ class ReceiptsPage(QWidget):
         if st and st != "All":
             sql += " AND status=?"; args.append(st)
         if self.today_only.isChecked():
-            sql += " AND date(received_at)=date('now','localtime')"
+            sql += (" AND received_at >= date('now','localtime')"
+                    " AND received_at < date('now','localtime','+1 day')")
         if self.dues_only.isChecked():
             sql += " AND due>0"
         sql += " ORDER BY id DESC LIMIT 1000"

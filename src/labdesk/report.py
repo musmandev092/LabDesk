@@ -223,7 +223,9 @@ def _patient_pairs(r):
     lab = r["lab_no"] or (r["case_no"] if "case_no" in r.keys() else "")
     age_sex = f"{r['age']} {r['age_desc']} / {r['sex']}"
     received = (r["received_at"] or "")[:16]
-    reported = datetime.now().strftime("%Y-%m-%d %H:%M")
+    # use the stored reporting date so reprints/resends keep the original date
+    rep_raw = (r["reported_at"] if "reported_at" in r.keys() and r["reported_at"] else "")
+    reported = rep_raw[:16] if rep_raw else datetime.now().strftime("%Y-%m-%d %H:%M")
     return [
         ("Patient Name", title + (r["patient_name"] or "")),
         ("Lab No.", lab),
@@ -352,6 +354,64 @@ def _report_section(con, item, sex, receipt) -> str:
     return (f"<div class='title-bar'>{_esc(title)}</div>"
             f"<table class='report'><thead>{thead}</thead><tbody>{''.join(rows)}</tbody></table>"
             f"{remarks}{method}")
+
+
+def _culture_section(con, item) -> str:
+    """Microbiology Culture & Sensitivity block for a culture test."""
+    head = con.execute(
+        "SELECT report_head, method_note FROM tests WHERE id=?", (item["test_id"],)
+    ).fetchone()
+    title = (head["report_head"] if head and head["report_head"] else item["test_name"]).title()
+    cur = con.execute(
+        "SELECT * FROM cultures WHERE receipt_item_id=? ORDER BY id DESC LIMIT 1", (item["id"],)
+    ).fetchone()
+    if not cur:
+        return (f"<div class='title-bar'>{_esc(title)}</div>"
+                "<table class='report'><tbody><tr><td style='color:#999;'>"
+                "<i>No culture result entered.</i></td></tr></tbody></table>")
+    findings = []
+    for label, val in (("Specimen", cur["specimen"]), ("Growth", cur["growth"]),
+                       ("Organism", cur["organism"]), ("Colony count", cur["colony_count"]),
+                       ("Gram stain", cur["gram_stain"]), ("ZN stain", cur["zn_stain"])):
+        if val:
+            findings.append(
+                f"<tr><td class='test' style='width:30%;'>{_esc(label)}</td>"
+                f"<td style='text-align:left;'>{_esc(val)}</td></tr>")
+    findings_tbl = (f"<table class='report'><tbody>{''.join(findings)}</tbody></table>"
+                    if findings else "")
+
+    sens = con.execute(
+        "SELECT antibiotic, result FROM culture_sensitivity WHERE culture_id=? ORDER BY antibiotic",
+        (cur["id"],),
+    ).fetchall()
+    sens_tbl = ""
+    if sens:
+        colour = {"S": GREEN, "I": AMBER, "R": RED}
+        full = {"S": "Sensitive", "I": "Intermediate", "R": "Resistant"}
+        rows = "".join(
+            f"<tr><td class='test' style='text-align:left;'>{_esc(s['antibiotic'])}</td>"
+            f"<td style='color:{colour.get((s['result'] or '').upper(), BODY)};font-weight:700;'>"
+            f"{_esc((s['result'] or '').upper())} — {full.get((s['result'] or '').upper(), '')}</td></tr>"
+            for s in sens
+        )
+        sens_tbl = (
+            "<table class='report' style='margin-top:3mm;'><thead><tr>"
+            "<th class='test'>Antibiotic</th><th>Sensitivity</th></tr></thead>"
+            f"<tbody>{rows}</tbody></table>")
+
+    remarks = ""
+    rk = item.keys()
+    rem_txt = ((item["remarks"] if "remarks" in rk else "") or "").strip() or \
+              ((cur["remarks"] or "").strip() if "remarks" in cur.keys() else "")
+    if rem_txt:
+        remarks = (f"<div class='remarks-box'><b>Remarks:</b> "
+                   f"{_esc(rem_txt).replace(chr(10), '<br>')}</div>")
+    method = ""
+    if head and head["method_note"]:
+        note = re.sub(r"[ \t]{2,}", " ", head["method_note"].replace("\r", "")).strip()
+        method = f"<div class='method'><b>Method / Comments:</b> {_esc(note)}</div>"
+    return (f"<div class='title-bar'>{_esc(title)}</div>"
+            f"{findings_tbl}{sens_tbl}{remarks}{method}")
 
 
 def _signatures(con) -> str:
@@ -528,7 +588,12 @@ def build_report_html(con, receipt_id: int) -> str:
     blocks = []
     for i, it in enumerate(items):
         cls = "section first" if i == 0 else "section"
-        blocks.append(f"<div class='{cls}'>{_report_section(con, it, sex, r)}</div>")
+        tc = con.execute("SELECT is_culture FROM tests WHERE id=?", (it["test_id"],)).fetchone()
+        if tc and tc["is_culture"]:
+            body = _culture_section(con, it)
+        else:
+            body = _report_section(con, it, sex, r)
+        blocks.append(f"<div class='{cls}'>{body}</div>")
     if not blocks:
         blocks.append("<p style='color:#999;'>No tests on this receipt.</p>")
     return _doc(_REPORT_CSS, rhead + rfoot + "".join(blocks))

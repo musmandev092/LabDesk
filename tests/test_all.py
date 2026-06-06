@@ -139,7 +139,7 @@ def _make_receipt(phone, *, sub=1000.0, paid=1000.0, with_results=True, status="
         """INSERT INTO receipts(lab_no,patient_id,patient_name,age,age_desc,sex,telephone,
                                 dr_name,specimen,subtotal,net_amount,paid,due,status,mr_no)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        ("LAB_TEST_001", pid, "Test Patient", 30, "Years", "Male", phone,
+        (f"LAB_TEST_{pid:04d}", pid, "Test Patient", 30, "Years", "Male", phone,
          "Dr. Test", "3cc EDTA", sub, sub, paid, due, status, None),
     ).lastrowid
     item_id = con.execute(
@@ -544,6 +544,51 @@ check(_cap and _cap[0].get("FileName", "").endswith(".pdf")
 # new lab_no format uses hyphenated date (verify the strftime the app uses)
 _ds = con.execute("SELECT strftime('%Y-%m-%d','now','localtime')").fetchone()[0]
 check(len(_ds) == 10 and _ds[4] == "-" and _ds[7] == "-", "lab_no date format is YYYY-MM-DD")
+
+# ---- improvement-pass additions ----
+import os as _os                                                 # noqa: E402
+# unique lab_no guard index exists
+_idx = [r[1] for r in con.execute("PRAGMA index_list('receipts')")]
+check("ux_receipts_labno" in _idx, "unique lab_no index exists (race guard)")
+# hot-path indexes created
+_pidx = [r[1] for r in con.execute("PRAGMA index_list('patients')")]
+check("ix_patients_tel" in _pidx, "patients.telephone index exists")
+# backups
+_bp = db.backup_db("test")
+check(_bp and _os.path.exists(str(_bp)), "backup_db creates a file")
+check(db.restore_db("/no/such/file.sqlite") is False, "restore_db rejects a missing file")
+# audit re-chain after purge
+for _i in range(3):
+    db.log_audit(con, "chainuser", "login", f"chain{_i}")
+con.execute("DELETE FROM audit_log WHERE detail='chain1'"); con.commit()
+_ok, _ = db.verify_audit_chain(con)
+check(not _ok, "deleting a middle row breaks the audit chain")
+db.rechain_audit(con)
+_ok2, _ = db.verify_audit_chain(con)
+check(_ok2, "rechain_audit restores integrity after a purge")
+# report uses the STORED reported_at (stable reprint date)
+con.execute("UPDATE receipts SET reported_at='2026-06-01 09:00' WHERE id=?", (R_VALID,)); con.commit()
+_rh = report.build_report_html(con, R_VALID)
+check("2026-06-01 09:00" in _rh, "report uses stored reported_at, not now()")
+# microbiology culture & sensitivity renders on the report
+_ct = con.execute("SELECT id, name FROM tests WHERE is_culture=1 LIMIT 1").fetchone()
+if _ct:
+    _cpid = con.execute("INSERT INTO patients(name,age,age_desc,sex,telephone) "
+                        "VALUES('Cult Pt',30,'Years','Male','03001234567')").lastrowid
+    _crid = con.execute("INSERT INTO receipts(lab_no,patient_id,patient_name,age,age_desc,sex,"
+                        "status,net_amount,paid,due) VALUES('LAB_CULT_1',?,'Cult Pt',30,'Years',"
+                        "'Male','reported',500,500,0)", (_cpid,)).lastrowid
+    _citem = con.execute("INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) "
+                         "VALUES(?,?,?,500)", (_crid, _ct["id"], _ct["name"])).lastrowid
+    _cid = con.execute("INSERT INTO cultures(receipt_item_id,specimen,growth,organism,gram_stain) "
+                       "VALUES(?,?,?,?,?)", (_citem, "Urine", "Growth present", "E. coli",
+                                            "Gram negative")).lastrowid
+    con.execute("INSERT INTO culture_sensitivity(culture_id,antibiotic,result) VALUES(?,?,?)",
+                (_cid, "Ciprofloxacin", "S"))
+    con.commit()
+    _chtml = report.build_report_html(con, _crid)
+    check("E. coli" in _chtml and "Ciprofloxacin" in _chtml and "Sensitiv" in _chtml,
+          "report renders microbiology culture & sensitivity")
 
 
 # ============================================================================
