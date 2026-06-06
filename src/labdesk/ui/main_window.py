@@ -25,6 +25,7 @@ from .doctors import DoctorsPage
 from .microbiology import MicrobiologyPage
 from .accounts import AccountsPage
 from .settings import SettingsPage
+from .logs import LogsPage
 
 
 NAV = [
@@ -37,6 +38,7 @@ NAV = [
     ("Microbiology", MicrobiologyPage),
     ("Accounts", AccountsPage),
     ("Settings", SettingsPage),
+    ("Logs", LogsPage),
 ]
 
 

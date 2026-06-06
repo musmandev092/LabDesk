@@ -336,19 +336,29 @@ class WorklistPage(QWidget):
             (self.current_receipt,),
         )
         c.commit()
+        lab_no = c.execute("SELECT lab_no FROM receipts WHERE id=?",
+                           (self.current_receipt,)).fetchone()[0]
+        db.log_audit(c, self.user["username"], "results_saved", f"{lab_no or self.current_receipt}")
         QMessageBox.information(self, "Results", "Results saved.")
         # optional auto-send on WhatsApp — runs in the background, reports when done
         if db.get_setting(c, "whatsapp_auto", "0") == "1":
-            wa.send_async(self, c, "report", self.current_receipt,
-                          clicked=self.wa_btn, lock_buttons=(self.wa_btn,))
+            rid = self.current_receipt
+            wa.send_async(self, c, "report", rid, clicked=self.wa_btn, lock_buttons=(self.wa_btn,),
+                          on_done=lambda ok, m: db.log_audit(
+                              self.con, self.user["username"], "whatsapp_report",
+                              ("sent" if ok else "failed") + f" (auto) — {lab_no or rid}"))
         self.refresh_list()
 
     def send_whatsapp(self):
         if self.current_receipt is None:
             return
+        rid = self.current_receipt
         # background send — keeps the window responsive
-        wa.send_async(self, self.con, "report", self.current_receipt,
-                      clicked=self.wa_btn, lock_buttons=(self.wa_btn,))
+        wa.send_async(self, self.con, "report", rid,
+                      clicked=self.wa_btn, lock_buttons=(self.wa_btn,),
+                      on_done=lambda ok, m: db.log_audit(
+                          self.con, self.user["username"], "whatsapp_report",
+                          ("sent" if ok else "failed") + f" — receipt {rid}"))
 
     def _snapshot_static_lines(self, sex):
         """Persist H/L/continuation lines (no editor) so reports render fully."""

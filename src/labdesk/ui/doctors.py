@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 )
 
 from .widgets import h1, muted, page_header
+from .. import db
 
 
 class DoctorDialog(QDialog):
@@ -56,6 +57,7 @@ class DoctorsPage(QWidget):
     def __init__(self, con, user):
         super().__init__()
         self.con = con
+        self.user = user
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(12)
@@ -120,7 +122,9 @@ class DoctorsPage(QWidget):
                 "INSERT INTO doctors(name,hospital,area,tel,mobile) VALUES (?,?,?,?,?)",
                 (v["name"], v["hospital"], v["area"], v["tel"], v["mobile"]),
             )
-            self.con.commit(); self.refresh()
+            self.con.commit()
+            db.log_audit(self.con, self.user["username"], "doctor_created", v["name"])
+            self.refresh()
 
     def edit(self):
         did = self._selected_id()
@@ -137,12 +141,18 @@ class DoctorsPage(QWidget):
                 "UPDATE doctors SET name=?,hospital=?,area=?,tel=?,mobile=? WHERE id=?",
                 (v["name"], v["hospital"], v["area"], v["tel"], v["mobile"], did),
             )
-            self.con.commit(); self.refresh()
+            self.con.commit()
+            db.log_audit(self.con, self.user["username"], "doctor_updated", v["name"])
+            self.refresh()
 
     def delete(self):
         did = self._selected_id()
         if did is None:
             return
         if QMessageBox.question(self, "Delete", "Delete this doctor?") == QMessageBox.Yes:
+            row = self.con.execute("SELECT name FROM doctors WHERE id=?", (did,)).fetchone()
             self.con.execute("UPDATE doctors SET active=0 WHERE id=?", (did,))
-            self.con.commit(); self.refresh()
+            self.con.commit()
+            db.log_audit(self.con, self.user["username"], "doctor_deleted",
+                         (row["name"] if row else str(did)))
+            self.refresh()

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 
 from .widgets import h1, muted, page_header
 from . import tasks
+from .. import db
 from ..constants import SPECIMEN_PRESETS
 from ..roles import can
 
@@ -169,7 +170,9 @@ class CatalogPage(QWidget):
                 (v["name"], v["charges"], v["category"], v["sample_required"],
                  v["report_head"], v["method_note"]),
             )
-            self.con.commit(); self.refresh()
+            self.con.commit()
+            db.log_audit(self.con, self.user["username"], "test_created", v["name"])
+            self.refresh()
 
     def edit(self):
         if not can(self.user["role"], "edit_catalog"):
@@ -187,4 +190,6 @@ class CatalogPage(QWidget):
                 (v["name"], v["charges"], v["category"], v["sample_required"],
                  v["report_head"], v["method_note"], tid),
             )
-            self.con.commit(); self.refresh()
+            self.con.commit()
+            db.log_audit(self.con, self.user["username"], "test_updated", v["name"])
+            self.refresh()

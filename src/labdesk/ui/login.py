@@ -74,9 +74,12 @@ class LoginDialog(QDialog):
         p = self.password.text()
         user = db.verify_user(self.con, u, p)
         if user:
+            db.log_audit(self.con, user["username"], "login", "signed in")
             self.user = user
             self.accept()
         else:
+            db.log_audit(self.con, u or "(blank)", "login_failed",
+                         "wrong username or password")
             QMessageBox.warning(self, "Sign in", "Invalid username or password.")
             self.password.clear()
             self.password.setFocus()

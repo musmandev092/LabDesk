@@ -18,13 +18,14 @@ ROLES = {
 PAGE_MIN_LEVEL = {
     "Dashboard": 1,
     "Reception / Billing": 2,
-    "Receipts": 2,
+    "Receipts / Reports": 2,
     "Test Catalog": 2,            # visible to most; editing gated separately
     "Doctors": 2,
     "Worklist / Results": 3,
     "Microbiology": 3,
     "Accounts": 4,
     "Settings": 4,
+    "Logs": 5,                    # audit trail — admin only
 }
 
 # capability -> minimum level

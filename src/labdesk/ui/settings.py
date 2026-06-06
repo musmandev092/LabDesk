@@ -316,7 +316,10 @@ class SettingsPage(QWidget):
             self.con.execute(
                 "INSERT INTO users(username,full_name,pass_hash,salt,role) VALUES (?,?,?,?,?)",
                 (v["username"], v["full_name"], h, salt, v["role"]))
-            self.con.commit(); self.refresh_users()
+            self.con.commit()
+            db.log_audit(self.con, self.user["username"], "user_created",
+                         f"{v['username']} ({role_label(v['role'])})")
+            self.refresh_users()
 
     def _toggle_user(self):
         r = self.users_table.currentRow()
@@ -326,8 +329,14 @@ class SettingsPage(QWidget):
         if uid == self.user["id"]:
             QMessageBox.warning(self, "User", "You cannot disable your own account.")
             return
+        row = self.con.execute("SELECT username, active FROM users WHERE id=?", (uid,)).fetchone()
         self.con.execute("UPDATE users SET active = 1 - active WHERE id=?", (uid,))
-        self.con.commit(); self.refresh_users()
+        self.con.commit()
+        now_active = 0 if (row and row["active"]) else 1
+        db.log_audit(self.con, self.user["username"],
+                     "user_enabled" if now_active else "user_disabled",
+                     (row["username"] if row else str(uid)))
+        self.refresh_users()
 
     def _security_card(self):
         form = self._form()
@@ -372,6 +381,7 @@ class SettingsPage(QWidget):
         db.set_setting(self.con, "theme", theme)
         self._apply_theme_preview()
         db.set_setting(self.con, "default_printer", self.printer_combo.currentData() or "")
+        db.log_audit(self.con, self.user["username"], "settings_saved", f"theme={theme}")
         QMessageBox.information(self, "Settings", "Saved.")
 
     def _test_whatsapp(self):
@@ -414,5 +424,6 @@ class SettingsPage(QWidget):
         h, salt = db.hash_password(pw)
         self.con.execute("UPDATE users SET pass_hash=?, salt=? WHERE id=?", (h, salt, self.user["id"]))
         self.con.commit()
+        db.log_audit(self.con, self.user["username"], "password_changed", "own password")
         self.new_pw.clear()
         QMessageBox.information(self, "Password", "Password updated.")

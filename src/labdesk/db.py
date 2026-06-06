@@ -226,6 +226,19 @@ def set_setting(con: sqlite3.Connection, key: str, value: str) -> None:
     con.commit()
 
 
+def log_audit(con: sqlite3.Connection, username: str, action: str, detail: str = "") -> None:
+    """Append one entry to the audit trail (shown on the admin Logs page).
+    Never raises — recording an action must never break the action itself."""
+    try:
+        con.execute(
+            "INSERT INTO audit_log(username, action, detail) VALUES (?,?,?)",
+            ((username or "")[:64], (action or "")[:64], (detail or "")[:500]),
+        )
+        con.commit()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def verify_user(con: sqlite3.Connection, username: str, password: str):
     row = con.execute(
         "SELECT * FROM users WHERE username=? AND active=1", (username,)

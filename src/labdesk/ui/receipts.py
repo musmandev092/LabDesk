@@ -238,7 +238,10 @@ class ReceiptsPage(QWidget):
         clicked = self.wa_rcpt_btn if kind == "receipt" else self.wa_rpt_btn
         # runs on a background thread; disables both WhatsApp buttons until done
         wa.send_async(self, self.con, kind, rid, clicked=clicked,
-                      lock_buttons=(self.wa_rcpt_btn, self.wa_rpt_btn))
+                      lock_buttons=(self.wa_rcpt_btn, self.wa_rpt_btn),
+                      on_done=lambda ok, m: db.log_audit(
+                          self.con, self.user["username"], "whatsapp_" + kind,
+                          ("sent" if ok else "failed") + f" — receipt {rid}"))
 
     def whatsapp_receipt(self):
         self._send_whatsapp("receipt")
@@ -290,4 +293,6 @@ class ReceiptsPage(QWidget):
             (rid, f"Due recovered {r['lab_no']}", r["due"]))
         self.con.execute("UPDATE receipts SET paid=net_amount, due=0 WHERE id=?", (rid,))
         self.con.commit()
+        db.log_audit(self.con, self.user["username"], "due_received",
+                     f"{r['lab_no']} — {money(r['due'], cur)}")
         self.refresh()

@@ -416,6 +416,12 @@ check("remarks" in icols, "receipt_items.remarks column exists")
 check(db.verify_user(con, "admin", "admin") is not None, "admin login works")
 check(db.verify_user(con, "admin", "wrong") is None, "wrong password rejected")
 check(db.verify_user(con, "ghost", "x") is None, "unknown user rejected")
+# audit log
+db.log_audit(con, "tester", "login", "unit test entry")
+n = con.execute("SELECT COUNT(*) FROM audit_log WHERE username='tester' AND action='login'").fetchone()[0]
+check(n >= 1, "log_audit writes a row")
+db.log_audit(con, None, None, None)  # must tolerate junk and never raise
+check(True, "log_audit tolerates None args")
 
 
 # ============================================================================
@@ -538,6 +544,14 @@ try:
         check(_wc["n"] == 0 and d3.user is not None, "login: correct password accepts, no warning")
     finally:
         QMessageBox.warning = _orig_warn
+
+    # ---- Logs page constructs and shows the audit rows ----
+    from labdesk.ui.logs import LogsPage
+    lp = LogsPage(con, {"username": "admin", "role": "admin", "id": 1})
+    lp.on_show()
+    check(lp.table.rowCount() >= 1, "LogsPage lists audit entries")
+    lp.search.setText("tester"); lp.refresh()
+    check(lp.table.rowCount() >= 1, "LogsPage search filters")
 except Exception as e:  # pragma: no cover
     check(False, f"Qt section crashed: {e}")
 
