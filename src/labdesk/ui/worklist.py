@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtWidgets import QSizePolicy
 
 from .widgets import h1, h2, muted, card, money, page_header
-from . import wa
+from . import wa, tasks
 from .. import db, report
 
 
@@ -44,7 +44,7 @@ class WorklistPage(QWidget):
         top = QHBoxLayout()
         self.search = QLineEdit(); self.search.setPlaceholderText("Search patient / lab no…")
         self.search.setMinimumHeight(40)
-        self.search.textChanged.connect(self.refresh_list)
+        self.search.textChanged.connect(tasks.debounce(self, self.refresh_list))
         self.status_filter = QComboBox()
         self.status_filter.setMinimumHeight(40)
         for value, label in [("All", "All"), ("pending", "Pending"),
@@ -375,11 +375,36 @@ class WorklistPage(QWidget):
                     )
 
     def print_report(self):
-        if self.current_receipt is not None:
-            report.print_report(self.con, self.current_receipt, self)
+        if self.current_receipt is None:
+            return
+        rid = self.current_receipt
+        printer = db.get_setting(self.con, "default_printer", "")
+
+        def done(ok, result):
+            if not ok:
+                QMessageBox.warning(self, "Print", f"Could not prepare the report:\n{result}")
+                return
+            report.print_bytes(result, self, "Print Report", printer)
+
+        tasks.run_in_background(self, lambda con: report.build_report_bytes(con, rid), done,
+                                clicked=self.print_btn, busy_text="Preparing…")
 
     def save_pdf(self):
-        if self.current_receipt is not None:
-            path = report.save_report_pdf(self.con, self.current_receipt, self)
-            if path:
+        if self.current_receipt is None:
+            return
+        from PySide6.QtWidgets import QFileDialog
+        rid = self.current_receipt
+        r = self.con.execute("SELECT lab_no FROM receipts WHERE id=?", (rid,)).fetchone()
+        default = f"{(r['lab_no'] if r else 'report')}.pdf"
+        path, _ = QFileDialog.getSaveFileName(self, "Save report PDF", default, "PDF (*.pdf)")
+        if not path:
+            return
+
+        def done(ok, result):
+            if ok:
                 QMessageBox.information(self, "PDF", f"Saved:\n{path}")
+            else:
+                QMessageBox.warning(self, "PDF", f"Could not save the PDF:\n{result}")
+
+        tasks.run_in_background(self, lambda con: report.export_report_pdf(con, rid, path), done,
+                                clicked=self.pdf_btn, busy_text="Saving…")

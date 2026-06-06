@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from .widgets import h1, muted, page_header
+from . import tasks
 from ..constants import SPECIMEN_PRESETS
 from ..roles import can
 
@@ -77,7 +78,7 @@ class CatalogPage(QWidget):
 
         self.search = QLineEdit(); self.search.setPlaceholderText("Search tests by name…")
         self.search.setMinimumHeight(40)
-        self.search.textChanged.connect(self.refresh)
+        self.search.textChanged.connect(tasks.debounce(self, self.refresh))
         lay.addWidget(self.search)
 
         split = QSplitter()

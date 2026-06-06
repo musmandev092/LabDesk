@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from .widgets import h1, muted, page_header, money
-from . import wa
+from . import wa, tasks
 from .. import db, report
 
 STATUS_COLORS = {"pending": "#b9770e", "in_progress": "#0e7c86",
@@ -91,7 +91,7 @@ class ReceiptsPage(QWidget):
         bar = QHBoxLayout()
         self.search = QLineEdit(); self.search.setPlaceholderText("Search patient / lab no / MR no…")
         self.search.setMinimumHeight(40)
-        self.search.textChanged.connect(self.refresh)
+        self.search.textChanged.connect(tasks.debounce(self, self.refresh))
         self.status = QComboBox(); self.status.setMinimumHeight(40)
         for v, lbl in [("All", "All status"), ("pending", "Pending"), ("in_progress", "In Progress"),
                        ("reported", "Reported"), ("delivered", "Delivered")]:
@@ -205,20 +205,25 @@ class ReceiptsPage(QWidget):
 
     # ---------------------------------------------------------------
     def _preview(self, kind):
-        """kind: 'report' or 'receipt'."""
+        """kind: 'report' or 'receipt'. Builds the PDF off the UI thread, then
+        opens the preview dialog when it's ready (window stays responsive)."""
         rid = self._selected_id()
         if rid is None:
             return
-        try:
-            tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False); tmp.close()
-            if kind == "receipt":
-                report.export_receipt_pdf(self.con, rid, tmp.name)
-                _PreviewDialog(tmp.name, self, "Receipt preview").exec()
-            else:
-                report.export_report_pdf(self.con, rid, tmp.name)
-                _PreviewDialog(tmp.name, self, "Report preview").exec()
-        except Exception as e:  # noqa: BLE001
-            QMessageBox.warning(self, "Preview", f"Could not build the preview:\n{e}")
+        clicked = self.prev_rcpt_btn if kind == "receipt" else self.prev_rpt_btn
+        title = "Receipt preview" if kind == "receipt" else "Report preview"
+        build = report.build_receipt_bytes if kind == "receipt" else report.build_report_bytes
+
+        def done(ok, result):
+            if not ok:
+                QMessageBox.warning(self, "Preview", f"Could not build the preview:\n{result}")
+                return
+            tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+            tmp.write(result); tmp.close()
+            _PreviewDialog(tmp.name, self, title).exec()
+
+        tasks.run_in_background(self, lambda con: build(con, rid), done,
+                                clicked=clicked, busy_text="Opening…")
 
     def preview(self):
         self._preview("report")
@@ -241,15 +246,30 @@ class ReceiptsPage(QWidget):
     def whatsapp_report(self):
         self._send_whatsapp("report")
 
-    def reprint(self):
+    def _print(self, kind):
+        """Build the PDF off the UI thread, then print on the UI thread."""
         rid = self._selected_id()
-        if rid is not None:
-            report.print_receipt(self.con, rid, self)
+        if rid is None:
+            return
+        clicked = self.print_rcpt_btn if kind == "receipt" else self.print_rpt_btn
+        title = "Print Receipt" if kind == "receipt" else "Print Report"
+        build = report.build_receipt_bytes if kind == "receipt" else report.build_report_bytes
+        printer = db.get_setting(self.con, "default_printer", "")
+
+        def done(ok, result):
+            if not ok:
+                QMessageBox.warning(self, "Print", f"Could not prepare the document:\n{result}")
+                return
+            report.print_bytes(result, self, title, printer)
+
+        tasks.run_in_background(self, lambda con: build(con, rid), done,
+                                clicked=clicked, busy_text="Preparing…")
+
+    def reprint(self):
+        self._print("receipt")
 
     def print_report(self):
-        rid = self._selected_id()
-        if rid is not None:
-            report.print_report(self.con, rid, self)
+        self._print("report")
 
     def receive_due(self):
         rid = self._selected_id()

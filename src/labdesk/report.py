@@ -616,17 +616,47 @@ def export_receipt_pdf(con, receipt_id: int, path: str) -> None:
     Path(path).write_bytes(_pdf_bytes(build_receipt_html(con, receipt_id)))
 
 
+# Build the PDF bytes — the slow (~1-2s) WeasyPrint step. These are safe to run
+# on a background thread (see ui/tasks.py); the resulting bytes are then printed
+# or previewed on the UI thread.
+def build_report_bytes(con, receipt_id: int) -> bytes:
+    return _pdf_bytes(build_report_html(con, receipt_id))
+
+
+def build_receipt_bytes(con, receipt_id: int) -> bytes:
+    return _pdf_bytes(build_receipt_html(con, receipt_id))
+
+
+def build_test_page_bytes(printer_name: str = "") -> bytes:
+    """A small printer-test page, as PDF bytes."""
+    when = datetime.now().strftime("%d %b %Y %H:%M")
+    target = printer_name or "Ask each time (print dialog)"
+    body = (
+        f"<div style='border:2px solid #005f73;border-radius:8px;padding:24px;margin:24px;'>"
+        f"<h1 style='color:#005f73;margin:0 0 8px;'>LabDesk — Printer Test</h1>"
+        f"<p style='font-size:12pt;'>If you can read this, your printer is working.</p>"
+        f"<p style='color:#64748b;'>Printer: <b>{_esc(target)}</b><br>{_esc(when)}</p>"
+        f"<p style='color:#005f73;font-size:13pt;font-weight:700;'>✓ ↑ ↓ Rs. 1,234.50</p>"
+        f"</div>"
+    )
+    return _pdf_bytes(_doc("body{font-family:'Inter',sans-serif;color:#1e293b;}", body))
+
+
 # Cap the raster DPI when sending to a hardware printer. At QPrinter's native
 # 1200 dpi an A4 page is ~10000x14000 px (~7 MB JPEG) — printing to a PDF
 # printer then yields 5-20 MB files. 200 dpi is crisp for text and ~50x smaller.
 _PRINT_DPI = 200
 
 
-def _print_pdf(pdf: bytes, parent, title: str, printer_name: str = "") -> None:
-    """Print the document. If `printer_name` is set (a configured default
-    printer), send straight to it — no dialog. Otherwise show the print dialog.
-    Printing *to a PDF file* hands back the WeasyPrint vector PDF (tiny, sharp);
-    a real printer gets each page rasterised at a sane DPI (not QPrinter's 1200)."""
+def print_bytes(pdf: bytes, parent, title: str, printer_name: str = "") -> None:
+    """Print already-built PDF bytes. MUST run on the UI thread (QPrinter/QPainter
+    are not thread-safe) — callers build the bytes on a worker first (ui/tasks.py),
+    then call this in the completion callback.
+
+    If `printer_name` is set (a configured default printer), send straight to it —
+    no dialog. Otherwise show the print dialog. Printing *to a PDF file* hands back
+    the WeasyPrint vector PDF (tiny, sharp); a real printer gets each page
+    rasterised at a sane DPI (not QPrinter's 1200)."""
     from PySide6.QtCore import QSize, QRectF
     from PySide6.QtGui import QPainter, QPageSize
     from PySide6.QtPdf import QPdfDocument
@@ -668,29 +698,20 @@ def _print_pdf(pdf: bytes, parent, title: str, printer_name: str = "") -> None:
 
 
 def print_report(con, receipt_id: int, parent=None) -> None:
-    _print_pdf(_pdf_bytes(build_report_html(con, receipt_id)), parent, "Print Report",
-               db.get_setting(con, "default_printer", ""))
+    """Synchronous convenience (builds + prints on the caller's thread). UI code
+    should build bytes on a worker then call print_bytes — see ui/tasks.py."""
+    print_bytes(build_report_bytes(con, receipt_id), parent, "Print Report",
+                db.get_setting(con, "default_printer", ""))
 
 
 def print_receipt(con, receipt_id: int, parent=None) -> None:
-    _print_pdf(_pdf_bytes(build_receipt_html(con, receipt_id)), parent, "Print Receipt",
-               db.get_setting(con, "default_printer", ""))
+    print_bytes(build_receipt_bytes(con, receipt_id), parent, "Print Receipt",
+                db.get_setting(con, "default_printer", ""))
 
 
 def print_test_page(parent=None, printer_name: str = "") -> None:
-    """Print a small test page to verify the printer works."""
-    when = datetime.now().strftime("%d %b %Y %H:%M")
-    target = printer_name or "Ask each time (print dialog)"
-    body = (
-        f"<div style='border:2px solid #005f73;border-radius:8px;padding:24px;margin:24px;'>"
-        f"<h1 style='color:#005f73;margin:0 0 8px;'>LabDesk — Printer Test</h1>"
-        f"<p style='font-size:12pt;'>If you can read this, your printer is working.</p>"
-        f"<p style='color:#64748b;'>Printer: <b>{_esc(target)}</b><br>{_esc(when)}</p>"
-        f"<p style='color:#005f73;font-size:13pt;font-weight:700;'>✓ ↑ ↓ Rs. 1,234.50</p>"
-        f"</div>"
-    )
-    _print_pdf(_pdf_bytes(_doc("body{font-family:'Inter',sans-serif;color:#1e293b;}", body)),
-               parent, "Print Test Page", printer_name)
+    """Print a small test page to verify the printer works (synchronous)."""
+    print_bytes(build_test_page_bytes(printer_name), parent, "Print Test Page", printer_name)
 
 
 def save_report_pdf(con, receipt_id: int, parent=None) -> str | None:

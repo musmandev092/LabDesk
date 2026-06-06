@@ -66,12 +66,20 @@ def _integrate_appimage(con) -> str | None:
         )
         if not desktop.exists() or desktop.read_text(encoding="utf-8") != entry:
             desktop.write_text(entry, encoding="utf-8")
-        for cmd in (["update-desktop-database", str(apps)],
-                    ["gtk-update-icon-cache", str(Path.home() / ".local/share/icons/hicolor")]):
-            try:
-                subprocess.run(cmd, capture_output=True, timeout=10)
-            except Exception:
-                pass
+        # Refreshing the menu/icon caches can take 1-3s — do it in a daemon thread
+        # so it never delays the first window. It's fire-and-forget (best effort).
+        import threading
+
+        def _refresh_caches():
+            for cmd in (["update-desktop-database", str(apps)],
+                        ["gtk-update-icon-cache",
+                         str(Path.home() / ".local/share/icons/hicolor")]):
+                try:
+                    subprocess.run(cmd, capture_output=True, timeout=10)
+                except Exception:
+                    pass
+
+        threading.Thread(target=_refresh_caches, daemon=True).start()
     except Exception:
         return None
     db.set_setting(con, "installed_version", db.APP_VERSION)
@@ -101,11 +109,26 @@ def run(argv: list[str]) -> int:
             return 0
         app._labdesk_server = server     # keep the listener alive
 
+    # Brief splash so startup (incl. the one-time catalog sync after an update,
+    # ~1s) shows feedback instead of a blank window. Flashes by on normal launches.
+    splash = None
+    if os.environ.get("LABDESK_SELFTEST") != "1" and APP_ICON.exists():
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QPixmap
+        from PySide6.QtWidgets import QSplashScreen
+        pm = QPixmap(str(APP_ICON)).scaled(220, 220, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        splash = QSplashScreen(pm)
+        splash.showMessage("Starting LabDesk…", Qt.AlignHCenter | Qt.AlignBottom, Qt.gray)
+        splash.show()
+        app.processEvents()
+
     con = db.init_db()
 
     # First-run / update: integrate into the desktop (menu entry + logo) and
     # show a one-time "installed" / "updated" notice when run as an AppImage.
     notice = _integrate_appimage(con)
+    if splash is not None:
+        splash.close()
     if notice and os.environ.get("LABDESK_SELFTEST") != "1":
         QMessageBox.information(None, "LabDesk", notice)
 

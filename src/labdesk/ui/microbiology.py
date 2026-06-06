@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtWidgets import QSizePolicy
 
 from .widgets import h1, h2, muted, card, page_header
+from . import tasks
 
 
 class MicrobiologyPage(QWidget):
@@ -31,7 +32,7 @@ class MicrobiologyPage(QWidget):
         # left: culture orders
         left = QWidget(); ll = QVBoxLayout(left)
         self.search = QLineEdit(); self.search.setPlaceholderText("Search patient / lab no…")
-        self.search.textChanged.connect(self.refresh_list)
+        self.search.textChanged.connect(tasks.debounce(self, self.refresh_list))
         ll.addWidget(self.search)
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Lab No", "Patient", "Test"])

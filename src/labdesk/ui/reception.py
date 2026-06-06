@@ -12,10 +12,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtWidgets import QSizePolicy
 
 from .widgets import h1, h2, muted, card, money, page_header, field_label
-from .. import db
+from . import tasks
+from .. import db, report, roles
 from ..constants import TITLES, AGE_UNITS, SEXES, SPECIMEN_PRESETS, normalize_phone
-from ..report import print_receipt
-from .. import roles
 
 
 def _clean_specimen(s: str) -> str:
@@ -85,7 +84,7 @@ class ReceptionPage(QWidget):
         self.find = QLineEdit()
         self.find.setPlaceholderText("🔍  Returning patient? search phone / MR No / name")
         self.find.setClearButtonEnabled(True)
-        self.find.textChanged.connect(self.search_patients)
+        self.find.textChanged.connect(tasks.debounce(self, self.search_patients))
         self.find_results = QListWidget()
         self.find_results.setMaximumHeight(0)
         self.find_results.hide()
@@ -101,7 +100,7 @@ class ReceptionPage(QWidget):
         self.test_search = QLineEdit()
         self.test_search.setPlaceholderText("Search test to add… (type, then double-click)")
         self.test_search.setMinimumHeight(38)
-        self.test_search.textChanged.connect(self.search_tests)
+        self.test_search.textChanged.connect(tasks.debounce(self, self.search_tests))
         self.results = QListWidget()
         self.results.itemActivated.connect(self.add_from_list)
         self.results.itemDoubleClicked.connect(self.add_from_list)
@@ -253,8 +252,8 @@ class ReceptionPage(QWidget):
             self._existing_patient_id = None
             self.linked_lbl.hide()
 
-    def search_patients(self, text):
-        text = text.strip()
+    def search_patients(self, text=None):
+        text = (self.find.text() if text is None else text).strip()
         self.find_results.clear()
         if len(text) < 2:
             self.find_results.hide()
@@ -333,8 +332,8 @@ class ReceptionPage(QWidget):
         elif len(cart_specs) == 1:
             self.specimen.setCurrentText(cart_specs[0])
 
-    def search_tests(self, text):
-        text = text.strip()
+    def search_tests(self, text=None):
+        text = (self.test_search.text() if text is None else text).strip()
         self.results.clear()
         cur = db.get_setting(self.con, "currency", "Rs.")
         if len(text) < 1:
@@ -502,12 +501,20 @@ class ReceptionPage(QWidget):
             )
         c.commit()
         self._last_receipt = rid
-        if do_print:
-            try:
-                print_receipt(self.con, rid, self)
-            except Exception as e:  # printing must never lose the saved data
-                QMessageBox.warning(self, "Print", f"Saved as {lab_no}, but printing failed:\n{e}")
         QMessageBox.information(self, "Saved", f"Receipt {lab_no} saved.")
+        if do_print:
+            # build the receipt PDF off the UI thread, then print — never blocks
+            # the save, and a print failure never loses the saved data.
+            printer = db.get_setting(self.con, "default_printer", "")
+
+            def _printed(ok, result):
+                if ok:
+                    report.print_bytes(result, self, "Print Receipt", printer)
+                else:
+                    QMessageBox.warning(
+                        self, "Print", f"Saved as {lab_no}, but printing failed:\n{result}")
+
+            tasks.run_in_background(self, lambda con: report.build_receipt_bytes(con, rid), _printed)
         self.clear_form()
 
     def clear_form(self):

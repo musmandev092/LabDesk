@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtPrintSupport import QPrinterInfo
 
 from .widgets import h1, muted, card, page_header, field_label
+from . import tasks
 from .. import db
 from .. import report
 from ..roles import ROLES, role_label, can
@@ -186,10 +187,15 @@ class SettingsPage(QWidget):
 
     def _test_printer(self):
         name = self.printer_combo.currentData() or ""
-        try:
-            report.print_test_page(self, name)
-        except Exception as e:  # noqa: BLE001
-            QMessageBox.warning(self, "Printer", f"Could not print:\n{e}")
+
+        def done(ok, result):
+            if ok:
+                report.print_bytes(result, self, "Print Test Page", name)
+            else:
+                QMessageBox.warning(self, "Printer", f"Could not print:\n{result}")
+
+        # build the test page off the UI thread (WeasyPrint), then print
+        tasks.run_in_background(self, lambda con: report.build_test_page_bytes(name), done)
 
     def _whatsapp_card(self):
         form = self._form()
