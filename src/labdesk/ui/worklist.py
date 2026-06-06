@@ -119,9 +119,14 @@ class WorklistPage(QWidget):
 
     def clear_selection(self):
         """Deselect the current receipt and reset the right-hand panel."""
-        self.current_receipt = None
+        # block signals while clearing — otherwise clearSelection() fires
+        # itemSelectionChanged -> load_receipt while currentRow() is still the old
+        # row, which would re-select the receipt we're trying to clear.
+        self.table.blockSignals(True)
         self.table.clearSelection()
         self.table.setCurrentCell(-1, -1)
+        self.table.blockSignals(False)
+        self.current_receipt = None
         self.header.setText("Select a receipt")
         self.empty_hint.show()
         while self.entry_layout.count():
@@ -141,7 +146,8 @@ class WorklistPage(QWidget):
     def refresh_list(self):
         q = f"%{self.search.text().strip()}%"
         st = self.status_filter.currentData() or "All"
-        sql = ("SELECT * FROM receipts WHERE (patient_name LIKE ? OR lab_no LIKE ?)")
+        sql = ("SELECT * FROM receipts WHERE (COALESCE(patient_name,'') LIKE ? "
+               "OR COALESCE(lab_no,'') LIKE ?)")
         args = [q, q]
         if st != "All":
             sql += " AND status=?"; args.append(st)
@@ -165,7 +171,12 @@ class WorklistPage(QWidget):
             self.table.setItem(i, 3, st_item)
 
     def _selected_id(self):
-        r = self.table.currentRow()
+        # derive from the actual selection (NOT currentRow) so a deselect doesn't
+        # leave a stale receipt loaded
+        sel = self.table.selectionModel().selectedRows()
+        if not sel:
+            return None
+        r = sel[0].row()
         return self._ids[r] if 0 <= r < len(self._ids) else None
 
     # ---------------------------------------------------------------

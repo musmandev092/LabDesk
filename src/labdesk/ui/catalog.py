@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QComboBox, QPlainTextEdit, QLabel, QMessageBox, QSizePolicy,
 )
 
-from .widgets import h1, muted, page_header
+from .widgets import h1, muted, page_header, like_term
 from . import tasks
 from .. import db
 from ..constants import SPECIMEN_PRESETS
@@ -115,9 +115,10 @@ class CatalogPage(QWidget):
         self.refresh()
 
     def refresh(self):
-        q = f"%{self.search.text().strip()}%"
+        q = like_term(self.search.text())
         rows = self.con.execute(
-            "SELECT * FROM tests WHERE active=1 AND name LIKE ? ORDER BY name LIMIT 1000",
+            "SELECT * FROM tests WHERE active=1 AND name LIKE ? ESCAPE '\\' "
+            "ORDER BY name LIMIT 1000",
             (q,),
         ).fetchall()
         total = self.con.execute("SELECT COUNT(*) FROM tests WHERE active=1").fetchone()[0]
@@ -184,6 +185,8 @@ class CatalogPage(QWidget):
         d = TestDialog(self, row)
         if d.exec() == QDialog.Accepted:
             v = d.values()
+            if not v["name"]:
+                return                       # never blank a test's name (matches add())
             self.con.execute(
                 "UPDATE tests SET name=?,charges=?,category=?,sample_required=?,"
                 "report_head=?,method_note=? WHERE id=?",

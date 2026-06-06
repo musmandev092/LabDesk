@@ -508,6 +508,27 @@ _cap = _wa._caption(con, "whatsapp_report_caption", "fb", lab="L")
 check(_cap == "{lab.__class__}", "format-string injection blocked (template kept literal)")
 db.set_setting(con, "whatsapp_report_caption", "")
 
+# ---- regressions found by the GUI test fleet (run 2) ----
+from labdesk.ui.widgets import money as _money, like_term as _lt   # noqa: E402
+eq(_money(-0.0), "Rs. 0", "money(-0.0) -> 'Rs. 0' (no '-0')")
+eq(_money(0.0), "Rs. 0", "money(0) -> 'Rs. 0'")
+check(_money(-5).startswith("- Rs."), "money negative still formats")
+eq(_lt("_"), "%\\_%", "like_term escapes underscore")
+eq(_lt("%"), "%\\%%", "like_term escapes percent")
+# catalog: a literal '_' search must NOT match the whole catalog
+_nall = con.execute("SELECT COUNT(*) FROM tests WHERE active=1").fetchone()[0]
+_nund = con.execute("SELECT COUNT(*) FROM tests WHERE active=1 AND name LIKE ? ESCAPE '\\'",
+                    (_lt("_"),)).fetchone()[0]
+check(_nall > 100 and _nund < _nall, "catalog: literal '_' search no longer returns everything")
+# a receipt with NULL patient_name AND NULL lab_no still appears on an empty search (COALESCE)
+con.execute("INSERT INTO receipts(lab_no,patient_name,status,net_amount,paid,due) "
+            "VALUES(NULL,NULL,'reported',0,0,0)")
+con.commit()
+_tot = con.execute("SELECT COUNT(*) FROM receipts").fetchone()[0]
+_vis = con.execute("SELECT COUNT(*) FROM receipts WHERE (COALESCE(patient_name,'') LIKE '%' "
+                   "OR COALESCE(lab_no,'') LIKE '%')").fetchone()[0]
+check(_vis == _tot, "NULL name/lab_no receipt visible on empty search (COALESCE)")
+
 
 # ============================================================================
 # 11b) Themes / caption templates / send_text / timeout / new settings
@@ -650,6 +671,31 @@ try:
     check(getattr(mp, "user", None) is _u, "MicrobiologyPage stores self.user")
     ap = AccountsPage(con, _u)
     check(getattr(ap, "user", None) is not None, "AccountsPage has self.user")
+
+    # ---- regressions found by the GUI test fleet ----
+    # worklist: clearing the selection must NOT re-select the receipt (signal reentrancy)
+    from labdesk.ui.worklist import WorklistPage
+    wp = WorklistPage(con, _u)
+    wp.status_filter.setCurrentIndex(0)   # All
+    wp.refresh_list()
+    if R_VALID in getattr(wp, "_ids", []):
+        wp.table.selectRow(wp._ids.index(R_VALID)); app.processEvents()
+        check(wp.current_receipt == R_VALID, "worklist: selecting a row loads it")
+        wp.clear_selection(); app.processEvents()
+        check(wp.current_receipt is None,
+              "worklist: clear_selection clears current_receipt (no signal reentrancy)")
+    # microbiology: clear_selection resets current_item
+    mp.current_item = 999999
+    mp.clear_selection()
+    check(mp.current_item is None, "microbiology: clear_selection clears current_item")
+    # receipts: deselecting a row yields no id (buttons disable), not a stale one
+    from labdesk.ui.receipts import ReceiptsPage
+    rp2 = ReceiptsPage(con, _u); rp2.on_show()
+    if rp2._ids:
+        rp2.table.selectRow(0); app.processEvents()
+        check(rp2._selected_id() is not None, "receipts: selected row gives an id")
+        rp2.table.clearSelection(); app.processEvents()
+        check(rp2._selected_id() is None, "receipts: deselect -> _selected_id None (stale-action fix)")
 except Exception as e:  # pragma: no cover
     check(False, f"Qt section crashed: {e}")
 

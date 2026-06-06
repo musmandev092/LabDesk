@@ -103,8 +103,12 @@ class MicrobiologyPage(QWidget):
         return super().eventFilter(obj, event)
 
     def clear_selection(self):
-        self.current_item = None
+        # block signals so clearSelection() doesn't re-fire load_item (which would
+        # re-set current_item to the old row while currentRow() is still set).
+        self.table.blockSignals(True)
         self.table.clearSelection(); self.table.setCurrentCell(-1, -1)
+        self.table.blockSignals(False)
+        self.current_item = None
         self.header.setText("Select a culture order")
         for w in (self.specimen, self.growth, self.gram, self.zn):
             w.setCurrentIndex(0)
@@ -131,7 +135,8 @@ class MicrobiologyPage(QWidget):
             """SELECT ri.id AS item_id, r.lab_no, r.patient_name, ri.test_name
                FROM receipt_items ri JOIN receipts r ON r.id=ri.receipt_id
                JOIN tests t ON t.id=ri.test_id
-               WHERE t.is_culture=1 AND (r.patient_name LIKE ? OR r.lab_no LIKE ?)
+               WHERE t.is_culture=1 AND (COALESCE(r.patient_name,'') LIKE ?
+                                         OR COALESCE(r.lab_no,'') LIKE ?)
                ORDER BY ri.id DESC LIMIT 300""",
             (q, q),
         ).fetchall()
@@ -145,7 +150,10 @@ class MicrobiologyPage(QWidget):
             self.table.setItem(i, 2, QTableWidgetItem(r["test_name"] or ""))
 
     def load_item(self):
-        r = self.table.currentRow()
+        sel = self.table.selectionModel().selectedRows()
+        if not sel:
+            return
+        r = sel[0].row()
         if not (0 <= r < len(self._items)):
             return
         self.current_item = self._items[r]
@@ -157,6 +165,11 @@ class MicrobiologyPage(QWidget):
             "SELECT * FROM cultures WHERE receipt_item_id=?", (self.current_item,)
         ).fetchone()
         self.sens.setRowCount(0)
+        # reset every field first so a culture with no saved data never shows the
+        # previously-selected culture's values
+        for w in (self.specimen, self.growth, self.gram, self.zn):
+            w.setCurrentIndex(0)
+        self.organism.clear(); self.colony.clear(); self.remarks.clear()
         if existing:
             self.specimen.setCurrentText(existing["specimen"] or "")
             self.growth.setCurrentText(existing["growth"] or "")
@@ -169,8 +182,6 @@ class MicrobiologyPage(QWidget):
                 "SELECT * FROM culture_sensitivity WHERE culture_id=?", (existing["id"],)
             ):
                 self._add_sens(s["antibiotic"], s["result"])
-        else:
-            self.organism.clear(); self.colony.clear(); self.remarks.clear()
 
     def _add_sens(self, antibiotic="", result="S"):
         i = self.sens.rowCount(); self.sens.insertRow(i)

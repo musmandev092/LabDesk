@@ -94,7 +94,15 @@ def stat_card(title: str, value: str, color: str = PRIMARY, on_click=None) -> QF
     return f
 
 
+def like_term(text: str) -> str:
+    """Build a %wrapped% LIKE pattern with the wildcards % _ \\ escaped so user
+    input matches literally. Pair with ESCAPE '\\' in the query."""
+    t = (text or "").strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{t}%"
+
+
 def money(value: float, currency: str = "Rs.") -> str:
+    value = value or 0.0          # normalise -0.0 / None so we never print "-0"
     if value < 0:
         return f"- {currency} {abs(value):,.0f}"
     return f"{currency} {value:,.0f}"

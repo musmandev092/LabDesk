@@ -144,7 +144,8 @@ class ReceiptsPage(QWidget):
 
     def refresh(self):
         q = f"%{self.search.text().strip()}%"
-        sql = ("SELECT * FROM receipts WHERE (patient_name LIKE ? OR lab_no LIKE ? OR mr_no LIKE ?)")
+        sql = ("SELECT * FROM receipts WHERE (COALESCE(patient_name,'') LIKE ? "
+               "OR COALESCE(lab_no,'') LIKE ? OR COALESCE(mr_no,'') LIKE ?)")
         args = [q, q, q]
         st = self.status.currentData()
         if st and st != "All":
@@ -183,7 +184,13 @@ class ReceiptsPage(QWidget):
         self._update_buttons()
 
     def _selected_id(self):
-        r = self.table.currentRow()
+        # derive from the actual selection (NOT currentRow): clearSelection /
+        # Ctrl-click-deselect empties the selection but leaves currentRow set,
+        # which would otherwise keep buttons live + act on a stale receipt.
+        sel = self.table.selectionModel().selectedRows()
+        if not sel:
+            return None
+        r = sel[0].row()
         return self._ids[r] if 0 <= r < len(self._ids) else None
 
     def _update_buttons(self):
