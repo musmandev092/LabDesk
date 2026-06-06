@@ -460,6 +460,33 @@ try:
         if "ok" in res2:
             break
     check(res2.get("ok") is False and "boom" in str(res2.get("r")), "task: error surfaced safely")
+
+    # ---- login: a wrong password must warn exactly ONCE (not twice) ----
+    from PySide6.QtWidgets import QMessageBox, QPushButton
+    from PySide6.QtTest import QTest
+    from PySide6.QtCore import Qt as _Qt
+    from labdesk.ui.login import LoginDialog
+    _wc = {"n": 0}
+    _orig_warn = QMessageBox.warning
+    QMessageBox.warning = staticmethod(lambda *a, **k: _wc.__setitem__("n", _wc["n"] + 1))
+    try:
+        d = LoginDialog(con); d.show()
+        d.username.setText("admin"); d.password.setText("definitely-wrong")
+        QTest.keyClick(d.password, _Qt.Key_Return); app.processEvents()
+        eq(_wc["n"], 1, "login: ENTER wrong password warns once")
+        _wc["n"] = 0
+        d2 = LoginDialog(con); d2.show()
+        d2.username.setText("admin"); d2.password.setText("nope")
+        [b for b in d2.findChildren(QPushButton) if b.text() == "Sign in"][0].click()
+        app.processEvents()
+        eq(_wc["n"], 1, "login: CLICK wrong password warns once")
+        _wc["n"] = 0
+        d3 = LoginDialog(con); d3.show()
+        d3.username.setText("admin"); d3.password.setText("admin")
+        QTest.keyClick(d3.password, _Qt.Key_Return); app.processEvents()
+        check(_wc["n"] == 0 and d3.user is not None, "login: correct password accepts, no warning")
+    finally:
+        QMessageBox.warning = _orig_warn
 except Exception as e:  # pragma: no cover
     check(False, f"Qt section crashed: {e}")
 

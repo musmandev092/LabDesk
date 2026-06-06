@@ -55,10 +55,16 @@ class LoginDialog(QDialog):
 
         btn = QPushButton("Sign in")
         btn.setMinimumHeight(42)
+        # Don't let the button auto-activate on Enter: otherwise pressing Enter in
+        # the password field fires BOTH returnPressed AND this default button, so
+        # try_login runs twice (two "Invalid username or password" popups).
+        btn.setAutoDefault(False)
+        btn.setDefault(False)
         btn.clicked.connect(self.try_login)
         outer.addWidget(btn)
         outer.addStretch(2)
 
+        # Enter: username → move to password; password → sign in (once).
         self.password.returnPressed.connect(self.try_login)
         self.username.returnPressed.connect(lambda: self.password.setFocus())
         self.username.setFocus()
