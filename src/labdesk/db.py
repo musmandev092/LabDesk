@@ -97,9 +97,12 @@ _EXTRA_COLUMNS = {
     "audit_log": [("hash", "TEXT")],
 }
 
-# brute-force lockout policy
+# brute-force lockout policy: lock after _MAX_FAILS wrong tries; the lockout
+# window then doubles on every further failure (60s → 120s → 240s …) up to
+# _LOCK_MAX_SECONDS, so a sustained guessing run is throttled, not just delayed.
 _MAX_FAILS = 5
 _LOCK_SECONDS = 60
+_LOCK_MAX_SECONDS = 3600
 # scrypt work factors (memory-hard; ~tens of ms per hash)
 _SCRYPT_N, _SCRYPT_R, _SCRYPT_P = 16384, 8, 1
 _SCRYPT_MAXMEM = 64 * 1024 * 1024
@@ -191,10 +194,22 @@ def _verify_password(password: str, stored: str, legacy_salt: str) -> bool:
                                 n=int(n), r=int(r), p=int(p),
                                 maxmem=_SCRYPT_MAXMEM, dklen=len(hexh) // 2)
             return hmac.compare_digest(dk.hex(), hexh)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return False
     h = hashlib.sha256(((legacy_salt or "") + password).encode("utf-8")).hexdigest()
     return hmac.compare_digest(h, stored)
+
+
+_DUMMY_HASH = ""  # lazily-built scrypt string used only to equalise login timing
+
+
+def _dummy_verify(password: str) -> None:
+    """Run one scrypt hash on the user-miss path so an unknown/inactive username
+    costs about the same as a real one — defeats username-enumeration via timing."""
+    global _DUMMY_HASH
+    if not _DUMMY_HASH:
+        _DUMMY_HASH, _ = hash_password("login-timing-equaliser")
+    _verify_password(password, _DUMMY_HASH, "")
 
 
 def connect(path: Path | None = None) -> sqlite3.Connection:
@@ -375,7 +390,7 @@ def _audit_fallback(username, action, detail, err) -> None:
     try:
         with open(data_dir() / "audit_fallback.log", "a", encoding="utf-8") as fh:
             fh.write(f"{username}\t{action}\t{detail}\t(audit-db-error: {err})\n")
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -399,7 +414,7 @@ def log_audit(con: sqlite3.Connection, username: str, action: str, detail: str =
             (ts, username, action, detail, chain),
         )
         con.commit()
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         _audit_fallback(username, action, detail, e)
 
 
@@ -412,7 +427,7 @@ def verify_audit_chain(con: sqlite3.Connection):
         rows = con.execute(
             "SELECT id, at, username, action, detail, hash FROM audit_log ORDER BY id"
         ).fetchall()
-    except Exception:  # noqa: BLE001
+    except Exception:
         return True, None
     for row in rows:
         if row["hash"] is None:
@@ -471,12 +486,12 @@ def backup_db(reason: str = "auto", keep: int = 14) -> Path | None:
             sc.backup(dc)
         sc.close(); dc.close()
         os.chmod(dest, 0o600)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
     try:
         for old in sorted(bdir.glob("labdesk-*.sqlite"))[:-keep]:
             old.unlink()
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return dest
 
@@ -498,7 +513,7 @@ def restore_db(path: str) -> bool:
                 p.unlink()
         os.chmod(cur, 0o600)
         return True
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
 
 
@@ -518,6 +533,7 @@ def verify_user(con: sqlite3.Connection, username: str, password: str):
         "SELECT * FROM users WHERE username=? AND active=1", (username,)
     ).fetchone()
     if not row:
+        _dummy_verify(password)   # equalise timing so missing users aren't detectable
         return None
     cols = row.keys()
     # locked out from too many recent failures?
@@ -537,17 +553,21 @@ def verify_user(con: sqlite3.Connection, username: str, password: str):
             con.execute("UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id=?",
                         (row["id"],))
             con.commit()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         return row
-    # wrong password → count the failure, lock after _MAX_FAILS
+    # wrong password → count the failure, then lock with an exponentially
+    # growing window once past _MAX_FAILS (60s, 120s, 240s … capped).
     try:
         fa = (row["failed_attempts"] if "failed_attempts" in cols and row["failed_attempts"] else 0) + 1
-        lock = str(time.time() + _LOCK_SECONDS) if fa >= _MAX_FAILS else None
+        lock = None
+        if fa >= _MAX_FAILS:
+            backoff = min(_LOCK_SECONDS * (2 ** (fa - _MAX_FAILS)), _LOCK_MAX_SECONDS)
+            lock = str(time.time() + backoff)
         con.execute("UPDATE users SET failed_attempts=?, locked_until=? WHERE id=?",
                     (fa, lock, row["id"]))
         con.commit()
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return None
 
@@ -604,8 +624,8 @@ def receive_due(con: sqlite3.Connection, receipt_id: int, amount: float, usernam
         "SELECT lab_no, net_amount, paid, due FROM receipts WHERE id=?", (receipt_id,)).fetchone()
     if not r or not r["due"] or r["due"] <= 0 or amount <= 0:
         return None
-    new_paid = (r["paid"] or 0) + amount
-    new_due = max(0.0, (r["net_amount"] or 0) - new_paid)
+    new_paid = round((r["paid"] or 0) + amount, 2)
+    new_due = round(max(0.0, (r["net_amount"] or 0) - new_paid), 2)
     con.execute(
         "INSERT INTO ledger(kind,ref_id,detail,credit,date) "
         "VALUES ('due_recovery',?,?,?,date('now','localtime'))",
@@ -676,6 +696,6 @@ def save_test_parameters(con: sqlite3.Connection, test_id: int, rows) -> None:
     except Exception:
         try:
             con.rollback()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         raise

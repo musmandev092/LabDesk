@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QLineEdit, QPushButton, QFileDialog,
-    QMessageBox, QHBoxLayout, QLabel, QScrollArea, QCheckBox, QComboBox,
+    QMessageBox, QHBoxLayout, QScrollArea, QCheckBox, QComboBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QDialog, QApplication,
 )
 
@@ -99,6 +99,7 @@ class SettingsPage(QWidget):
         super().__init__()
         self.con = con
         self.user = user
+        self._user_ids = []   # parallel to users_table rows; filled by refresh_users
         self.inputs: dict[str, QLineEdit] = {}
 
         root = QVBoxLayout(self)

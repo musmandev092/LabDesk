@@ -1,13 +1,13 @@
 """Receipts: history of all saved receipts — search, reprint, take due payment."""
 from __future__ import annotations
 
+import contextlib
 import os
 import tempfile
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QLineEdit,
-    QComboBox, QPushButton, QHeaderView, QLabel, QDateEdit, QMessageBox, QCheckBox,
+    QComboBox, QPushButton, QHeaderView, QLabel, QMessageBox, QCheckBox,
     QDialog, QFrame, QInputDialog, QFileDialog, QFormLayout, QDoubleSpinBox,
 )
 
@@ -81,21 +81,24 @@ class _EditReceiptDialog(QDialog):
         self._recompute()
 
     def _net(self):
-        return max(0.0, self._sub - self._sub * self.discount.value() / 100.0)
+        # round to whole paisa so a discount can't leave sub-cent residue that
+        # later shows as a "phantom due" (prints 0.00 but keeps due>0)
+        return round(max(0.0, self._sub - self._sub * self.discount.value() / 100.0), 2)
 
     def _recompute(self):
         net = self._net()
-        due = max(0.0, net - self.paid.value())
+        due = round(max(0.0, net - self.paid.value()), 2)
         self.net_lbl.setText(money(net, self.cur))
         self.due_lbl.setText(money(due, self.cur))
 
     def values(self):
         net = self._net()
+        paid = round(self.paid.value(), 2)
         return {
             "discount_pct": self.discount.value(),
             "net_amount": net,
-            "paid": self.paid.value(),
-            "due": max(0.0, net - self.paid.value()),
+            "paid": paid,
+            "due": round(max(0.0, net - paid), 2),
             "payment_method": self.method.currentText(),
         }
 
@@ -219,7 +222,7 @@ class ReceiptsPage(QWidget):
         if self.today_only.isChecked():
             sql += f" AND {db.RECEIVED_TODAY}"
         if self.dues_only.isChecked():
-            sql += f" AND due>0 AND {db.NOT_VOIDED}"
+            sql += f" AND due>0.005 AND {db.NOT_VOIDED}"
         sql += " ORDER BY id DESC LIMIT 1000"
         rows = self.con.execute(sql, args).fetchall()
         cur = db.currency(self.con)
@@ -294,16 +297,15 @@ class ReceiptsPage(QWidget):
         labno = self._lab_no(rid)
 
         def ready(result):
-            tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)  # 0600
-            tmp.write(result); tmp.close()
+            fd, tmp_path = tempfile.mkstemp(suffix=".pdf")  # 0600
+            with os.fdopen(fd, "wb") as f:
+                f.write(result)
             db.log_audit(self.con, self.user["username"], "previewed_" + kind, labno)
             try:
-                _PreviewDialog(tmp.name, self, title).exec()
+                _PreviewDialog(tmp_path, self, title).exec()
             finally:
-                try:
-                    os.remove(tmp.name)        # no patient-PII residue in temp
-                except OSError:
-                    pass
+                with contextlib.suppress(OSError):
+                    os.remove(tmp_path)        # no patient-PII residue in temp
 
         tasks.build_pdf(self, lambda con: build(con, rid), ready,
                         clicked=clicked, busy_text="Opening…", error_title="Preview")
@@ -424,10 +426,10 @@ class ReceiptsPage(QWidget):
                         "VALUES ('adjustment',?,?,?,date('now','localtime'))",
                         (rid, f"Bill edit {rec['lab_no']} — refund", -delta))
             self.con.commit()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             try:
                 self.con.rollback()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
             QMessageBox.warning(self, "Edit bill", f"Could not save the changes:\n{e}")
             return
@@ -470,17 +472,22 @@ class ReceiptsPage(QWidget):
                                               "CSV (*.csv)")
         if not path:
             return
+        def _safe(item):
+            # neutralise spreadsheet formula injection: a cell a spreadsheet would
+            # treat as a formula (leading = + - @ tab CR) is prefixed with a quote
+            s = item.text() if item else ""
+            return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
+
         try:
             cols = self.table.columnCount()
             with open(path, "w", newline="", encoding="utf-8") as f:
                 w = csv.writer(f)
-                w.writerow([self.table.horizontalHeaderItem(c).text() for c in range(cols)])
+                w.writerow([_safe(self.table.horizontalHeaderItem(c)) for c in range(cols)])
                 for r in range(self.table.rowCount()):
-                    w.writerow([(self.table.item(r, c).text() if self.table.item(r, c) else "")
-                                for c in range(cols)])
+                    w.writerow([_safe(self.table.item(r, c)) for c in range(cols)])
             db.log_audit(self.con, self.user["username"], "exported_csv",
                          f"receipts ({self.table.rowCount()} rows) → {path}")
             QMessageBox.information(self, "Export",
                                    f"Exported {self.table.rowCount()} rows to:\n{path}")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             QMessageBox.warning(self, "Export", f"Could not export:\n{e}")

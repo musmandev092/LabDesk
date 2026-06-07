@@ -6,7 +6,7 @@ from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit, QComboBox,
     QSpinBox, QDoubleSpinBox, QPushButton, QTableWidget, QTableWidgetItem,
-    QHeaderView, QLabel, QCompleter, QMessageBox, QListWidget, QListWidgetItem,
+    QHeaderView, QLabel, QMessageBox, QListWidget, QListWidgetItem,
     QInputDialog, QCheckBox, QMenu,
 )
 
@@ -448,7 +448,7 @@ class ReceptionPage(QWidget):
             try:
                 w.statusBar().showMessage(msg, 4000)
                 return
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
     def _add_top_test(self):
@@ -559,12 +559,13 @@ class ReceptionPage(QWidget):
         new_patient = not pid
         doc_id = self.doctor.currentData()
         doc_name = self.doctor.currentText().strip()
-        # compute totals directly (don't depend on cached recompute state)
-        sub = sum(it["charge"] for it in self.cart)
+        # compute totals directly (don't depend on cached recompute state);
+        # round to whole paisa so a discount can't leave a sub-cent "phantom due"
+        sub = round(sum(it["charge"] for it in self.cart), 2)
         disc_pct = self.discount.value()
-        net = max(0.0, sub - sub * disc_pct / 100.0)
-        paid = self.paid.value()
-        due = max(0.0, net - paid)
+        net = round(max(0.0, sub - sub * disc_pct / 100.0), 2)
+        paid = round(self.paid.value(), 2)
+        due = round(max(0.0, net - paid), 2)
         pay_method = self.payment_method.currentText()
         optout = 1 if self.wa_optout.isChecked() else 0
         prefix = db.get_setting(c, "lab_no_prefix", "LAB")
@@ -596,13 +597,21 @@ class ReceptionPage(QWidget):
                 (pid, doc_id, title, mr_no, name, age, age_desc, sex, tel, addr,
                  doc_name, specimen, sub, disc_pct, 0, net, paid, due,
                  pay_method, "pending", self.user["username"])).lastrowid
-            # atomic lab number: try the next daily serial, retry on the UNIQUE guard
-            # (ux_receipts_labno) so two terminals can't mint the same number.
-            base = c.execute(
-                "SELECT COUNT(*) FROM receipts WHERE date(received_at)=date('now','localtime')"
+            # atomic lab number: base it on the highest serial already minted
+            # today for this prefix — NOT COUNT(*), which regresses (and triggers
+            # a retry storm) if a receipt is ever removed — then bump on the
+            # UNIQUE guard (ux_receipts_labno) so two terminals can't collide.
+            serial_prefix = f"{prefix}_{datestr}_"
+            like = (serial_prefix.replace("\\", "\\\\")
+                    .replace("%", "\\%").replace("_", "\\_") + "%")
+            top = c.execute(
+                "SELECT MAX(CAST(substr(lab_no, ?) AS INTEGER)) FROM receipts "
+                "WHERE lab_no LIKE ? ESCAPE '\\'",
+                (len(serial_prefix) + 1, like),
             ).fetchone()[0]
+            base = (top or 0) + 1
             lab_no = None
-            for bump in range(0, 500):
+            for bump in range(500):
                 cand = f"{prefix}_{datestr}_{base + bump:03d}"
                 try:
                     c.execute("UPDATE receipts SET lab_no=?, case_no=? WHERE id=?", (cand, cand, rid))
@@ -622,10 +631,10 @@ class ReceptionPage(QWidget):
                     "VALUES ('income',?,?,?,date('now','localtime'))",
                     (rid, f"Receipt {lab_no} — {name}", paid))
             c.commit()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             try:
                 c.rollback()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
             QMessageBox.warning(self, "Save failed",
                                 "The receipt was NOT saved — nothing has been charged. "

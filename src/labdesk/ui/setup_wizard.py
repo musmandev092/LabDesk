@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import db
-from .style import PRODUCT_NAME, PRODUCT_TAGLINE
+from .style import PRODUCT_NAME
 from .widgets import field_label
 
 
@@ -114,7 +114,7 @@ class SetupWizard(QDialog):
         # actions
         btns = QHBoxLayout()
         btns.addStretch(1)
-        finish = QPushButton(f"Finish setup  →")
+        finish = QPushButton("Finish setup  →")
         finish.clicked.connect(self._finish)
         btns.addWidget(finish)
         root.addLayout(btns)

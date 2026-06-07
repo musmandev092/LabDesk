@@ -9,6 +9,7 @@ offline. Printing rasterises the WeasyPrint PDF onto the chosen QPrinter.
 """
 from __future__ import annotations
 
+import contextlib
 import html
 import os
 import re
@@ -32,8 +33,6 @@ GREEN = "#059669"
 AMBER = "#d97706"         # below range ↓
 RED = "#dc2626"           # above range ↑
 BODY = "#1e293b"
-MUTED = "#64748b"
-BORDER = "#cbd5e1"
 
 ARROW_UP = "↑"            # above reference range (High)
 ARROW_DOWN = "↓"          # below reference range (Low)
@@ -44,6 +43,27 @@ INTER_TTF = ASSETS / "fonts" / "Inter.ttf"
 
 def _esc(v) -> str:
     return html.escape(str(v if v is not None else ""))
+
+
+def _method_block(head) -> str:
+    """The 'Method / Comments' footer for a test. One normalisation everywhere:
+    collapse blank lines, then collapse runs of spaces (the two report variants
+    used to differ)."""
+    if not head or not head["method_note"]:
+        return ""
+    note = head["method_note"].replace("\r", "")
+    note = re.sub(r"[ \t]*\n[ \t]*\n+", "\n", note)   # collapse blank lines
+    note = re.sub(r"[ \t]{2,}", " ", note).strip()    # collapse runs of spaces
+    return f"<div class='method'><b>Method / Comments:</b> {_esc(note)}</div>"
+
+
+def _remarks_block(text) -> str:
+    """The optional 'Remarks' box, newline → <br>. Shared by both report kinds."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    return (f"<div class='remarks-box'><b>Remarks:</b> "
+            f"{_esc(text).replace(chr(10), '<br>')}</div>")
 
 
 def _file_url(p: str | Path) -> str:
@@ -77,33 +97,30 @@ def _user_display(con, username: str) -> str:
 # ---------------------------------------------------------------------------
 # Reference range + abnormal flag (numeric)
 # ---------------------------------------------------------------------------
-def _resolved_ref(res, sex: str) -> str:
+def _resolve_ref(res, sex: str = "") -> tuple[str, str]:
+    """Resolve the reference range to (display_html, flag_range).
+
+    ``flag_range`` is the single numeric range a result is judged against. It is
+    "" — meaning *no* abnormal flag — when the display shows both the M and F
+    ranges (sex unknown, ranges differ), so we never flag a value against the
+    wrong sex's range while showing both."""
     keys = res.keys()
     m = ((res["p_male"] if "p_male" in keys else None) or "").strip().replace("\n", " ")
     f = ((res["p_female"] if "p_female" in keys else None) or "").strip().replace("\n", " ")
+    ref_text = (res["ref_text"] if "ref_text" in keys else "") or ""
     sx = (sex or "").strip().lower()
     if sx.startswith("m") and m:
-        return m
+        return _esc(m), m
     if sx.startswith("f") and f:
-        return f
-    return m or f or (res["ref_text"] or "")
-
-
-def _reference_html(res, sex: str = "") -> str:
-    keys = res.keys()
-    m = ((res["p_male"] if "p_male" in keys else None) or "").strip().replace("\n", " ")
-    f = ((res["p_female"] if "p_female" in keys else None) or "").strip().replace("\n", " ")
-    sx = (sex or "").strip().lower()
-    if sx.startswith("m") and m:
-        return _esc(m)
-    if sx.startswith("f") and f:
-        return _esc(f)
+        return _esc(f), f
     if m and f and m != f:
-        return (f"<span style='color:{TEAL_DARK};'>M:</span> {_esc(m)}<br>"
+        disp = (f"<span style='color:{TEAL_DARK};'>M:</span> {_esc(m)}<br>"
                 f"<span style='color:{TEAL_DARK};'>F:</span> {_esc(f)}")
-    if m or f:
-        return _esc(m or f)
-    return _esc((res["ref_text"] or "")).replace("\n", "<br>")
+        return disp, ""          # ambiguous — show both, flag against neither
+    one = m or f
+    if one:
+        return _esc(one), one
+    return _esc(ref_text).replace("\n", "<br>"), ref_text
 
 
 def _flag(value, ref):
@@ -115,7 +132,15 @@ def _flag(value, ref):
         v = float(vs)
     except ValueError:
         return None
-    ref = (ref or "").replace("–", "-").replace("≤", "<=").replace("≥", ">=")
+    ref = (ref or "").replace("–", "-").replace("≤", "<=").replace("≥", ">=").strip()
+    # A leading operator means an open bound; resolve it BEFORE the a-b range
+    # pattern so "< 200 (ideal 0-99)" is judged on <200, not the parenthetical.
+    mlt = re.match(r"^<\s*=?\s*(-?\d+\.?\d*)", ref)
+    if mlt:
+        return ("High", RED) if v > float(mlt.group(1)) else ("Normal", GREEN)
+    mgt = re.match(r"^>\s*=?\s*(-?\d+\.?\d*)", ref)
+    if mgt:
+        return ("Low", AMBER) if v < float(mgt.group(1)) else ("Normal", GREEN)
     m = re.search(r"(-?\d+\.?\d*)\s*-\s*(-?\d+\.?\d*)", ref)
     if m:
         lo, hi = float(m.group(1)), float(m.group(2))
@@ -181,7 +206,7 @@ def _three(n):
 
 
 def _amount_in_words(amount) -> str:
-    n = int(round(amount or 0))
+    n = round(amount or 0)
     if n == 0:
         return "Zero Rupees Only"
     parts = []
@@ -327,29 +352,20 @@ def _report_section(con, item, sex, receipt) -> str:
         val = (str(res["value"]).strip() if res["value"] is not None else "")
         if not name and not val:
             continue  # skip blank filler rows (legacy padding parameters)
-        ref = _resolved_ref(res, sex)
+        ref_disp, ref_flag = _resolve_ref(res, sex)
         pid = res["parameter_id"] if "parameter_id" in res.keys() else None
-        prev = "".join(_value_cell(m.get(pid), ref) for m in hist_maps)
-        cur = _value_cell(res["value"], ref, current=True)
+        prev = "".join(_value_cell(m.get(pid), ref_flag) for m in hist_maps)
+        cur = _value_cell(res["value"], ref_flag, current=True)
         rows.append(
             f"<tr><td class='test'>{_esc(res['name'])}</td>"
-            f"<td class='ref'>{_reference_html(res, sex)}</td>"
+            f"<td class='ref'>{ref_disp}</td>"
             f"<td class='unit'>{_esc(res['units'])}</td>{prev}{cur}</tr>"
         )
     if not rows:
         rows.append(f"<tr><td colspan='{ncols}' style='color:#999;'><i>No result entered.</i></td></tr>")
 
-    method = ""
-    if head and head["method_note"]:
-        note = re.sub(r"[ \t]*\n[ \t]*\n+", "\n", head["method_note"].replace("\r", ""))
-        note = re.sub(r"[ \t]{2,}", " ", note).strip()
-        method = f"<div class='method'><b>Method / Comments:</b> {_esc(note)}</div>"
-
-    remarks = ""
-    rem_txt = ((item["remarks"] if "remarks" in item.keys() else "") or "").strip()
-    if rem_txt:
-        remarks = (f"<div class='remarks-box'><b>Remarks:</b> "
-                   f"{_esc(rem_txt).replace(chr(10), '<br>')}</div>")
+    method = _method_block(head)
+    remarks = _remarks_block(item["remarks"] if "remarks" in item.keys() else "")
 
     return (f"<div class='title-bar'>{_esc(title)}</div>"
             f"<table class='report'><thead>{thead}</thead><tbody>{''.join(rows)}</tbody></table>"
@@ -399,17 +415,11 @@ def _culture_section(con, item) -> str:
             "<th class='test'>Antibiotic</th><th>Sensitivity</th></tr></thead>"
             f"<tbody>{rows}</tbody></table>")
 
-    remarks = ""
     rk = item.keys()
     rem_txt = ((item["remarks"] if "remarks" in rk else "") or "").strip() or \
               ((cur["remarks"] or "").strip() if "remarks" in cur.keys() else "")
-    if rem_txt:
-        remarks = (f"<div class='remarks-box'><b>Remarks:</b> "
-                   f"{_esc(rem_txt).replace(chr(10), '<br>')}</div>")
-    method = ""
-    if head and head["method_note"]:
-        note = re.sub(r"[ \t]{2,}", " ", head["method_note"].replace("\r", "")).strip()
-        method = f"<div class='method'><b>Method / Comments:</b> {_esc(note)}</div>"
+    remarks = _remarks_block(rem_txt)
+    method = _method_block(head)
     return (f"<div class='title-bar'>{_esc(title)}</div>"
             f"{findings_tbl}{sens_tbl}{remarks}{method}")
 
@@ -609,12 +619,17 @@ def build_receipt_html(con, receipt_id: int) -> str:
     ).fetchall()
     g = _g(con)
     cur = g("currency", "Rs.")
-    discount = (r["subtotal"] or 0) - (r["net_amount"] or 0)
+    # normalise money once: a NULL column must render as 0.00, never crash :,.2f
+    subtotal = r["subtotal"] or 0
+    net = r["net_amount"] or 0
+    paid = r["paid"] or 0
+    due = r["due"] or 0
+    discount = subtotal - net
     reg_by = _user_display(con, r["created_by"] if "created_by" in r.keys() else "")
     year = (r["received_at"] or "")[:4] or datetime.now().strftime("%Y")
-    due_col = RED if r["due"] else GREEN
+    due_col = RED if due else GREEN
     # change handed back when the customer overpaid (paid > net)
-    change = max(0.0, (r["paid"] or 0) - (r["net_amount"] or 0))
+    change = max(0.0, paid - net)
 
     logo = _img(g("logo_path"))
     dept = (f"<div class='dept'>{_esc(g('lab_subtitle'))}</div>") if g("lab_subtitle") else ""
@@ -628,7 +643,7 @@ def build_receipt_html(con, receipt_id: int) -> str:
     )
     rows = "".join(
         f"<tr><td class='tc'>{i+1}</td><td>{_esc(it['test_name'])}</td>"
-        f"<td class='tr'>{it['charge']:,.2f}</td></tr>"
+        f"<td class='tr'>{(it['charge'] or 0):,.2f}</td></tr>"
         for i, it in enumerate(items)
     )
     items_table = (
@@ -638,20 +653,20 @@ def build_receipt_html(con, receipt_id: int) -> str:
     )
     summary = (
         f"<div class='summary'><div class='notes'>"
-        f"<div class='words'><b>Amount in words:</b><br><i>{_esc(_amount_in_words(r['net_amount'] or 0))}</i></div>"
+        f"<div class='words'><b>Amount in words:</b><br><i>{_esc(_amount_in_words(net))}</i></div>"
         f"<div class='remarks'><b>Remarks:</b><br>Please present this receipt to collect your report. "
         f"Reports are issued strictly following final verification and signature by the consultant pathologist.</div>"
         f"</div><div class='totals'><table class='tot'>"
-        f"<tr><td class='lbl'>Total:</td><td class='val'>{r['subtotal']:,.2f}</td></tr>"
+        f"<tr><td class='lbl'>Total:</td><td class='val'>{subtotal:,.2f}</td></tr>"
         f"<tr><td class='lbl'>Discount:</td><td class='val'>{discount:,.2f}</td></tr>"
-        f"<tr class='net'><td>To Be Paid:</td><td class='val'>{_esc(cur)} {r['net_amount']:,.2f}</td></tr>"
-        f"<tr><td class='lbl'>Paid:</td><td class='val'>{r['paid']:,.2f}</td></tr>"
+        f"<tr class='net'><td>To Be Paid:</td><td class='val'>{_esc(cur)} {net:,.2f}</td></tr>"
+        f"<tr><td class='lbl'>Paid:</td><td class='val'>{paid:,.2f}</td></tr>"
         f"<tr><td class='lbl' style='color:{due_col};'>Balance:</td>"
-        f"<td class='val' style='color:{due_col};'>{_esc(cur)} {r['due']:,.2f}</td></tr>"
+        f"<td class='val' style='color:{due_col};'>{_esc(cur)} {due:,.2f}</td></tr>"
         + (f"<tr><td class='lbl' style='color:{GREEN};'>Change returned:</td>"
            f"<td class='val' style='color:{GREEN};'>{_esc(cur)} {change:,.2f}</td></tr>"
            if change > 0 else "")
-        + f"</table></div></div>"
+        + "</table></div></div>"
     )
     footer = (
         f"<table class='rfoot'><tr><td>{_esc(g('lab_name'))} © {_esc(year)}</td>"
@@ -744,12 +759,12 @@ def print_bytes(pdf: bytes, parent, title: str, printer_name: str = "") -> None:
     if printer.outputFormat() == QPrinter.PdfFormat and printer.outputFileName():
         Path(printer.outputFileName()).write_bytes(pdf)
         return
-    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)  # 0600
-    tmp.write(pdf)
-    tmp.close()
+    fd, tmp_path = tempfile.mkstemp(suffix=".pdf")  # 0600
+    with os.fdopen(fd, "wb") as f:
+        f.write(pdf)
     try:
         doc = QPdfDocument(parent)
-        doc.load(tmp.name)
+        doc.load(tmp_path)
         dpi = min(printer.resolution(), _PRINT_DPI)
         painter = QPainter(printer)
         page_rect = printer.pageRect(QPrinter.DevicePixel)
@@ -763,10 +778,8 @@ def print_bytes(pdf: bytes, parent, title: str, printer_name: str = "") -> None:
             painter.drawImage(QRectF(page_rect), img)
         painter.end()
     finally:
-        try:
-            os.remove(tmp.name)               # don't leave patient-PII PDF in temp
-        except OSError:
-            pass
+        with contextlib.suppress(OSError):
+            os.remove(tmp_path)               # don't leave patient-PII PDF in temp
 
 
 def print_report(con, receipt_id: int, parent=None) -> None:

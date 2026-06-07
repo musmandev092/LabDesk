@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QFrame, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QSizePolicy, QTableWidgetItem,
 )
 
-from .style import PRIMARY, PRIMARY_DARK, MUTED, BORDER
+from .style import PRIMARY
 
 # status → (display colour) for receipt/worklist tables (single source of truth)
 STATUS_COLORS = {"pending": "#b9770e", "in_progress": "#0e7c86",

@@ -68,7 +68,36 @@ def _headers(cfg):
     return {"Content-Type": "application/json", "token": cfg["token"]}
 
 
+class _NoCrossHostRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse a redirect that changes host (or downgrades https→http).
+
+    The gateway request carries the auth token and a base64 patient PDF; a
+    redirect to another host would silently exfiltrate both. Same-host (and
+    http→https upgrade) redirects are still followed normally."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        import urllib.parse
+        o = urllib.parse.urlparse(req.full_url)
+        n = urllib.parse.urlparse(newurl)
+        same_host = (n.hostname or "").lower() == (o.hostname or "").lower()
+        downgrade = o.scheme == "https" and n.scheme != "https"
+        if not same_host or downgrade:
+            raise urllib.error.HTTPError(
+                req.full_url, code,
+                "Gateway tried to redirect to a different host — blocked to "
+                "protect your access token and patient data.", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+# Install as the process default so urllib.request.urlopen routes through it: a
+# redirect to another host then can't leak the token/PDF. (We still CALL urlopen
+# by name so it stays patchable/mockable.)
+urllib.request.install_opener(urllib.request.build_opener(_NoCrossHostRedirect))
+
+
 def _post(cfg, path, payload, timeout=None):
+    ok, why = validate_url(cfg["url"])
+    if not ok:
+        raise ValueError(why)
     req = urllib.request.Request(
         f"{cfg['url']}{path}", data=json.dumps(payload).encode("utf-8"),
         headers=_headers(cfg), method="POST")
@@ -77,6 +106,9 @@ def _post(cfg, path, payload, timeout=None):
 
 
 def _get(cfg, path, timeout=_TIMEOUT_GET):
+    ok, why = validate_url(cfg["url"])
+    if not ok:
+        raise ValueError(why)
     req = urllib.request.Request(f"{cfg['url']}{path}", headers=_headers(cfg), method="GET")
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.status, r.read().decode("utf-8", "replace")
@@ -180,7 +212,7 @@ def _log_wa(con, receipt_id, kind, number, filename, ok, message) -> None:
             "VALUES (?,?,?,?,?,?)",
             (receipt_id, kind, number, filename, 1 if ok else 0, (message or "")[:200]))
         con.commit()
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -190,6 +222,9 @@ def check_status(con) -> tuple[bool, str]:
         return False, "Set the WhatsApp gateway URL in Settings first."
     if not cfg["token"]:
         return False, "Set the WhatsApp access token in Settings first."
+    ok, why = validate_url(cfg["url"])
+    if not ok:
+        return False, why
     try:
         _, body = _get(cfg, "/session/status")
         data = json.loads(body).get("data", {})
@@ -206,7 +241,7 @@ def check_status(con) -> tuple[bool, str]:
         return False, _friendly_url_error(e)
     except OSError as e:   # raw socket timeout / connection / DNS errors (no internet)
         return False, _friendly_url_error(e)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return False, f"Error: {e}"
 
 
@@ -221,6 +256,9 @@ def send_pdf(con, number: str, pdf_path: str, caption: str = "",
     cfg = _cfg(con)
     if not cfg["url"] or not cfg["token"]:
         return False, "WhatsApp isn't set up yet (Settings → WhatsApp)."
+    ok, why = validate_url(cfg["url"])
+    if not ok:
+        return False, why
     phone = wa_number(number, cfg["cc"])
     if not phone:
         return False, "This patient has no valid WhatsApp number (03XXXXXXXXX)."
@@ -275,7 +313,7 @@ def send_pdf(con, number: str, pdf_path: str, caption: str = "",
         return False, _friendly_url_error(e)
     except OSError as e:   # raw socket timeout / connection / DNS errors (no internet)
         return False, _friendly_url_error(e)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return False, f"Could not send on WhatsApp: {e}"
 
 
@@ -296,7 +334,7 @@ def _send_built_pdf(con, receipt_id, build_fn, caption_key, label, fname_suffix=
     try:
         try:
             getattr(report, build_fn)(con, receipt_id, tmp)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return False, f"Could not build the {label} PDF: {e}"
         lab = db.get_setting(con, "lab_name", "")
         cap = _caption(con, caption_key,
@@ -331,6 +369,9 @@ def send_text(con, raw_number: str, text: str) -> tuple[bool, str]:
     cfg = _cfg(con)
     if not cfg["url"] or not cfg["token"]:
         return False, "WhatsApp isn't set up yet (Settings → WhatsApp)."
+    ok, why = validate_url(cfg["url"])
+    if not ok:
+        return False, why
     phone = wa_number(raw_number, cfg["cc"])
     if not phone:
         return False, "Enter a valid number (03XXXXXXXXX) to send a test to."
@@ -353,5 +394,5 @@ def send_text(con, raw_number: str, text: str) -> tuple[bool, str]:
         return False, _friendly_url_error(e)
     except OSError as e:
         return False, _friendly_url_error(e)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return False, f"Could not send on WhatsApp: {e}"

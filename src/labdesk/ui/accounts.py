@@ -5,10 +5,10 @@ from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QTableWidget, QTableWidgetItem,
     QLineEdit, QDoubleSpinBox, QPushButton, QHeaderView, QLabel, QGridLayout,
-    QDateEdit, QMessageBox, QInputDialog,
+    QDateEdit, QInputDialog,
 )
 
-from .widgets import stat_card, money, page_header, field_label, num_item
+from .widgets import stat_card, money, page_header, field_label, num_item, selected_id
 from .. import db
 
 
@@ -17,6 +17,7 @@ class AccountsPage(QWidget):
         super().__init__()
         self.con = con
         self.user = user
+        self._due_ids = []   # parallel to due_table rows; filled by refresh_dues
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(12)
@@ -77,7 +78,7 @@ class AccountsPage(QWidget):
             "SELECT COALESCE(SUM(amount),0) FROM expenses WHERE date BETWEEN ? AND ?",
             (f, t)).fetchone()[0]
         due = c.execute(
-            f"SELECT COALESCE(SUM(due),0) FROM receipts WHERE due>0 AND {db.NOT_VOIDED}"
+            f"SELECT COALESCE(SUM(due),0) FROM receipts WHERE due>0.005 AND {db.NOT_VOIDED}"
         ).fetchone()[0]
         self.c_income.value_label.setText(money(income, cur))
         self.c_expense.value_label.setText(money(expense, cur))
@@ -183,13 +184,14 @@ class AccountsPage(QWidget):
         self.due_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.due_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.due_table.itemSelectionChanged.connect(
-            lambda: self.recover_btn.setEnabled(self.due_table.currentRow() >= 0))
+            lambda: self.recover_btn.setEnabled(
+                bool(self.due_table.selectionModel().selectedRows())))
         lay.addWidget(self.due_table)
         return w
 
     def refresh_dues(self):
         rows = self.con.execute(
-            f"SELECT * FROM receipts WHERE due>0 AND {db.NOT_VOIDED} ORDER BY id DESC"
+            f"SELECT * FROM receipts WHERE due>0.005 AND {db.NOT_VOIDED} ORDER BY id DESC"
         ).fetchall()
         self.due_table.setRowCount(0); self._due_ids = []
         for r in rows:
@@ -203,10 +205,11 @@ class AccountsPage(QWidget):
         self.recover_btn.setEnabled(False)
 
     def recover_due(self):
-        r = self.due_table.currentRow()
-        if not (0 <= r < len(self._due_ids)):
+        # use the actual selection, not currentRow (which survives a rebuild and
+        # would settle a different receipt than the one highlighted)
+        rid = selected_id(self.due_table, self._due_ids)
+        if rid is None:
             return
-        rid = self._due_ids[r]
         rec = self.con.execute("SELECT lab_no, due FROM receipts WHERE id=?", (rid,)).fetchone()
         if not rec or not rec["due"] or rec["due"] <= 0:
             return

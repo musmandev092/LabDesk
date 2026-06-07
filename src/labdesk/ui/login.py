@@ -3,8 +3,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QLineEdit, QPushButton, QLabel, QMessageBox, QFrame,
-    QInputDialog,
+    QDialog, QVBoxLayout, QLineEdit, QPushButton, QLabel, QMessageBox, QInputDialog,
 )
 
 from .. import db

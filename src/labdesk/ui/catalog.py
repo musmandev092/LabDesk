@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTableWidget, QTableWidgetItem,
     QLineEdit, QPushButton, QHeaderView, QDialog, QFormLayout, QDoubleSpinBox,
     QComboBox, QPlainTextEdit, QLabel, QMessageBox, QSizePolicy, QCheckBox,
-    QListWidget, QListWidgetItem, QInputDialog,
+    QListWidget, QListWidgetItem,
 )
 from PySide6.QtGui import QColor
 
@@ -176,7 +176,7 @@ class ParametersDialog(QDialog):
         except db.ParameterInUseError as e:
             QMessageBox.warning(self, "Parameters", str(e))
             return
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             QMessageBox.warning(self, "Parameters", f"Could not save the parameters:\n{e}")
             return
         db.log_audit(self.con, self.user["username"], "parameters_edited",
@@ -330,6 +330,7 @@ class CatalogPage(QWidget):
         super().__init__()
         self.con = con
         self.user = user
+        self._ids = []   # parallel to tests table rows; filled by refresh
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(12)

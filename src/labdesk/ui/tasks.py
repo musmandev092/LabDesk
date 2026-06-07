@@ -42,20 +42,20 @@ class _Runnable(QRunnable):
         self._work = work
         self.signals = _Signals()
 
-    def run(self):  # noqa: D401 - runs on a pool thread
+    def run(self):
         ok, result = False, "Something went wrong."
         con = None
         try:
             con = db.connect()                 # fresh connection owned by THIS thread
             result = self._work(con)
             ok = True
-        except Exception as e:  # noqa: BLE001 - last-resort guard
+        except Exception as e:
             ok, result = False, (str(e) or e.__class__.__name__)
         finally:
             if con is not None:
                 try:
                     con.close()
-                except Exception:  # noqa: BLE001
+                except Exception:
                     pass
             self.signals.done.emit(ok, result)
 
@@ -91,7 +91,7 @@ def run_in_background(parent, work, on_done, *, clicked=None, lock=(), busy_text
         if callable(upd) and _alive(parent):
             try:
                 upd()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
         else:
             for b in locks:
@@ -100,7 +100,7 @@ def run_in_background(parent, work, on_done, *, clicked=None, lock=(), busy_text
         if _alive(parent):
             try:
                 on_done(ok, result)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
     task.signals.done.connect(_finished)   # cross-thread → queued onto the UI thread

@@ -118,7 +118,7 @@ def _setup_crash_logging() -> None:
                 QMessageBox.critical(None, "LabDesk",
                                      "Something went wrong. The details were saved to:\n"
                                      f"{logdir / 'labdesk.log'}")
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
         sys.__excepthook__(exc_type, exc, tb)
 
@@ -163,7 +163,7 @@ def run(argv: list[str]) -> int:
     if os.environ.get("LABDESK_SELFTEST") != "1":
         try:
             db.backup_db("launch")
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     # First-run / update: integrate into the desktop (menu entry + logo) and

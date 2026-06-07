@@ -6,7 +6,7 @@ from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTableWidget, QTableWidgetItem,
     QLineEdit, QComboBox, QPushButton, QHeaderView, QLabel, QScrollArea,
-    QFrame, QGridLayout, QMessageBox, QCheckBox, QPlainTextEdit, QFileDialog,
+    QGridLayout, QMessageBox, QCheckBox, QPlainTextEdit, QFileDialog,
 )
 
 from PySide6.QtWidgets import QSizePolicy
@@ -30,6 +30,7 @@ class WorklistPage(QWidget):
         super().__init__()
         self.con = con
         self.user = user
+        self._ids = []   # parallel to worklist table rows; filled by refresh
         self.current_receipt = None
         self._editors = {}   # (item_id, parameter_id) -> QLineEdit
         self._show = {}      # (item_id, parameter_id) -> QCheckBox (ticked = print this row)
@@ -350,10 +351,10 @@ class WorklistPage(QWidget):
                 (self.current_receipt,),
             )
             c.commit()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             try:
                 c.rollback()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
             QMessageBox.warning(self, "Save failed",
                                 f"Results were NOT saved — please try again.\n\n{e}")

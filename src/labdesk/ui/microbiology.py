@@ -6,7 +6,7 @@ from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTableWidget, QTableWidgetItem,
     QLineEdit, QComboBox, QPushButton, QHeaderView, QLabel, QFormLayout,
-    QPlainTextEdit, QMessageBox, QGridLayout,
+    QPlainTextEdit, QMessageBox,
 )
 
 from PySide6.QtWidgets import QSizePolicy
@@ -225,10 +225,10 @@ class MicrobiologyPage(QWidget):
                 "UPDATE receipt_items SET reported=1, reported_at=datetime('now','localtime') WHERE id=?",
                 (self.current_item,))
             c.commit()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             try:
                 c.rollback()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
             QMessageBox.warning(self, "Save failed",
                                 f"The culture report was NOT saved — please try again.\n\n{e}")

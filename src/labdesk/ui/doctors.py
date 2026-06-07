@@ -58,6 +58,7 @@ class DoctorsPage(QWidget):
         super().__init__()
         self.con = con
         self.user = user
+        self._ids = []   # parallel to doctors table rows; filled by refresh
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(12)
