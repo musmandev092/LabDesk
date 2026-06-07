@@ -97,7 +97,7 @@ if [ -d "$QSP" ]; then
   rm -f "$QSP"/*.pyi "$QSP"/libpyside6qml.abi3.so* 2>/dev/null || true
 
   # -- Python bindings: keep ONLY the modules the app imports ----------------
-  KEEP_MODS="QtCore QtGui QtNetwork QtPdf QtPdfWidgets QtPrintSupport QtWidgets"
+  KEEP_MODS="QtCore QtGui QtPrintSupport QtWidgets"
   for so in "$QSP"/*.abi3.so; do
     [ -e "$so" ] || continue
     m="$(basename "$so" .abi3.so)"
@@ -112,7 +112,12 @@ if [ -d "$QSP" ]; then
         canbus wayland-shell-integration wayland-graphics-integration-server \
         wayland-graphics-integration-client wayland-decoration-client \
         egldeviceintegrations sensors texttospeech webview designer vectorimageformats \
+        networkinformation tls \
         2>/dev/null || true )
+  # single-instance now uses an fcntl lock, not QtNetwork → drop the last network
+  # consumers so the ldd closure can remove libQt6Network too
+  rm -f "$QSP/Qt/plugins/generic/libqtuiotouchplugin.so" \
+        "$QSP/Qt/plugins/imageformats/libqpdf.so" 2>/dev/null || true
   # platform plugins: keep only xcb (desktop) + offscreen (headless/self-test)
   ( cd "$QSP/Qt/plugins/platforms" 2>/dev/null && \
     find . -maxdepth 1 -name 'libq*.so' ! -name 'libqxcb.so' ! -name 'libqoffscreen.so' \

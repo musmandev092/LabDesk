@@ -6,15 +6,13 @@ and a "CASH RECEIPT" (amount-in-words box + totals panel). They are drawn
 natively with Qt (see render.py: QPainter → QPdfWriter), so the app needs no
 WeasyPrint/Pango/Cairo/fontTools/Pillow. Inter is bundled (assets/fonts) and
 embedded in the PDF. The HTML builders below are retained for content tests and
-are not used for rendering. Printing rasterises the PDF onto the chosen QPrinter.
+are not used for rendering. Printing paints straight onto the QPrinter (vector,
+no QtPdf round-trip); preview renders to image pages (no QtPdf viewer).
 """
 from __future__ import annotations
 
-import contextlib
 import html
-import os
 import re
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -703,80 +701,52 @@ def build_test_page_bytes(printer_name: str = "") -> bytes:
     return render.build_test_page(printer_name)
 
 
-# Cap the raster DPI when sending to a hardware printer. At QPrinter's native
-# 1200 dpi an A4 page is ~10000x14000 px (~7 MB JPEG) — printing to a PDF
-# printer then yields 5-20 MB files. 200 dpi is crisp for text and ~50x smaller.
-_PRINT_DPI = 200
-
-
-def print_bytes(pdf: bytes, parent, title: str, printer_name: str = "") -> None:
-    """Print already-built PDF bytes. MUST run on the UI thread (QPrinter/QPainter
-    are not thread-safe) — callers build the bytes on a worker first (ui/tasks.py),
-    then call this in the completion callback.
-
-    If `printer_name` is set (a configured default printer), send straight to it —
-    no dialog. Otherwise show the print dialog. Printing *to a PDF file* hands back
-    the WeasyPrint vector PDF (tiny, sharp); a real printer gets each page
-    rasterised at a sane DPI (not QPrinter's 1200)."""
-    from PySide6.QtCore import QSize, QRectF
-    from PySide6.QtGui import QPainter, QPageSize
-    from PySide6.QtPdf import QPdfDocument
+def _make_printer(parent, title, printer_name):
+    """Build a QPrinter: send to the configured default if it still exists, else
+    show the print dialog. Returns None if the user cancels."""
+    from PySide6.QtGui import QPageSize
     from PySide6.QtPrintSupport import QPrinter, QPrintDialog, QPrinterInfo
-
     printer = QPrinter(QPrinter.HighResolution)
     printer.setPageSize(QPageSize(QPageSize.A4))
     printer.setFullPage(True)
-    # a configured default printer that still exists → print directly, no dialog
-    have_default = bool(printer_name) and printer_name in QPrinterInfo.availablePrinterNames()
-    if have_default:
+    if printer_name and printer_name in QPrinterInfo.availablePrinterNames():
         printer.setPrinterName(printer_name)
-    else:
-        dlg = QPrintDialog(printer, parent)
-        dlg.setWindowTitle(title)
-        if not dlg.exec():
-            return
-    # "Print to File (PDF)" → just write the vector PDF; no rasterising.
-    if printer.outputFormat() == QPrinter.PdfFormat and printer.outputFileName():
-        Path(printer.outputFileName()).write_bytes(pdf)
+        return printer
+    dlg = QPrintDialog(printer, parent)
+    dlg.setWindowTitle(title)
+    return printer if dlg.exec() else None
+
+
+def print_doc(con, receipt_id, kind, parent, title, printer_name="") -> None:
+    """Render a document straight onto the chosen printer — vector output, no
+    QtPdf round-trip and no patient-PII temp file. MUST run on the UI thread
+    (QPrinter/QPainter are not thread-safe); native rendering is fast (~tens of
+    ms) so it is synchronous. Choosing 'Print to File (PDF)' in the dialog makes
+    the printer emit a PDF directly — handled for free by painting onto it."""
+    printer = _make_printer(parent, title, printer_name)
+    if printer is None:
         return
-    fd, tmp_path = tempfile.mkstemp(suffix=".pdf")  # 0600
-    with os.fdopen(fd, "wb") as f:
-        f.write(pdf)
-    try:
-        doc = QPdfDocument(parent)
-        doc.load(tmp_path)
-        dpi = min(printer.resolution(), _PRINT_DPI)
-        painter = QPainter(printer)
-        page_rect = printer.pageRect(QPrinter.DevicePixel)
-        for i in range(doc.pageCount()):
-            if i:
-                printer.newPage()
-            pt = doc.pagePointSize(i)
-            w = max(1, int(pt.width() / 72.0 * dpi))
-            h = max(1, int(pt.height() / 72.0 * dpi))
-            img = doc.render(i, QSize(w, h))
-            painter.drawImage(QRectF(page_rect), img)
-        painter.end()
-    finally:
-        with contextlib.suppress(OSError):
-            os.remove(tmp_path)               # don't leave patient-PII PDF in temp
+    if kind == "testpage":
+        render.build_test_page(printer_name, device=printer)
+    elif kind == "receipt":
+        render.build_receipt(con, receipt_id, device=printer)
+    else:
+        render.build_report(con, receipt_id, device=printer)
 
 
 def print_report(con, receipt_id: int, parent=None) -> None:
-    """Synchronous convenience (builds + prints on the caller's thread). UI code
-    should build bytes on a worker then call print_bytes — see ui/tasks.py."""
-    print_bytes(build_report_bytes(con, receipt_id), parent, "Print Report",
-                db.get_setting(con, "default_printer", ""))
+    print_doc(con, receipt_id, "report", parent, "Print Report",
+              db.get_setting(con, "default_printer", ""))
 
 
 def print_receipt(con, receipt_id: int, parent=None) -> None:
-    print_bytes(build_receipt_bytes(con, receipt_id), parent, "Print Receipt",
-                db.get_setting(con, "default_printer", ""))
+    print_doc(con, receipt_id, "receipt", parent, "Print Receipt",
+              db.get_setting(con, "default_printer", ""))
 
 
 def print_test_page(parent=None, printer_name: str = "") -> None:
     """Print a small test page to verify the printer works (synchronous)."""
-    print_bytes(build_test_page_bytes(printer_name), parent, "Print Test Page", printer_name)
+    print_doc(None, None, "testpage", parent, "Print Test Page", printer_name)
 
 
 def save_report_pdf(con, receipt_id: int, parent=None) -> str | None:

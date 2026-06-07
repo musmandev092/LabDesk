@@ -417,13 +417,11 @@ class WorklistPage(QWidget):
         rid = self.current_receipt
         printer = db.get_setting(self.con, "default_printer", "")
         labno = self._lab_no(rid)
-
-        def ready(result):
-            report.print_bytes(result, self, "Print Report", printer)
+        try:
+            report.print_doc(self.con, rid, "report", self, "Print Report", printer)
             db.log_audit(self.con, self.user["username"], "printed_report", labno)
-
-        tasks.build_pdf(self, lambda con: report.build_report_bytes(con, rid), ready,
-                        clicked=self.print_btn, busy_text="Preparing…", error_title="Print")
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.warning(self, "Print", f"Could not print:\n{e}")
 
     def save_pdf(self):
         if self.current_receipt is None:

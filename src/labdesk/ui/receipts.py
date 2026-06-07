@@ -1,19 +1,18 @@
 """Receipts: history of all saved receipts — search, reprint, take due payment."""
 from __future__ import annotations
 
-import contextlib
-import os
-import tempfile
-
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QLineEdit,
     QComboBox, QPushButton, QHeaderView, QLabel, QMessageBox, QCheckBox,
     QDialog, QFrame, QInputDialog, QFileDialog, QFormLayout, QDoubleSpinBox,
+    QScrollArea,
 )
 
 from .widgets import muted, page_header, money, num_item, selected_id, status_badge
 from . import wa, tasks
-from .. import db, report
+from .. import db, report, render
 from ..constants import PAYMENT_METHODS
 from ..roles import can
 
@@ -22,25 +21,29 @@ REPORT_READY = ("reported", "delivered")
 
 
 class _PreviewDialog(QDialog):
-    """In-app PDF preview of a report or receipt (uses Qt's PDF viewer)."""
-    def __init__(self, pdf_path, parent=None, title="Preview"):
+    """In-app preview of a report/receipt — the document rendered to image pages
+    (native Qt, no QtPdf viewer) shown in a scroll area."""
+    def __init__(self, pages, parent=None, title="Preview"):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.resize(840, 1040)
-        from PySide6.QtPdf import QPdfDocument
-        from PySide6.QtPdfWidgets import QPdfView
-        self._doc = QPdfDocument(self)
-        self._doc.load(pdf_path)
-        view = QPdfView(self)
-        view.setDocument(self._doc)
-        try:
-            view.setPageMode(QPdfView.PageMode.MultiPage)
-            view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
-        except Exception:
-            pass
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        host = QWidget()
+        vl = QVBoxLayout(host)
+        vl.setContentsMargins(12, 12, 12, 12)
+        vl.setSpacing(12)
+        for img in pages:
+            lbl = QLabel()
+            lbl.setAlignment(Qt.AlignHCenter)
+            # scale each A4 page to a comfortable on-screen width, keeping aspect
+            pm = QPixmap.fromImage(img).scaledToWidth(780, Qt.SmoothTransformation)
+            lbl.setPixmap(pm)
+            vl.addWidget(lbl)
+        scroll.setWidget(host)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(view)
+        lay.addWidget(scroll)
 
 
 class _EditReceiptDialog(QDialog):
@@ -286,29 +289,20 @@ class ReceiptsPage(QWidget):
         return (r["lab_no"] if r and r["lab_no"] else f"#{rid}")
 
     def _preview(self, kind):
-        """kind: 'report' or 'receipt'. Builds the PDF off the UI thread, then
-        opens the preview dialog when it's ready (window stays responsive)."""
+        """kind: 'report' or 'receipt'. Render to image pages natively and show
+        them in the preview dialog — no PDF temp file, no QtPdf viewer."""
         rid = self._selected_id()
         if rid is None:
             return
-        clicked = self.prev_rcpt_btn if kind == "receipt" else self.prev_rpt_btn
         title = "Receipt preview" if kind == "receipt" else "Report preview"
-        build = report.build_receipt_bytes if kind == "receipt" else report.build_report_bytes
         labno = self._lab_no(rid)
-
-        def ready(result):
-            fd, tmp_path = tempfile.mkstemp(suffix=".pdf")  # 0600
-            with os.fdopen(fd, "wb") as f:
-                f.write(result)
-            db.log_audit(self.con, self.user["username"], "previewed_" + kind, labno)
-            try:
-                _PreviewDialog(tmp_path, self, title).exec()
-            finally:
-                with contextlib.suppress(OSError):
-                    os.remove(tmp_path)        # no patient-PII residue in temp
-
-        tasks.build_pdf(self, lambda con: build(con, rid), ready,
-                        clicked=clicked, busy_text="Opening…", error_title="Preview")
+        try:
+            pages = render.render_pages(self.con, rid, kind)
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.warning(self, "Preview", f"Could not build preview:\n{e}")
+            return
+        db.log_audit(self.con, self.user["username"], "previewed_" + kind, labno)
+        _PreviewDialog(pages, self, title).exec()
 
     def preview(self):
         self._preview("report")
@@ -335,22 +329,18 @@ class ReceiptsPage(QWidget):
         self._send_whatsapp("report")
 
     def _print(self, kind):
-        """Build the PDF off the UI thread, then print on the UI thread."""
+        """Render straight onto the printer (native, vector — no PDF round-trip)."""
         rid = self._selected_id()
         if rid is None:
             return
-        clicked = self.print_rcpt_btn if kind == "receipt" else self.print_rpt_btn
         title = "Print Receipt" if kind == "receipt" else "Print Report"
-        build = report.build_receipt_bytes if kind == "receipt" else report.build_report_bytes
         printer = db.get_setting(self.con, "default_printer", "")
         labno = self._lab_no(rid)
-
-        def ready(result):
-            report.print_bytes(result, self, title, printer)
+        try:
+            report.print_doc(self.con, rid, kind, self, title, printer)
             db.log_audit(self.con, self.user["username"], "printed_" + kind, labno)
-
-        tasks.build_pdf(self, lambda con: build(con, rid), ready,
-                        clicked=clicked, busy_text="Preparing…", error_title="Print")
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.warning(self, "Print", f"Could not print:\n{e}")
 
     def reprint(self):
         self._print("receipt")

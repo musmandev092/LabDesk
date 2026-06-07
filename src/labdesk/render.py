@@ -9,6 +9,7 @@ mm() (mm→device units) and px() (CSS px@96 → mm) map the old CSS values exac
 """
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 from PySide6.QtCore import QBuffer, QByteArray, QMarginsF, QRectF, Qt
@@ -90,34 +91,78 @@ def _font(size_pt, *, bold=False, spacing_px=0.0):
 class Doc:
     """A QPdfWriter + QPainter wrapper that draws in millimetres at 300 dpi."""
 
-    def __init__(self, margin_mm=(8, 8, 8, 8)):
+    def __init__(self, margin_mm=(8, 8, 8, 8), device=None, images=False):
         _ensure_app()
-        self._buf = QByteArray()
-        self._dev = QBuffer(self._buf)
-        self._dev.open(QBuffer.WriteOnly)
-        self.w = QPdfWriter(self._dev)
-        self.w.setResolution(DPI)
-        self.w.setPageSize(QPageSize(QPageSize.A4))
-        self.w.setPageMargins(QMarginsF(0, 0, 0, 0), QPageLayout.Millimeter)
+        self._images_mode = images
+        self._images = []
+        self._owns = device is None and not images
+        if images:
+            # paint each page onto an A4 QImage at 300 dpi (for on-screen preview,
+            # so we need no QtPdf viewer). new_page() finalises one and starts next.
+            self._buf = self._dev = self.w = None
+        elif self._owns:
+            self._buf = QByteArray()
+            self._dev = QBuffer(self._buf)
+            self._dev.open(QBuffer.WriteOnly)
+            self.w = QPdfWriter(self._dev)
+        else:
+            # an external QPagedPaintDevice (e.g. a QPrinter) — paint straight onto
+            # it so printing needs no QtPdf round-trip and emits vector output
+            self._buf = self._dev = None
+            self.w = device
         self.ml, self.mt, self.mr, self.mb = margin_mm
-        self.p = QPainter(self.w)
+        self.content_w = A4_W_MM - self.ml - self.mr
+        if images:
+            self._start_image()
+        else:
+            self.w.setResolution(DPI)
+            self.w.setPageSize(QPageSize(QPageSize.A4))
+            with contextlib.suppress(Exception):
+                self.w.setPageMargins(QMarginsF(0, 0, 0, 0), QPageLayout.Millimeter)
+            with contextlib.suppress(Exception):
+                self.w.setFullPage(True)      # QPrinter: paint the whole sheet ourselves
+            self.p = QPainter(self.w)
+            self._hints()
+
+    def _hints(self):
         self.p.setRenderHint(QPainter.Antialiasing, True)
         self.p.setRenderHint(QPainter.TextAntialiasing, True)
         self.p.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        self.content_w = A4_W_MM - self.ml - self.mr
 
-    # -- finish --
-    def tobytes(self) -> bytes:
+    def _start_image(self):
+        img = QImage(int(mm(A4_W_MM)), int(mm(A4_H_MM)), QImage.Format_RGB888)
+        img.fill(QColor("#ffffff"))
+        img.setDotsPerMeterX(int(DPI / 25.4 * 1000))
+        img.setDotsPerMeterY(int(DPI / 25.4 * 1000))
+        self._cur_img = img
+        self.p = QPainter(img)
+        self._hints()
+
+    # -- finish: PDF bytes (owned QPdfWriter), list[QImage] (images), or None --
+    def finish(self):
         self.p.end()
-        self._dev.close()
-        return bytes(self._buf)
+        if self._images_mode:
+            self._images.append(self._cur_img)
+            return self._images
+        if self._owns:
+            self._dev.close()
+            return bytes(self._buf)
+        return None
+
+    def tobytes(self) -> bytes:
+        return self.finish()
 
     def new_page(self):
-        self.w.newPage()
+        if self._images_mode:
+            self.p.end()
+            self._images.append(self._cur_img)
+            self._start_image()
+        else:
+            self.w.newPage()
 
     # -- primitives (all args in mm) --
     def fm(self, font) -> QFontMetricsF:
-        return QFontMetricsF(font, self.w)
+        return QFontMetricsF(font, self.p.device())
 
     def fill_rect(self, x, y, w, h, color):
         self.p.fillRect(QRectF(mm(x), mm(y), mm(w), mm(h)), QColor(color))
@@ -233,7 +278,7 @@ def _patient_card(d: Doc, x, y, pairs, *, card_pad=(5, 6), gap=(4, 6),
 # ---------------------------------------------------------------------------
 # Cash receipt
 # ---------------------------------------------------------------------------
-def build_receipt(con, receipt_id: int) -> bytes:
+def build_receipt(con, receipt_id: int, device=None, images=False):
     from . import report as R
     g = R._g(con)
     r = con.execute("SELECT * FROM receipts WHERE id=?", (receipt_id,)).fetchone()
@@ -250,7 +295,7 @@ def build_receipt(con, receipt_id: int) -> bytes:
     from datetime import datetime
     year = (r["received_at"] or "")[:4] or datetime.now().strftime("%Y")
 
-    d = Doc(margin_mm=(8, 8, 14, 8))
+    d = Doc(margin_mm=(8, 8, 14, 8), device=device, images=images)
     x0 = d.ml
     y = d.mt
 
@@ -695,7 +740,7 @@ def _draw_blocks_after_table(d: Doc, lay, x0, y):
     return y
 
 
-def build_report(con, receipt_id: int) -> bytes:
+def build_report(con, receipt_id: int, device=None, images=False):
     from . import report as R
     g = R._g(con)
     r = con.execute("SELECT * FROM receipts WHERE id=?", (receipt_id,)).fetchone()
@@ -703,7 +748,7 @@ def build_report(con, receipt_id: int) -> bytes:
                         (receipt_id,)).fetchall()
     sex = r["sex"]
 
-    d = Doc(margin_mm=(8, 8, 8, 8))
+    d = Doc(margin_mm=(8, 8, 8, 8), device=device, images=images)
     # Pre-measure: each item → list of "page chunks" (one test may span pages)
     # First a dry layout to count pages.
     layouts = []
@@ -792,10 +837,10 @@ def _draw_culture(d: Doc, con, item, x0, y):
     return y
 
 
-def build_test_page(printer_name: str = "") -> bytes:
+def build_test_page(printer_name: str = "", device=None):
     """A small printer-test page (native)."""
     from datetime import datetime
-    d = Doc(margin_mm=(20, 20, 20, 20))
+    d = Doc(margin_mm=(20, 20, 20, 20), device=device)
     x0 = d.ml
     y = d.mt
     d.rounded(x0, y, d.content_w, 60, 8, border=TEAL, border_px=2)
@@ -810,3 +855,10 @@ def build_test_page(printer_name: str = "") -> bytes:
     d.text(x0 + 8, y + 47, d.content_w - 16, 8, "✓ ↑ ↓ Rs. 1,234.50",
            _font(13, bold=True), TEAL)
     return d.tobytes()
+
+
+def render_pages(con, receipt_id: int, kind: str):
+    """Render a document to a list of QImage pages (on-screen preview; no QtPdf)."""
+    if kind == "receipt":
+        return build_receipt(con, receipt_id, images=True)
+    return build_report(con, receipt_id, images=True)

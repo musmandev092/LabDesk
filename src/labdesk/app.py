@@ -1,6 +1,7 @@
 """Application bootstrap: init DB, run first-run setup, login, main window."""
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import subprocess
@@ -21,26 +22,27 @@ APP_ICON = Path(__file__).resolve().parent / "assets" / "app_icon_256.png"
 
 
 def _acquire_single_instance():
-    """Allow only one LabDesk window per user. Returns the QLocalServer when this
-    process is the primary, or None when another instance is already running
-    (after poking it to come to the front)."""
-    from PySide6.QtNetwork import QLocalServer, QLocalSocket
+    """Allow only one LabDesk window per user via an advisory fcntl lock (no
+    QtNetwork dependency). Returns the held lock-file object when this process is
+    the primary, or None when another instance already holds it. The kernel
+    releases the lock automatically on exit — including a crash — so there is no
+    stale-lock cleanup to do."""
+    import fcntl
+    import tempfile
     try:
-        name = f"LabDesk-{os.getuid()}"
+        uid = os.getuid()
     except AttributeError:               # non-POSIX fallback
-        name = "LabDesk-instance"
-    probe = QLocalSocket()
-    probe.connectToServer(name)
-    if probe.waitForConnected(250):      # someone is already listening → that's the app
-        probe.write(b"raise\n"); probe.flush(); probe.waitForBytesWritten(250)
-        probe.disconnectFromServer()
-        return None
-    QLocalServer.removeServer(name)      # clear a stale socket from a crash
-    server = QLocalServer()
-    # only let the SAME OS user connect to the single-instance socket
-    server.setSocketOptions(QLocalServer.UserAccessOption)
-    server.listen(name)                  # if this fails we still run (fail-open)
-    return server
+        uid = "x"
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+    path = os.path.join(runtime, f"LabDesk-{uid}.lock")
+    try:
+        f = open(path, "w")
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return None                      # another instance holds the lock
+    with contextlib.suppress(OSError):
+        f.write(str(os.getpid())); f.flush()
+    return f
 
 
 def _integrate_appimage(con) -> str | None:
@@ -141,13 +143,12 @@ def run(argv: list[str]) -> int:
     from . import render
     render.preload()
 
-    # Single instance: if LabDesk is already open, focus it and quit this launch.
-    server = None
+    # Single instance: if LabDesk is already open, quit this launch.
     if os.environ.get("LABDESK_SELFTEST") != "1":
-        server = _acquire_single_instance()
-        if server is None:
+        lock = _acquire_single_instance()
+        if lock is None:
             return 0
-        app._labdesk_server = server     # keep the listener alive
+        app._labdesk_lock = lock          # keep the lock file alive for the run
 
     # Brief splash so startup (incl. the one-time catalog sync after an update,
     # ~1s) shows feedback instead of a blank window. Flashes by on normal launches.
@@ -205,22 +206,6 @@ def run(argv: list[str]) -> int:
 
     win = MainWindow(con, login.user)
     win.show()
-
-    # a later launch pokes the local server → bring this window to the front
-    if server is not None:
-        def _raise_existing():
-            conn = server.nextPendingConnection()
-            if conn is None:
-                return
-            conn.waitForReadyRead(200)
-            payload = bytes(conn.readAll()).strip()
-            conn.disconnectFromServer()
-            if payload != b"raise":          # only act on the expected command
-                return
-            from PySide6.QtCore import Qt
-            win.setWindowState((win.windowState() & ~Qt.WindowMinimized) | Qt.WindowActive)
-            win.show(); win.raise_(); win.activateWindow()
-        server.newConnection.connect(_raise_existing)
 
     return app.exec()
 

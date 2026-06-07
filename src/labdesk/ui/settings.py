@@ -195,17 +195,12 @@ class SettingsPage(QWidget):
 
     def _test_printer(self):
         name = self.printer_combo.currentData() or ""
-
-        def done(ok, result):
-            if ok:
-                report.print_bytes(result, self, "Print Test Page", name)
-                db.log_audit(self.con, self.user["username"], "printer_test",
-                             name or "ask-each-time")
-            else:
-                QMessageBox.warning(self, "Printer", f"Could not print:\n{result}")
-
-        # build the test page off the UI thread (WeasyPrint), then print
-        tasks.run_in_background(self, lambda con: report.build_test_page_bytes(name), done)
+        try:
+            report.print_test_page(self, name)
+            db.log_audit(self.con, self.user["username"], "printer_test",
+                         name or "ask-each-time")
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.warning(self, "Printer", f"Could not print:\n{e}")
 
     def _appearance_card(self):
         form = self._form()

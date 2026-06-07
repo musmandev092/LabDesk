@@ -653,18 +653,13 @@ class ReceptionPage(QWidget):
                          f"{disc_pct:g}% on {lab_no} (by {who})")
         QMessageBox.information(self, "Saved", f"Receipt {lab_no} saved.")
         if do_print:
-            # build the receipt PDF off the UI thread, then print — never blocks
-            # the save, and a print failure never loses the saved data.
-            printer = db.get_setting(self.con, "default_printer", "")
-
-            def _printed(ok, result):
-                if ok:
-                    report.print_bytes(result, self, "Print Receipt", printer)
-                else:
-                    QMessageBox.warning(
-                        self, "Print", f"Saved as {lab_no}, but printing failed:\n{result}")
-
-            tasks.run_in_background(self, lambda con: report.build_receipt_bytes(con, rid), _printed)
+            # native render is fast and prints straight onto the printer (vector);
+            # a print failure here never loses the already-saved receipt.
+            try:
+                report.print_receipt(self.con, rid, self)
+            except Exception as e:  # noqa: BLE001 - printing must never lose the save
+                QMessageBox.warning(
+                    self, "Print", f"Saved as {lab_no}, but printing failed:\n{e}")
         # optional: auto-send the bill on WhatsApp (gated silently so it never
         # nags when WhatsApp isn't set up or the patient has no number)
         if (db.get_setting(self.con, "whatsapp_auto_receipt", "0") == "1"
