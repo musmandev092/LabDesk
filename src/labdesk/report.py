@@ -239,16 +239,13 @@ def _regs(g) -> str:
     ] if x)
 
 
-def _patient_pairs(r):
+def _patient_pairs(r, *, include_reporting: bool = True):
     title = (r["title"] + " ") if ("title" in r.keys() and r["title"]) else ""
     mr = r["mr_no"] if "mr_no" in r.keys() else ""
     lab = r["lab_no"] or (r["case_no"] if "case_no" in r.keys() else "")
     age_sex = f"{r['age']} {r['age_desc']} / {r['sex']}"
     received = (r["received_at"] or "")[:16]
-    # use the stored reporting date so reprints/resends keep the original date
-    rep_raw = (r["reported_at"] if "reported_at" in r.keys() and r["reported_at"] else "")
-    reported = rep_raw[:16] if rep_raw else datetime.now().strftime("%Y-%m-%d %H:%M")
-    return [
+    pairs = [
         ("Patient Name", title + (r["patient_name"] or "")),
         ("Lab No.", lab),
         ("Registration Date", received),
@@ -256,15 +253,23 @@ def _patient_pairs(r):
         ("Age / Sex", age_sex),
         ("MR No.", mr),
         ("Referred By", r["dr_name"]),
-        ("Reporting Date", reported),
     ]
+    # The reporting date is real only once results are finalised — it is stamped
+    # on receipts.reported_at then and stays stable across reprints. NEVER
+    # fabricate "now": an unreported receipt or a pre-save preview must show no
+    # reporting time (blank → renders as "—"). The cash receipt (a billing doc)
+    # omits the field entirely via include_reporting=False.
+    if include_reporting:
+        rep_raw = (r["reported_at"] if "reported_at" in r.keys() and r["reported_at"] else "")
+        pairs.append(("Reporting Date", rep_raw[:16]))
+    return pairs
 
 
-def _patient_card(r) -> str:
+def _patient_card(r, *, include_reporting: bool = True) -> str:
     cells = "".join(
         f'<div class="ig"><span class="l">{_esc(lbl)}</span>'
         f'<span class="v">{_esc(val) if val else "—"}</span></div>'
-        for lbl, val in _patient_pairs(r)
+        for lbl, val in _patient_pairs(r, include_reporting=include_reporting)
     )
     return f'<div class="patient-card">{cells}</div>'
 
@@ -670,19 +675,28 @@ def build_receipt_html(con, receipt_id: int) -> str:
         f"<td style='text-align:right;'><i>Computer-generated document. No signature required.</i></td>"
         f"</tr></table>"
     )
-    body = footer + header + _patient_card(r) + items_table + summary
+    body = footer + header + _patient_card(r, include_reporting=False) + items_table + summary
     return _doc(_RECEIPT_CSS, body)
 
 
 # ---------------------------------------------------------------------------
 # Output — WeasyPrint PDF + raster-to-printer
 # ---------------------------------------------------------------------------
+def _pdf_target(path: str) -> Path:
+    """Normalise a caller-supplied export path: expand ~ and force a .pdf suffix
+    so an export can't be coerced into writing a different file type."""
+    p = Path(path).expanduser()
+    if p.suffix.lower() != ".pdf":
+        p = p.with_suffix(".pdf")
+    return p
+
+
 def export_report_pdf(con, receipt_id: int, path: str) -> None:
-    Path(path).write_bytes(render.build_report(con, receipt_id))
+    _pdf_target(path).write_bytes(render.build_report(con, receipt_id))
 
 
 def export_receipt_pdf(con, receipt_id: int, path: str) -> None:
-    Path(path).write_bytes(render.build_receipt(con, receipt_id))
+    _pdf_target(path).write_bytes(render.build_receipt(con, receipt_id))
 
 
 # Build the PDF bytes natively (QPainter → QPdfWriter). Safe to run on a

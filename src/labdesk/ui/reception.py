@@ -97,7 +97,13 @@ class ReceptionPage(QWidget):
         self.find_results.itemClicked.connect(self.pick_patient)
         self.linked_lbl = muted("")
         self.linked_lbl.hide()
-        self.wa_optout = QCheckBox("Patient opted out of WhatsApp (don't send reports)")
+        # Positive consent, default ON (giving a number implies the patient wants
+        # WhatsApp delivery). Unticking opts them out; the choice is timestamped.
+        self.wa_consent = QCheckBox("Send reports & bills to this patient on WhatsApp")
+        self.wa_consent.setChecked(True)
+        self.wa_consent.setToolTip(
+            "Reports/bills are delivered through WhatsApp (Meta). Untick if the "
+            "patient does not want messages sent to their number.")
         # previous visits of a picked returning patient (hidden until one is chosen)
         self.prev_lbl = muted("Previous visits")
         self.prev_lbl.hide()
@@ -106,7 +112,7 @@ class ReceptionPage(QWidget):
         self.prev_visits.setEditTriggers(QListWidget.NoEditTriggers)
         self.prev_visits.hide()
         patient_card = card(self.find, self.find_results, self.linked_lbl, pform,
-                            self.wa_optout, self.prev_lbl, self.prev_visits, title="Patient")
+                            self.wa_consent, self.prev_lbl, self.prev_visits, title="Patient")
         patient_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         left.addWidget(patient_card)
 
@@ -335,7 +341,8 @@ class ReceptionPage(QWidget):
         self.tel.setText(r["telephone"] or "")
         self.address.setText(r["address"] or "")
         self.mr_no.setText(r["mr_no"] or "")
-        self.wa_optout.setChecked(bool("wa_optout" in r.keys() and r["wa_optout"]))
+        # consent = NOT opted out (default ON for rows predating the column)
+        self.wa_consent.setChecked(not ("wa_optout" in r.keys() and r["wa_optout"]))
         self.linked_lbl.setText(
             f"✓ Linked to existing patient {r['mr_no'] or ''} — new visit will join their history")
         self.linked_lbl.show()
@@ -567,9 +574,10 @@ class ReceptionPage(QWidget):
         paid = round(self.paid.value(), 2)
         due = round(max(0.0, net - paid), 2)
         pay_method = self.payment_method.currentText()
-        optout = 1 if self.wa_optout.isChecked() else 0
+        optout = 0 if self.wa_consent.isChecked() else 1
         prefix = db.get_setting(c, "lab_no_prefix", "LAB")
         datestr = c.execute("SELECT strftime('%Y-%m-%d','now','localtime')").fetchone()[0]
+        consent_at = c.execute("SELECT datetime('now','localtime')").fetchone()[0]
         # The whole write is one transaction: if anything fails we roll back so a
         # half-saved bill can never exist (nothing charged), and we surface it.
         try:
@@ -578,13 +586,13 @@ class ReceptionPage(QWidget):
                 mr_no = mr_no or (row["mr_no"] if row else "") or f"MR{pid:05d}"
                 c.execute(
                     "UPDATE patients SET title=?,name=?,age=?,age_desc=?,sex=?,telephone=?,"
-                    "address=?,mr_no=?,wa_optout=? WHERE id=?",
-                    (title, name, age, age_desc, sex, tel, addr, mr_no, optout, pid))
+                    "address=?,mr_no=?,wa_optout=?,wa_consent_at=? WHERE id=?",
+                    (title, name, age, age_desc, sex, tel, addr, mr_no, optout, consent_at, pid))
             else:    # new patient
                 pid = c.execute(
-                    "INSERT INTO patients(title,mr_no,name,age,age_desc,sex,telephone,address,wa_optout) "
-                    "VALUES (?,?,?,?,?,?,?,?,?)",
-                    (title, mr_no, name, age, age_desc, sex, tel, addr, optout)).lastrowid
+                    "INSERT INTO patients(title,mr_no,name,age,age_desc,sex,telephone,address,"
+                    "wa_optout,wa_consent_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (title, mr_no, name, age, age_desc, sex, tel, addr, optout, consent_at)).lastrowid
                 if not mr_no:
                     mr_no = f"MR{pid:05d}"
                     c.execute("UPDATE patients SET mr_no=? WHERE id=?", (mr_no, pid))
@@ -679,7 +687,7 @@ class ReceptionPage(QWidget):
         self.title.setCurrentIndex(0)
         self.specimen.setCurrentIndex(0)
         self.age.setValue(0); self.paid.setValue(0)
-        self.wa_optout.setChecked(False)
+        self.wa_consent.setChecked(True)
         self.payment_method.setCurrentIndex(0)
         # reset the discount-approval lock for cashiers, then re-apply any promo
         self._discount_approved_by = None

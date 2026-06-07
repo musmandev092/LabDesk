@@ -22,6 +22,9 @@ Linux desktops with no Python, Qt, or database install required.
 ## Running it
 
 ```bash
+# (optional but recommended) verify the download is intact/authentic first:
+sha256sum -c LabDesk-x86_64.AppImage.sha256
+
 chmod +x LabDesk-x86_64.AppImage
 ./LabDesk-x86_64.AppImage
 ```
@@ -32,6 +35,29 @@ admin password. After that, sign in as `admin` with the password you set.
 Data lives at `~/.local/share/LabDesk/labdesk.sqlite`. It is seeded with the test
 catalog on first run. Override the location with `LABDESK` style env var
 `LABDESK_DATA_DIR=/path` (legacy name, still honoured).
+
+## Security & data protection
+
+LabDesk holds patient PII and medical results. What the app does for you, and
+what the deployment must do:
+
+- **Passwords** are stored with scrypt (memory-hard) + per-user salt; logins are
+  rate-limited with an exponential lockout. The audit log is a tamper-evident
+  hash chain (see the **Logs** page).
+- **On-disk protection.** The data dir is `0700` and the database, its WAL/SHM
+  sidecars, the WhatsApp token (`.secrets.json`) and backups are `0600` — i.e.
+  readable only by the OS user that runs LabDesk.
+- **Trust boundary — important.** Roles (receptionist/technician/admin) are
+  enforced inside the app, but the database is a plain file owned by the OS user.
+  Anyone who can log into that OS account (or copy the file) can read or change
+  the data directly, bypassing roles. Therefore:
+  - give each staff member their **own OS login**, *or*
+  - on a shared machine, enable **full-disk encryption** and lock the screen.
+- **WhatsApp delivery.** Reports/bills are sent through WhatsApp (Meta), so that
+  data transits a third party. Send only to patients who have agreed — there is a
+  per-patient consent toggle in **Reception** (on by default, timestamped). Use
+  an `https://` gateway for anything not running on this same computer; the app
+  warns before sending over plain `http` to another host.
 
 ### If the app does not start on a *minimal* AlmaLinux
 
@@ -55,8 +81,13 @@ Requires [`uv`](https://docs.astral.sh/uv/).
 ```bash
 uv sync                          # env with PySide6
 uv run python -m labdesk         # run the app
-bash scripts/build_appimage.sh   # -> build/LabDesk-x86_64.AppImage
+bash scripts/build_appimage.sh   # -> build/LabDesk-x86_64.AppImage (+ .sha256)
 ```
+
+> **Maintenance TODO:** the bundle ships CPython 3.12, which enters
+> security-fixes-only EOL in **Oct 2028**. Plan an interpreter bump (3.13/3.14)
+> before then. `appimagetool` is pinned by version + SHA-256 in
+> `scripts/build_appimage.sh` — bump both together when updating it.
 
 The test catalog the app ships with is baked into `src/labdesk/seed.sqlite`.
 It was built once from the old Access system; that one-time migration is done,

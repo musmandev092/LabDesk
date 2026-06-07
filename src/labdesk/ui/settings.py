@@ -120,7 +120,10 @@ class SettingsPage(QWidget):
         col.addWidget(self._text_card("Report footer", REPORT_FIELDS))
         col.addWidget(self._whatsapp_card())
         col.addWidget(self._security_card())
-        col.addWidget(self._backup_card())
+        # Backup/restore replaces the entire database — gate it behind an explicit
+        # admin capability rather than mere Settings-page visibility.
+        if can(self.user["role"], "manage_backups"):
+            col.addWidget(self._backup_card())
         if can(self.user["role"], "manage_users"):
             col.addWidget(self._users_card())
         col.addStretch(1)
@@ -259,7 +262,9 @@ class SettingsPage(QWidget):
         return card(
             muted("Self-hosted WhatsApp gateway (free, sends report/receipt PDFs). "
                   "See WHATSAPP_SETUP.md — run it, scan the QR, then put its URL and "
-                  "access token here. Captions accept {lab}, {lab_no}, {name}."),
+                  "access token here. Captions accept {lab}, {lab_no}, {name}.\n\n"
+                  "Privacy: reports/bills are delivered through WhatsApp (Meta). Only "
+                  "send to patients who have agreed — set per patient in Reception."),
             w, title="WhatsApp gateway",
         )
 
@@ -363,6 +368,9 @@ class SettingsPage(QWidget):
             QMessageBox.warning(self, "Backup", "Could not create a backup.")
 
     def _restore_db(self):
+        if not can(self.user["role"], "manage_backups"):
+            QMessageBox.warning(self, "Restore", "You don't have permission to restore the database.")
+            return
         bdir = str(db.data_dir() / "backups")
         path, _ = QFileDialog.getOpenFileName(self, "Restore from backup", bdir, "SQLite (*.sqlite)")
         if not path:
@@ -388,7 +396,7 @@ class SettingsPage(QWidget):
             return
         uid = self._user_ids[r]
         uname = self.con.execute("SELECT username FROM users WHERE id=?", (uid,)).fetchone()[0]
-        temp = "Temp-" + _secrets.token_hex(3)   # e.g. Temp-9af3c1
+        temp = "Temp-" + _secrets.token_hex(4)   # 32-bit single-use, e.g. Temp-9af3c1d2
         h, salt = db.hash_password(temp)
         self.con.execute(
             "UPDATE users SET pass_hash=?, salt=?, must_change_password=1, "
@@ -436,8 +444,14 @@ class SettingsPage(QWidget):
     def _pick(self, key):
         path, _ = QFileDialog.getOpenFileName(
             self, "Choose image", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)")
-        if path:
-            self.inputs[key].setText(path)
+        if not path:
+            return
+        # Copy the chosen image into the protected data dir so branding files live
+        # inside it (not referenced from arbitrary, possibly-sensitive locations).
+        try:
+            self.inputs[key].setText(str(db.import_asset(path, key)))
+        except OSError as e:
+            QMessageBox.warning(self, "Image", f"Could not use that image:\n{e}")
 
     def save(self):
         # validate the gateway URL (SSRF / mis-send guard) before persisting
@@ -447,7 +461,22 @@ class SettingsPage(QWidget):
             if not ok:
                 QMessageBox.warning(self, "WhatsApp", why)
                 return
-            if not whatsapp.is_local_url(wa_url):
+            import urllib.parse as _urlparse
+            scheme = _urlparse.urlparse(wa_url).scheme
+            if scheme == "http" and not whatsapp.is_loopback_url(wa_url):
+                # Plain http to anything other than this very computer means the
+                # patient PDF AND the access token travel UNENCRYPTED over the
+                # network where they can be intercepted. Strongly warn.
+                if QMessageBox.question(
+                    self, "WhatsApp — insecure connection",
+                    "This gateway uses plain http:// to a host that is NOT this "
+                    "computer. Patient reports and your access token would be sent "
+                    "UNENCRYPTED over the network and could be intercepted.\n\n"
+                    "Use https:// for any gateway not running on this machine. "
+                    "Save anyway?",
+                ) != QMessageBox.Yes:
+                    return
+            elif not whatsapp.is_local_url(wa_url):
                 if QMessageBox.question(
                     self, "WhatsApp",
                     "The gateway URL is not a local/loopback address. Patient PDFs and "
@@ -483,6 +512,10 @@ class SettingsPage(QWidget):
                or db.get_setting(self.con, "whatsapp_url", "")).rstrip("/")
         if not url:
             QMessageBox.warning(self, "WhatsApp", "Set the Gateway URL first.")
+            return
+        ok, why = whatsapp.validate_url(url)
+        if not ok:
+            QMessageBox.warning(self, "WhatsApp", why)
             return
         QDesktopServices.openUrl(QUrl(url + "/login"))
 

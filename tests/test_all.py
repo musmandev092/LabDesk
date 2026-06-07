@@ -604,7 +604,7 @@ check(con.execute("SELECT COUNT(*) FROM receipts WHERE due>0 AND COALESCE(voided
 con.execute("UPDATE patients SET wa_optout=1 WHERE id=(SELECT patient_id FROM receipts WHERE id=?)",
             (R_VALID,)); con.commit()
 _ok, _m = _wa.recipient_ready(con, R_VALID)
-check(not _ok and "opted out" in _m.lower(), "recipient_ready honors WhatsApp opt-out")
+check(not _ok and "agreed" in _m.lower(), "recipient_ready honors WhatsApp opt-out")
 con.execute("UPDATE patients SET wa_optout=0 WHERE id=(SELECT patient_id FROM receipts WHERE id=?)",
             (R_VALID,)); con.commit()
 # WhatsApp delivery log written on send

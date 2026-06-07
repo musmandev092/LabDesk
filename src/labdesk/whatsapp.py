@@ -144,6 +144,15 @@ def validate_url(url: str) -> tuple[bool, str]:
     return True, ""
 
 
+def is_loopback_url(url: str) -> bool:
+    """True only for strict loopback (localhost/127.0.0.1/::1) — the single case
+    where plain http carries no on-the-wire exposure (it never leaves the box).
+    Used to decide whether to warn about unencrypted http transport."""
+    import urllib.parse
+    host = (urllib.parse.urlparse(url or "").hostname or "").lower()
+    return host in ("localhost", "127.0.0.1", "::1")
+
+
 def is_local_url(url: str) -> bool:
     """True if the URL points at loopback or a private (RFC1918) address — the
     intended self-hosted deployment. Non-local hosts get a warning before sending."""
@@ -197,7 +206,8 @@ def recipient_ready(con, receipt_id: int) -> tuple[bool, str]:
     if not row:
         return False, "Receipt not found."
     if "wa_optout" in row.keys() and row["wa_optout"]:
-        return False, "This patient has opted out of WhatsApp messages."
+        return False, ("This patient hasn't agreed to receive WhatsApp messages "
+                       "(enable it in Reception).")
     if wa_number(row["telephone"] or "", _cfg(con)["cc"]) is None:
         return (False, "This patient has no valid WhatsApp number. "
                        "Add or correct the phone (03XXXXXXXXX) in Reception.")
@@ -275,31 +285,49 @@ def send_pdf(con, number: str, pdf_path: str, caption: str = "",
     }
     try:
         status, body = _post(cfg, "/chat/send/document", payload)
+        # Prefer the gateway's authoritative JSON fields over scanning the raw
+        # body for English phrases — a changed/spoofed gateway could otherwise
+        # make a failed send read as success (or vice-versa) via crafted text.
+        j = None
+        try:
+            parsed = json.loads(body)
+            if isinstance(parsed, dict):
+                j = parsed
+        except json.JSONDecodeError:
+            pass
         low = body.lower()
         not_linked = any(s in low for s in
                          ("logged in", "loggedin", "no session", "not connected"))
-        # Decide success: explicit "success" wins; an "error" field (or a 2xx body
-        # that says "not logged in") means failure even on HTTP 200; otherwise a
-        # 2xx with no error signal is treated as sent.
         success = None
-        try:
-            j = json.loads(body)
-            if isinstance(j, dict):
-                if "success" in j:
-                    success = bool(j["success"])
-                elif "error" in j:
-                    success = False
-        except json.JSONDecodeError:
-            pass
+        if j is not None:
+            if "success" in j:
+                success = bool(j["success"])
+            elif j.get("error"):
+                success = False
+            elif "code" in j:
+                try:
+                    success = 200 <= int(j["code"]) < 300
+                except (TypeError, ValueError):
+                    pass
         if success is None:
-            success = (200 <= status < 300) and not not_linked
-        if success and 200 <= status < 300:
+            # No authoritative JSON signal. Trust a 2xx ONLY if the reply was
+            # valid JSON (a genuine gateway response); a 2xx with an opaque text
+            # body is treated as UNCONFIRMED rather than assumed-delivered.
+            if 200 <= status < 300 and not not_linked:
+                success = True if j is not None else None
+            else:
+                success = False
+        if success is True and 200 <= status < 300:
             return True, f"Sent to {number} on WhatsApp."
         if not_linked:
             return False, ("WhatsApp isn't linked. Open Settings → WhatsApp → "
                            "Test connection and scan the QR code, then try again.")
         if status in (401, 403):
             return False, "Access token is wrong (Settings → WhatsApp)."
+        if success is None:
+            return False, ("The gateway accepted the upload but did not confirm "
+                           "delivery — please check the patient's WhatsApp before "
+                           "relying on this.")
         return False, f"The gateway could not send the message (HTTP {status})."
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace").lower()
@@ -377,14 +405,41 @@ def send_text(con, raw_number: str, text: str) -> tuple[bool, str]:
         return False, "Enter a valid number (03XXXXXXXXX) to send a test to."
     try:
         status, body = _post(cfg, "/chat/send/text", {"Phone": phone, "Body": text})
+        # Prefer the gateway's JSON verdict over scanning the raw body for phrases
+        # (a changed/spoofed gateway could otherwise fake success/failure).
+        j = None
+        try:
+            parsed = json.loads(body)
+            if isinstance(parsed, dict):
+                j = parsed
+        except json.JSONDecodeError:
+            pass
         low = body.lower()
-        if "logged in" in low or "no session" in low or "not connected" in low:
+        not_linked = any(s in low for s in
+                         ("logged in", "loggedin", "no session", "not connected"))
+        success = None
+        if j is not None:
+            if "success" in j:
+                success = bool(j["success"])
+            elif j.get("error"):
+                success = False
+            elif "code" in j:
+                try:
+                    success = 200 <= int(j["code"]) < 300
+                except (TypeError, ValueError):
+                    pass
+        if success is None and 200 <= status < 300 and not not_linked:
+            success = True if j is not None else None
+        if success is True and 200 <= status < 300:
+            return True, f"Test message sent to {raw_number}."
+        if not_linked:
             return False, ("WhatsApp isn't linked. Open Settings → WhatsApp → "
                            "Test connection and scan the QR code, then try again.")
-        if 200 <= status < 300:
-            return True, f"Test message sent to {raw_number}."
         if status in (401, 403):
             return False, "Access token is wrong (Settings → WhatsApp)."
+        if success is None:
+            return False, ("The gateway accepted the request but did not confirm "
+                           "it was sent — please check before relying on this.")
         return False, f"The gateway could not send the message (HTTP {status})."
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):

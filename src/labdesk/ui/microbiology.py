@@ -224,6 +224,15 @@ class MicrobiologyPage(QWidget):
             c.execute(
                 "UPDATE receipt_items SET reported=1, reported_at=datetime('now','localtime') WHERE id=?",
                 (self.current_item,))
+            # also stamp the receipt's reporting date on first finalisation, so the
+            # report's "Reporting Date" is filled for culture-only receipts too
+            # (kept stable across reprints — only set while still pending).
+            c.execute(
+                "UPDATE receipts SET status='reported', "
+                "reported_at=datetime('now','localtime') "
+                "WHERE id=(SELECT receipt_id FROM receipt_items WHERE id=?) "
+                "AND status IN ('pending','in_progress')",
+                (self.current_item,))
             c.commit()
         except Exception as e:
             try:

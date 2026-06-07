@@ -14,6 +14,24 @@ if [ -z "$APPIMAGE" ]; then
 fi
 [ -n "$APPIMAGE" ] && [ -f "$APPIMAGE" ] || { echo "AppImage not found. Pass its path:  $0 /path/to/LabDesk-x86_64.AppImage"; exit 1; }
 APPIMAGE="$(readlink -f "$APPIMAGE")"
+
+# If a checksum shipped next to the AppImage (build_appimage.sh emits one),
+# verify it BEFORE trusting/executing the file, so a corrupted or swapped
+# AppImage can't be installed unnoticed.
+SUMFILE="$APPIMAGE.sha256"
+if [ -f "$SUMFILE" ]; then
+  if command -v sha256sum >/dev/null 2>&1; then
+    ( cd "$(dirname "$APPIMAGE")" && sha256sum -c --status "$(basename "$SUMFILE")" ) || {
+      echo "!! checksum verification FAILED for $APPIMAGE — refusing to install." >&2
+      exit 1; }
+    echo "   checksum verified ($SUMFILE)"
+  else
+    echo "   WARNING: sha256sum not available — skipping checksum verification" >&2
+  fi
+else
+  echo "   note: no $SUMFILE alongside the AppImage — skipping checksum verification"
+fi
+
 chmod +x "$APPIMAGE" 2>/dev/null || true
 
 ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"

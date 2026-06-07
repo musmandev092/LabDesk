@@ -177,6 +177,15 @@ class MainWindow(QMainWindow):
         dlg = LoginDialog(self.con, self)
         dlg.setWindowTitle("Locked — sign in to continue")
         if dlg.exec() == QDialog.Accepted and dlg.user is not None:
+            if dlg.user["username"] != self.user["username"]:
+                # A *different* user unlocked the screen. The open pages were built
+                # for — and still carry the identity/privileges of — the user who
+                # locked it. Don't let them be operated under the new identity; end
+                # this session so the new user starts their own (correct) one.
+                db.log_audit(self.con, self.user["username"], "logout",
+                             f"locked session ended — {dlg.user['username']} signed in instead")
+                self.close()
+                return
             self.user = dlg.user
             db.log_audit(self.con, self.user["username"], "login", "unlocked")
             self._locked = False

@@ -35,6 +35,7 @@ CAP_MIN_LEVEL = {
     "edit_settings": 4,
     "delete": 4,                  # destructive actions (e.g. delete doctor)
     "apply_discount": 3,          # give a bill discount (Technician/Admin = "manager")
+    "manage_backups": 5,          # back up / restore the whole DB — admin only
 }
 
 

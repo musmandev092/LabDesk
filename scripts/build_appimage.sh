@@ -14,13 +14,31 @@ PATH="$HOME/.local/bin:$PATH"
 
 # appimagetool: fetch once if missing. build/ is gitignored, so a fresh clone
 # won't have it — this keeps "clone → build" working without manual setup.
+#
+# Pinned to a tagged release + SHA-256 (NOT the rolling "continuous" tag) so a
+# changed/compromised upstream asset can't silently end up baked into a build
+# that ships to a clinic. Bump AIT_VERSION and AIT_SHA256 together to update.
 mkdir -p "$TOOLS"
+AIT_VERSION="1.9.0"
+AIT_SHA256="46fdd785094c7f6e545b61afcfb0f3d98d8eab243f644b4b17698c01d06083d1"
+AIT_URL="https://github.com/AppImage/appimagetool/releases/download/${AIT_VERSION}/appimagetool-x86_64.AppImage"
+_ait_ok() { echo "${AIT_SHA256}  $1" | sha256sum -c --status 2>/dev/null; }
+# Drop a cached tool that no longer matches the pin (e.g. a stale "continuous" one).
+if [ -x "$TOOLS/appimagetool" ] && ! _ait_ok "$TOOLS/appimagetool"; then
+  echo ">> cached appimagetool failed checksum — refetching" >&2
+  rm -f "$TOOLS/appimagetool"
+fi
 if [ ! -x "$TOOLS/appimagetool" ]; then
-  echo ">> fetching appimagetool (one-time)"
-  AIT_URL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+  echo ">> fetching appimagetool $AIT_VERSION (one-time)"
   if command -v curl >/dev/null 2>&1; then curl -fsSL -o "$TOOLS/appimagetool" "$AIT_URL"
   elif command -v wget >/dev/null 2>&1; then wget -qO "$TOOLS/appimagetool" "$AIT_URL"
   else echo "!! need curl or wget to fetch appimagetool" >&2; exit 1; fi
+  if ! _ait_ok "$TOOLS/appimagetool"; then
+    echo "!! appimagetool SHA-256 mismatch — refusing to use it." >&2
+    echo "   expected: $AIT_SHA256" >&2
+    echo "   got:      $(sha256sum "$TOOLS/appimagetool" | cut -d' ' -f1)" >&2
+    rm -f "$TOOLS/appimagetool"; exit 1
+  fi
   chmod +x "$TOOLS/appimagetool"
 fi
 
@@ -317,5 +335,10 @@ if [ "$sz" -lt 10000000 ]; then
 fi
 rm -f "$LOG"
 
+# Emit a SHA-256 next to the artifact so recipients can verify authenticity
+# (the AppImage is delivered out-of-band and handles patient data).
+( cd "$BUILD" && sha256sum "$(basename "$OUT")" > "$(basename "$OUT").sha256" )
+echo ">> checksum: $OUT.sha256"
+
 echo ">> done: $OUT"
-ls -lh "$OUT"
+ls -lh "$OUT" "$OUT.sha256"

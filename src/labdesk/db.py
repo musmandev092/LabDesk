@@ -69,7 +69,8 @@ DEFAULT_SETTINGS = {
     "whatsapp_country_code": "92",
     "whatsapp_auto": "0",        # "1" => auto-send report when results saved
     "whatsapp_auto_receipt": "0",  # "1" => auto-send the bill when a receipt is saved
-    "whatsapp_api_key": "",
+    # NOTE: whatsapp_api_key is deliberately NOT a default setting — the token
+    # lives only in the 0600 .secrets.json file, never in the DB/backups.
     # caption templates ({lab}, {lab_no}, {name} placeholders; blank = built-in)
     "whatsapp_report_caption": "",
     "whatsapp_receipt_caption": "",
@@ -79,7 +80,9 @@ DEFAULT_SETTINGS = {
 # Columns added after v1 — created on existing databases if missing.
 _EXTRA_COLUMNS = {
     "patients": [("title", "TEXT"), ("mr_no", "TEXT"),
-                 ("wa_optout", "INTEGER NOT NULL DEFAULT 0")],
+                 ("wa_optout", "INTEGER NOT NULL DEFAULT 0"),
+                 # when the WhatsApp consent choice was last set (audit trail)
+                 ("wa_consent_at", "TEXT")],
     "receipts": [("title", "TEXT"), ("mr_no", "TEXT"), ("case_no", "TEXT"),
                  ("reported_at", "TEXT"), ("payment_method", "TEXT"),
                  ("voided", "INTEGER NOT NULL DEFAULT 0"), ("void_reason", "TEXT"),
@@ -137,6 +140,22 @@ def _harden_perms(target: Path) -> None:
                 os.chmod(p, 0o600)
         except OSError:
             pass
+
+
+def import_asset(src: str, name_hint: str = "asset") -> Path:
+    """Copy a chosen branding image into the (0700) data dir's `assets/` folder and
+    return the managed path. Keeps logos inside the protected data dir instead of
+    referencing arbitrary, possibly-sensitive locations elsewhere on disk."""
+    s = Path(src).expanduser()
+    assets = data_dir() / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(assets, 0o700)
+    except OSError:
+        pass
+    dest = assets / f"{name_hint}{s.suffix.lower() or '.png'}"
+    shutil.copyfile(s, dest)
+    return dest
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +280,15 @@ def init_db(
             ).fetchone()
             if adm and _verify_password("admin", adm["pass_hash"], adm["salt"] or ""):
                 con.execute("UPDATE users SET must_change_password=1 WHERE id=?", (adm["id"],))
+        # Force any account still on a legacy (non-scrypt) password hash to reset
+        # it — the next login then rehashes to scrypt. Fresh installs have none.
+        try:
+            con.execute(
+                "UPDATE users SET must_change_password=1 "
+                "WHERE pass_hash IS NOT NULL AND pass_hash NOT LIKE 'scrypt$%'"
+            )
+        except sqlite3.Error:
+            pass
     con.commit()
     _harden_perms(Path(target))
     return con
@@ -388,8 +416,14 @@ def set_setting(con: sqlite3.Connection, key: str, value: str) -> None:
 def _audit_fallback(username, action, detail, err) -> None:
     """If the audit DB write fails, append to a local file so the gap is visible."""
     try:
-        with open(data_dir() / "audit_fallback.log", "a", encoding="utf-8") as fh:
+        p = data_dir() / "audit_fallback.log"
+        with open(p, "a", encoding="utf-8") as fh:
             fh.write(f"{username}\t{action}\t{detail}\t(audit-db-error: {err})\n")
+        # this file can hold lab numbers / patient names — keep it owner-only
+        try:
+            os.chmod(p, 0o600)
+        except OSError:
+            pass
     except Exception:
         pass
 
@@ -496,11 +530,35 @@ def backup_db(reason: str = "auto", keep: int = 14) -> Path | None:
     return dest
 
 
+def _looks_like_labdesk_db(path: Path) -> bool:
+    """A restore source must be a real SQLite database that has a users table —
+    guards against overwriting the live DB with a garbage or foreign file."""
+    try:
+        with open(path, "rb") as fh:
+            if fh.read(16) != b"SQLite format 3\x00":
+                return False
+    except OSError:
+        return False
+    try:
+        probe = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            row = probe.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'"
+            ).fetchone()
+        finally:
+            probe.close()
+        return bool(row)
+    except sqlite3.Error:
+        return False
+
+
 def restore_db(path: str) -> bool:
     """Replace the live DB with a backup file (caller should close connections and
     restart the app afterwards). A safety copy of the current DB is taken first."""
     src = Path(path)
     if not src.exists():
+        return False
+    if not _looks_like_labdesk_db(src):
         return False
     try:
         cur = db_path()
