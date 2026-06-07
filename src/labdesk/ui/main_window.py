@@ -138,8 +138,9 @@ class MainWindow(QMainWindow):
         for i in range(min(9, len(self.pages))):
             QShortcut(QKeySequence(f"Alt+{i + 1}"), self, activated=lambda idx=i: self.go(idx))
 
-        self.statusBar().setSizeGripEnabled(False)
-        self.statusBar().showMessage("Ready")
+        # No bottom status bar — transient notices are shown inline on the page
+        # itself (e.g. Reception's "Added N tests" toast).
+        self.statusBar().hide()
         self.btn_group.button(0).setChecked(True)
         self.go(0)
 

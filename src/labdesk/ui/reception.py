@@ -1,7 +1,7 @@
 """Reception / Billing: register a patient visit, pick tests, take payment."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit, QComboBox,
@@ -46,6 +46,15 @@ class ReceptionPage(QWidget):
         root.setSpacing(12)
         header, _ = page_header("Reception / Billing", "Register a patient and create an invoice")
         root.addWidget(header)
+
+        # inline, self-clearing notice (replaces the old window status bar). Kept
+        # always-present so showing/clearing it doesn't shift the page layout.
+        self.toast = QLabel("")
+        self.toast.setStyleSheet("color:#1f9d55; font-weight:600;")
+        root.addWidget(self.toast)
+        self._toast_timer = QTimer(self)
+        self._toast_timer.setSingleShot(True)
+        self._toast_timer.timeout.connect(lambda: self.toast.setText(""))
 
         body = QHBoxLayout()
         body.setSpacing(14)
@@ -454,14 +463,9 @@ class ReceptionPage(QWidget):
         self.statusBar_message(msg)
 
     def statusBar_message(self, msg):
-        """Surface a brief status note via the main window's status bar if present."""
-        w = self.window()
-        if hasattr(w, "statusBar"):
-            try:
-                w.statusBar().showMessage(msg, 4000)
-                return
-            except Exception:
-                pass
+        """Show a brief, self-clearing notice inline on the page (no status bar)."""
+        self.toast.setText(msg)
+        self._toast_timer.start(4000)
 
     def _add_top_test(self):
         """Enter in the test search box adds the first matching test."""
