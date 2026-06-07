@@ -12,6 +12,18 @@ APPDIR="$BUILD/$APPID.AppDir"
 TOOLS="$BUILD/tools"
 PATH="$HOME/.local/bin:$PATH"
 
+# appimagetool: fetch once if missing. build/ is gitignored, so a fresh clone
+# won't have it — this keeps "clone → build" working without manual setup.
+mkdir -p "$TOOLS"
+if [ ! -x "$TOOLS/appimagetool" ]; then
+  echo ">> fetching appimagetool (one-time)"
+  AIT_URL="https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+  if command -v curl >/dev/null 2>&1; then curl -fsSL -o "$TOOLS/appimagetool" "$AIT_URL"
+  elif command -v wget >/dev/null 2>&1; then wget -qO "$TOOLS/appimagetool" "$AIT_URL"
+  else echo "!! need curl or wget to fetch appimagetool" >&2; exit 1; fi
+  chmod +x "$TOOLS/appimagetool"
+fi
+
 echo ">> resolving standalone python"
 REALPY="$(readlink -f "$HERE/.venv/bin/python3")"
 PYROOT="$(dirname "$(dirname "$REALPY")")"
