@@ -194,7 +194,52 @@ if [ -d "$QSP" ]; then
     done
     rm -f "$need" "$q"
   fi
+
+  # -- ICU data → 16 KB stub --------------------------------------------------
+  #    libicudata.so.73 is 31 MB of Unicode/locale/collation/converter data.
+  #    Qt 6 has its own CLDR locale DB compiled into libQt6Core, so an English
+  #    app only loses QCollator (locale-aware sorting) — which this app does not
+  #    use (it sorts via SQL ORDER BY / Qt default compare). We replace the 31 MB
+  #    file with a tiny stub exporting the icudt73_dat symbol so the NEEDED link
+  #    still resolves. (If no C compiler is present, keep the full file.)
+  ICU="$(ls "$QTLIB"/libicudata.so.* 2>/dev/null | head -n1)"
+  if [ -n "$ICU" ] && command -v gcc >/dev/null 2>&1; then
+    icuver="$(basename "$ICU" | sed -E 's/^libicudata\.so\.([0-9]+).*/\1/')"
+    cat > "$BUILD/.icustub.c" <<CSTUB
+/* ICU stubdata: exports icudt${icuver}_dat with an empty payload */
+typedef struct { unsigned short headerSize; unsigned char magic1, magic2; } MappedData;
+typedef struct { MappedData hdr; unsigned char info[20]; } Stub;
+__attribute__((visibility("default"))) const Stub icudt${icuver}_dat = { {32, 0xda, 0x27}, {0} };
+CSTUB
+    if gcc -shared -fPIC -Wl,-soname,"$(basename "$ICU")" \
+           -o "$BUILD/.icustub.so" "$BUILD/.icustub.c" 2>/dev/null; then
+      cp "$BUILD/.icustub.so" "$ICU"
+      echo "   ICU data stubbed: libicudata → $(du -h "$ICU" | cut -f1)"
+    fi
+    rm -f "$BUILD/.icustub.c" "$BUILD/.icustub.so"
+  fi
 fi
+
+# -- bundled CPython: drop what a GUI+sqlite+http app never uses ------------
+#    Tcl/Tk (tkinter package already gone; only _tkinter linked these libs)
+( cd "$PYLIB/.." 2>/dev/null && rm -f lib/libtcl*.so lib/libtk*.so 2>/dev/null || true )
+( cd "$PYLIB/.." 2>/dev/null && rm -rf lib/tcl* lib/tk* lib/itcl* lib/thread* lib/sqlite3* 2>/dev/null || true )
+rm -f "$PYLIB"/lib-dynload/_tkinter*.so "$PYLIB"/lib-dynload/_dbm*.so 2>/dev/null || true
+rm -rf "$PYLIB"/dbm 2>/dev/null || true
+#    curses terminfo DB (12 MB) — a GUI app never drops to a curses terminal
+rm -rf "$APPDIR/usr/python/share/terminfo" "$APPDIR/usr/share/terminfo" 2>/dev/null || true
+rm -rf "$APPDIR/usr/python/share/man" "$APPDIR/usr/python/share/doc" 2>/dev/null || true
+#    C headers + build artifacts (wheels are prebuilt; nothing compiles at runtime)
+rm -rf "$APPDIR/usr/python/include" 2>/dev/null || true
+rm -rf "$PYLIB"/config-*-linux-gnu 2>/dev/null || true
+find "$SP" -name '*.c' -o -name '*.h' -o -name '*.pyx' -o -name '*.pyi' 2>/dev/null | xargs -r rm -f
+#    pure-python stdlib the app + deps never import (verified by research)
+( cd "$PYLIB" && rm -rf asyncio multiprocessing concurrent xmlrpc wsgiref unittest \
+      smtplib.py imaplib.py poplib.py ftplib.py mailbox.py telnetlib.py \
+      doctest.py pdb.py pickletools.py difflib.py 2>/dev/null || true )
+#    dev launchers in bin/ (keep python3.12 + its symlinks)
+( cd "$APPDIR/usr/python/bin" 2>/dev/null && rm -f 2to3* idle3* pydoc3* *-config pip pip3 pip3.* 2>/dev/null || true )
+
 echo "   trimmed bundle: $(du -sh "$APPDIR/usr" | cut -f1)"
 
 echo ">> installing app icon (microscope logo)"
