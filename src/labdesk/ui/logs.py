@@ -60,6 +60,7 @@ ACTION_LABELS = {
     "test_deleted": ("Test deleted", "#c0392b"),
     "test_deactivated": ("Test retired", "#c0392b"),
     "test_activated": ("Test restored", "#1f9d55"),
+    "parameters_edited": ("Parameters edited", "#0e7c86"),
     "receipt_voided": ("Receipt voided", "#c0392b"),
     "receipt_edited": ("Bill edited", "#b9770e"),
     "report_delivered": ("Report delivered", "#1f9d55"),

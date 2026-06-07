@@ -16,7 +16,9 @@ import sqlite3
 from .widgets import h1, h2, muted, card, money, page_header, field_label
 from . import tasks, wa
 from .. import db, report, roles, whatsapp
-from ..constants import TITLES, AGE_UNITS, SEXES, SPECIMEN_PRESETS, normalize_phone
+from ..constants import (
+    TITLES, AGE_UNITS, SEXES, SPECIMEN_PRESETS, PAYMENT_METHODS, normalize_phone,
+)
 
 
 def _clean_specimen(s: str) -> str:
@@ -176,7 +178,7 @@ class ReceptionPage(QWidget):
         tgrid.addWidget(field_label("Net payable"), 2, 0); tgrid.addWidget(self.net, 2, 1, Qt.AlignRight)
         tgrid.addWidget(field_label("Paid"), 3, 0); tgrid.addWidget(self.paid, 3, 1)
         self.payment_method = QComboBox()
-        self.payment_method.addItems(["Cash", "Card", "Easypaisa", "JazzCash", "Bank", "Other"])
+        self.payment_method.addItems(PAYMENT_METHODS)
         tgrid.addWidget(field_label("Payment method"), 4, 0); tgrid.addWidget(self.payment_method, 4, 1)
         tgrid.addWidget(field_label("Due"), 5, 0); tgrid.addWidget(self.due, 5, 1, Qt.AlignRight)
         tgrid.addWidget(self.change_lbl, 6, 0); tgrid.addWidget(self.change, 6, 1, Qt.AlignRight)

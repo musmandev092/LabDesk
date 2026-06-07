@@ -715,6 +715,51 @@ check(con.execute("SELECT credit FROM ledger WHERE ref_id=? AND kind='adjustment
 for _a in ("panel_created", "panel_updated", "panel_deleted", "receipt_edited"):
     check(_a in ACTION_LABELS, f"Logs has a label for '{_a}'")
 
+# --- in-app parameter editor (db.save_test_parameters) ---
+_pet = con.execute("SELECT id FROM tests WHERE active=1 LIMIT 1").fetchone()[0]
+con.execute("DELETE FROM test_parameters WHERE test_id=?", (_pet,)); con.commit()
+# create three lines: heading, normal, note
+db.save_test_parameters(con, _pet, [
+    {"id": None, "part_type": "H", "name": "CBC", "units": "", "ref_male": "", "ref_female": ""},
+    {"id": None, "part_type": "N", "name": "Haemoglobin", "units": "g/dL",
+     "ref_male": "13-17", "ref_female": "12-15", "default_result": ""},
+    {"id": None, "part_type": "L", "name": "Method: automated", "units": "", "ref_male": "", "ref_female": ""},
+])
+_prows = con.execute("SELECT * FROM test_parameters WHERE test_id=? ORDER BY seq", (_pet,)).fetchall()
+check(len(_prows) == 3, "save_test_parameters inserts new lines")
+check([r["part_type"] for r in _prows] == ["H", "N", "L"], "parameter types and order preserved")
+check(_prows[1]["name"] == "Haemoglobin" and _prows[1]["ref_male"] == "13-17",
+      "normal parameter fields stored")
+# edit in place (keep ids) + reorder: swap first two, rename Haemoglobin
+_hid = _prows[1]["id"]
+db.save_test_parameters(con, _pet, [
+    {"id": _prows[1]["id"], "part_type": "N", "name": "Hb", "units": "g/dL",
+     "ref_male": "13-17", "ref_female": "12-15"},
+    {"id": _prows[0]["id"], "part_type": "H", "name": "CBC"},
+    {"id": _prows[2]["id"], "part_type": "L", "name": "Method: automated"},
+])
+_prows2 = con.execute("SELECT id,name FROM test_parameters WHERE test_id=? ORDER BY seq", (_pet,)).fetchall()
+check(_prows2[0]["name"] == "Hb" and _prows2[0]["id"] == _hid,
+      "edit preserves parameter id (results stay linked) and reorders")
+check(con.execute("SELECT COUNT(*) FROM test_parameters WHERE test_id=?", (_pet,)).fetchone()[0] == 3,
+      "edit does not duplicate rows")
+# delete-guard: a parameter with saved results cannot be removed
+_gri = con.execute("INSERT INTO receipts(lab_no,patient_name,sex,status) "
+                   "VALUES('LAB_PG','PG','Male','reported')").lastrowid
+_git = con.execute("INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) VALUES(?,?,?,0)",
+                   (_gri, _pet, "x")).lastrowid
+con.execute("INSERT INTO results(receipt_item_id,parameter_id,name,value) VALUES(?,?,?,?)",
+            (_git, _hid, "Hb", "14")); con.commit()
+try:
+    db.save_test_parameters(con, _pet, [
+        {"id": _prows2[1]["id"], "part_type": "H", "name": "CBC"}])  # omits _hid
+    check(False, "save_test_parameters blocks deleting an in-use parameter")
+except db.ParameterInUseError as _e:
+    check("Hb" in _e.names, "ParameterInUseError names the in-use parameter")
+check(con.execute("SELECT 1 FROM test_parameters WHERE id=?", (_hid,)).fetchone() is not None,
+      "in-use parameter survives the rejected delete (rollback)")
+check("parameters_edited" in ACTION_LABELS, "Logs has a label for 'parameters_edited'")
+
 
 # ============================================================================
 # 11b) Themes / caption templates / send_text / timeout / new settings

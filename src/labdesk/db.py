@@ -579,3 +579,66 @@ def delete_panel(con: sqlite3.Connection, panel_id: int) -> None:
     con.execute("UPDATE panels SET active=0 WHERE id=?", (panel_id,))
     con.execute("DELETE FROM panel_items WHERE panel_id=?", (panel_id,))
     con.commit()
+
+
+# ---- in-app parameter editor ------------------------------------------------
+class ParameterInUseError(Exception):
+    """Raised when the editor tries to remove a parameter that already has saved
+    results on a patient report (deleting it would orphan that history)."""
+    def __init__(self, names):
+        self.names = list(names)
+        super().__init__(
+            "These parameters have saved patient results and can't be removed: "
+            + ", ".join(self.names))
+
+
+def save_test_parameters(con: sqlite3.Connection, test_id: int, rows) -> None:
+    """Persist the report-line definitions for a test from the in-app editor.
+
+    Diff-based so existing parameter IDs (and any patient results referencing
+    them) survive: existing rows are UPDATEd in place, new rows INSERTed, and
+    rows the user removed are DELETEd — unless they already have saved results,
+    in which case nothing is saved and ParameterInUseError is raised.
+    """
+    old = con.execute(
+        "SELECT id, name FROM test_parameters WHERE test_id=?", (test_id,)).fetchall()
+    old_ids = {r["id"]: (r["name"] or "") for r in old}
+    keep = set()
+    try:
+        for seq, r in enumerate(rows):
+            vals = (seq, (r.get("part_type") or "N"), r.get("name") or "",
+                    r.get("units") or "", r.get("ref_male") or "", r.get("ref_female") or "",
+                    r.get("default_result") or "", r.get("superscript") or "",
+                    r.get("group_head") or "")
+            pid = r.get("id")
+            if pid and pid in old_ids:
+                con.execute(
+                    "UPDATE test_parameters SET seq=?,part_type=?,name=?,units=?,ref_male=?,"
+                    "ref_female=?,default_result=?,superscript=?,group_head=? WHERE id=?",
+                    (*vals, pid))
+                keep.add(pid)
+            else:
+                con.execute(
+                    "INSERT INTO test_parameters(test_id,seq,part_type,name,units,ref_male,"
+                    "ref_female,default_result,superscript,group_head) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?)", (test_id, *vals))
+        in_use = []
+        for pid, name in old_ids.items():
+            if pid in keep:
+                continue
+            if con.execute("SELECT 1 FROM results WHERE parameter_id=? LIMIT 1", (pid,)).fetchone():
+                in_use.append(name or f"#{pid}")
+            else:
+                con.execute("DELETE FROM test_parameters WHERE id=?", (pid,))
+        if in_use:
+            con.rollback()
+            raise ParameterInUseError(in_use)
+        con.commit()
+    except ParameterInUseError:
+        raise
+    except Exception:
+        try:
+            con.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        raise

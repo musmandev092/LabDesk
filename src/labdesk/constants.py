@@ -48,3 +48,7 @@ SPECIMEN_PRESETS = [
     "Nasopharyngeal Swab",
     "Blood for Culture",
 ]
+
+
+# Payment methods offered at billing and when editing a bill (single source of truth).
+PAYMENT_METHODS = ["Cash", "Card", "Easypaisa", "JazzCash", "Bank", "Other"]

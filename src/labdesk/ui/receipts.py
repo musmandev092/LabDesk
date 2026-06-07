@@ -70,7 +70,8 @@ class _EditReceiptDialog(QDialog):
         self.paid.valueChanged.connect(self._recompute)
         form.addRow("Paid", self.paid)
         self.method = QComboBox()
-        self.method.addItems(["Cash", "Card", "Easypaisa", "JazzCash", "Bank", "Other"])
+        from ..constants import PAYMENT_METHODS
+        self.method.addItems(PAYMENT_METHODS)
         if rec["payment_method"]:
             self.method.setCurrentText(rec["payment_method"])
         form.addRow("Payment method", self.method)
