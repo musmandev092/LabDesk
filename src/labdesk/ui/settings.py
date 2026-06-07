@@ -309,6 +309,8 @@ class SettingsPage(QWidget):
             self.users_table.setItem(i, 3, QTableWidgetItem("Yes" if r["active"] else "No"))
 
     def _add_user(self):
+        if not can(self.user["role"], "manage_users"):
+            return  # defence in depth — managing users is admin-only
         d = UserDialog(self)
         if d.exec() == QDialog.Accepted:
             v = d.values()
@@ -330,6 +332,8 @@ class SettingsPage(QWidget):
             self.refresh_users()
 
     def _toggle_user(self):
+        if not can(self.user["role"], "manage_users"):
+            return  # defence in depth — managing users is admin-only
         r = self.users_table.currentRow()
         if not (0 <= r < len(self._user_ids)):
             return
@@ -360,6 +364,8 @@ class SettingsPage(QWidget):
         )
 
     def _backup_now(self):
+        if not can(self.user["role"], "manage_backups"):
+            return  # defence in depth — backup/restore is admin-only
         p = db.backup_db("manual")
         if p:
             db.log_audit(self.con, self.user["username"], "backup_created", str(p))
@@ -389,6 +395,8 @@ class SettingsPage(QWidget):
             QMessageBox.warning(self, "Restore", "Restore failed (file unreadable?).")
 
     def _reset_user_pw(self):
+        if not can(self.user["role"], "manage_users"):
+            return  # defence in depth — managing users is admin-only
         import secrets as _secrets
         r = self.users_table.currentRow()
         if not (0 <= r < len(self._user_ids)):

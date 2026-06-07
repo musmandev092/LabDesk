@@ -186,6 +186,18 @@ QScrollBar::handle:vertical {{ background: {p['scroll']}; border-radius: 6px; mi
 QScrollBar::handle:vertical:hover {{ background: {p['scroll_hover']}; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
 QScrollArea {{ border: none; background: transparent; }}
+
+/* Popup menus (right-click row menu, etc.) — themed so they don't fall back to
+   a platform-white surface that washes out under the dark theme. Enabled items
+   use full text colour; disabled (not-yet-available) items read as muted grey. */
+QMenu {{
+    background: {p['card']}; color: {p['text']};
+    border: 1px solid {p['border']}; border-radius: 8px; padding: 4px;
+}}
+QMenu::item {{ padding: 7px 22px 7px 16px; border-radius: 6px; }}
+QMenu::item:selected {{ background: {p['primary_light']}; color: {p['text']}; }}
+QMenu::item:disabled {{ color: {p['muted']}; background: transparent; }}
+QMenu::separator {{ height: 1px; background: {p['border']}; margin: 5px 10px; }}
 QStatusBar {{ background: {p['card']}; color: {p['muted']}; border-top: 1px solid {p['border']}; }}
 QSplitter::handle {{ background: transparent; width: 14px; }}
 

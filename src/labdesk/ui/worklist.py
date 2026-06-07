@@ -1,12 +1,12 @@
 """Worklist / Results: pick a receipt, enter results per parameter, print report."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QEvent
+from PySide6.QtCore import Qt, QEvent, QDate
 from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTableWidget, QTableWidgetItem,
     QLineEdit, QComboBox, QPushButton, QHeaderView, QLabel, QScrollArea,
-    QGridLayout, QMessageBox, QCheckBox, QPlainTextEdit,
+    QGridLayout, QMessageBox, QCheckBox, QPlainTextEdit, QDateEdit,
 )
 
 from PySide6.QtWidgets import QSizePolicy
@@ -54,7 +54,16 @@ class WorklistPage(QWidget):
             self.status_filter.addItem(label, value)
         self.status_filter.setCurrentIndex(1)  # Pending
         self.status_filter.currentIndexChanged.connect(self.refresh_list)
-        top.addWidget(self.search, 1); top.addWidget(QLabel("Status:")); top.addWidget(self.status_filter)
+        # optional calendar date-range filter (on received date)
+        self.use_dates = QCheckBox("By date"); self.use_dates.toggled.connect(self._dates_toggled)
+        self.date_from = self._date_edit()
+        self.date_to = self._date_edit()
+        self.date_from.dateChanged.connect(self.refresh_list)
+        self.date_to.dateChanged.connect(self.refresh_list)
+        top.addWidget(self.search, 1)
+        top.addWidget(QLabel("Status:")); top.addWidget(self.status_filter)
+        top.addWidget(self.use_dates)
+        top.addWidget(self.date_from); top.addWidget(QLabel("→")); top.addWidget(self.date_to)
         root.addLayout(top)
 
         split = QSplitter()
@@ -139,6 +148,33 @@ class WorklistPage(QWidget):
         self.save_btn.setEnabled(False)
 
     # ---------------------------------------------------------------
+    def _date_edit(self):
+        """A calendar-popup date editor, defaulting to today, disabled until the
+        'By date' filter is switched on."""
+        d = QDateEdit()
+        d.setCalendarPopup(True)
+        d.setDisplayFormat("yyyy-MM-dd")
+        d.setDate(QDate.currentDate())
+        d.setEnabled(False)
+        d.setMinimumHeight(40)
+        return d
+
+    def _dates_toggled(self, on):
+        self.date_from.setEnabled(on)
+        self.date_to.setEnabled(on)
+        self.refresh_list()
+
+    def _date_clause(self):
+        """SQL fragment + args for the active date-range filter, else (None, [])."""
+        if not self.use_dates.isChecked():
+            return None, []
+        d1 = self.date_from.date()
+        d2 = self.date_to.date()
+        if d1 > d2:
+            d1, d2 = d2, d1
+        return ("received_at >= ? AND received_at < ?",
+                [d1.toString("yyyy-MM-dd"), d2.addDays(1).toString("yyyy-MM-dd")])
+
     def on_show(self):
         self.refresh_list()
 
@@ -150,6 +186,9 @@ class WorklistPage(QWidget):
         args = [q, q]
         if st != "All":
             sql += " AND status=?"; args.append(st)
+        dc, dargs = self._date_clause()
+        if dc:
+            sql += f" AND {dc}"; args += dargs
         sql += " ORDER BY id DESC LIMIT 500"
         rows = self.con.execute(sql, args).fetchall()
         self.table.setRowCount(0)

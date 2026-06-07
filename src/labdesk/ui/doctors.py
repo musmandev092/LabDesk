@@ -89,7 +89,10 @@ class DoctorsPage(QWidget):
 
     def _update_buttons(self):
         has = self.table.currentRow() >= 0 and self.table.currentRow() < len(self._ids)
-        self.edit_btn.setEnabled(has); self.del_btn.setEnabled(has)
+        self.edit_btn.setEnabled(has)
+        # deleting a doctor is an admin ("delete") action — keep the button
+        # disabled for lower roles instead of warning only after a click.
+        self.del_btn.setEnabled(has and can(self.user["role"], "delete"))
 
     def on_show(self):
         self.refresh()

@@ -346,7 +346,6 @@ class CatalogPage(QWidget):
         if not can(user["role"], "edit_catalog"):
             add.hide(); edit.hide(); self.retire_btn.hide()  # read-only for lower roles
             self.params_btn.hide(); self.panels_btn.hide()
-            self.tests_readonly = True
         header, self.sub = page_header("Test Catalog", "", add, edit, self.retire_btn,
                                        self.params_btn, self.panels_btn)
         lay.addWidget(header)

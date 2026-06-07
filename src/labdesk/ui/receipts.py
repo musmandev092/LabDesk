@@ -1,13 +1,13 @@
 """Receipts: history of all saved receipts — search, reprint, take due payment."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QDate
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QLineEdit,
     QComboBox, QPushButton, QHeaderView, QLabel, QMessageBox, QCheckBox,
     QDialog, QFrame, QInputDialog, QFileDialog, QFormLayout, QDoubleSpinBox,
-    QScrollArea,
+    QScrollArea, QMenu, QDateEdit,
 )
 
 from .widgets import muted, page_header, money, num_item, selected_id, status_badge
@@ -179,14 +179,24 @@ class ReceiptsPage(QWidget):
                        ("reported", "Reported"), ("delivered", "Delivered")]:
             self.status.addItem(lbl, v)
         self.status.currentIndexChanged.connect(self.refresh)
-        self.today_only = QCheckBox("Today only"); self.today_only.toggled.connect(self.refresh)
+        self.today_only = QCheckBox("Today only"); self.today_only.toggled.connect(self._today_toggled)
         self.dues_only = QCheckBox("Dues only"); self.dues_only.toggled.connect(self.refresh)
+        # calendar date-range filter (optional — enabled by its checkbox)
+        self.use_dates = QCheckBox("By date"); self.use_dates.toggled.connect(self._dates_toggled)
+        self.date_from = self._date_edit()
+        self.date_to = self._date_edit()
+        self.date_from.dateChanged.connect(self.refresh)
+        self.date_to.dateChanged.connect(self.refresh)
         export = QPushButton("Export CSV"); export.setObjectName("ghost")
         export.clicked.connect(self.export_csv)
         bar.addWidget(self.search, 1)
         bar.addWidget(self.status)
         bar.addWidget(self.today_only)
         bar.addWidget(self.dues_only)
+        bar.addWidget(self.use_dates)
+        bar.addWidget(self.date_from)
+        bar.addWidget(QLabel("→"))
+        bar.addWidget(self.date_to)
         bar.addWidget(export)
         root.addLayout(bar)
 
@@ -203,13 +213,54 @@ class ReceiptsPage(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self._update_buttons)
-        self.table.doubleClicked.connect(self.reprint)
+        # Double-clicking a row does NOT print — printing is an explicit toolbar
+        # action so a report is never sent to the printer by accident.
+        # Right-click a row for the same actions as the toolbar.
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_row_menu)
         root.addWidget(self.table, 1)
 
         self.summary = muted("")
         root.addWidget(self.summary)
 
     # ---------------------------------------------------------------
+    def _date_edit(self):
+        """A calendar-popup date editor, defaulting to today, disabled until the
+        'By date' filter is switched on."""
+        d = QDateEdit()
+        d.setCalendarPopup(True)
+        d.setDisplayFormat("yyyy-MM-dd")
+        d.setDate(QDate.currentDate())
+        d.setEnabled(False)
+        d.setMinimumHeight(40)
+        return d
+
+    def _dates_toggled(self, on):
+        self.date_from.setEnabled(on)
+        self.date_to.setEnabled(on)
+        if on and self.today_only.isChecked():   # the two date filters are exclusive
+            self.today_only.blockSignals(True)
+            self.today_only.setChecked(False)
+            self.today_only.blockSignals(False)
+        self.refresh()
+
+    def _today_toggled(self, on):
+        if on and self.use_dates.isChecked():
+            self.use_dates.setChecked(False)     # toggles off → disables the editors
+        self.refresh()
+
+    def _date_clause(self):
+        """SQL fragment + args for the active date-range filter, else (None, [])."""
+        if not self.use_dates.isChecked():
+            return None, []
+        d1 = self.date_from.date()
+        d2 = self.date_to.date()
+        if d1 > d2:                               # tolerate a reversed range
+            d1, d2 = d2, d1
+        # half-open upper bound (to-date + 1 day) so the whole 'to' day is included
+        return ("received_at >= ? AND received_at < ?",
+                [d1.toString("yyyy-MM-dd"), d2.addDays(1).toString("yyyy-MM-dd")])
+
     def on_show(self):
         self.refresh()
 
@@ -229,6 +280,9 @@ class ReceiptsPage(QWidget):
             sql += " AND status=?"; args.append(st)
         if self.today_only.isChecked():
             sql += f" AND {db.RECEIVED_TODAY}"
+        dc, dargs = self._date_clause()
+        if dc:
+            sql += f" AND {dc}"; args += dargs
         if self.dues_only.isChecked():
             sql += f" AND due>0.005 AND {db.NOT_VOIDED}"
         sql += " ORDER BY id DESC LIMIT 1000"
@@ -289,6 +343,36 @@ class ReceiptsPage(QWidget):
             for b in (*self._report_btns, self.pay_btn, self.deliver_btn,
                       self.edit_btn, self.void_btn):
                 b.setEnabled(False)
+
+    def _show_row_menu(self, pos):
+        """Right-click menu on a receipt row. Mirrors the toolbar exactly: same
+        labels, same enabled/disabled (greyed = not available yet) and the same
+        role-based visibility — the buttons stay the single source of truth."""
+        idx = self.table.indexAt(pos)
+        if not idx.isValid():
+            return                          # no menu on empty space
+        # select the right-clicked row so the actions (and button states) target it
+        self.table.selectRow(idx.row())
+        groups = (
+            self._receipt_btns,
+            self._report_btns,
+            (self.pay_btn, self.deliver_btn, self.edit_btn, self.void_btn),
+        )
+        menu = QMenu(self)
+        first = True
+        for btns in groups:
+            shown = [b for b in btns if b.isVisibleTo(self)]   # respects role hiding
+            if not shown:
+                continue
+            if not first:
+                menu.addSeparator()
+            first = False
+            for b in shown:
+                act = menu.addAction(b.text())
+                act.setEnabled(b.isEnabled())   # greyed when the action isn't available
+                act.triggered.connect(b.click)
+        if not menu.isEmpty():
+            menu.exec(self.table.viewport().mapToGlobal(pos))
 
     # ---------------------------------------------------------------
     def _lab_no(self, rid):
@@ -469,14 +553,21 @@ class ReceiptsPage(QWidget):
         self.refresh()
 
     def void_receipt(self):
+        if not can(self.user["role"], "delete"):
+            return  # defence in depth — voiding is an admin action
         rid = self._selected_id()
         if rid is None:
             return
         r = self.con.execute("SELECT lab_no, paid, voided FROM receipts WHERE id=?", (rid,)).fetchone()
         if not r or r["voided"]:
             return
-        reason, ok = QInputDialog.getText(self, "Void receipt", f"Reason for voiding {r['lab_no']}:")
-        if not ok or not reason.strip():
+        reason, ok = QInputDialog.getText(
+            self, "Void receipt", f"Reason for voiding {r['lab_no']} (required):")
+        if not ok:
+            return  # cancelled
+        if not reason.strip():
+            QMessageBox.warning(self, "Void receipt",
+                                "A reason is required to void a receipt.")
             return
         if QMessageBox.question(
             self, "Void receipt",
