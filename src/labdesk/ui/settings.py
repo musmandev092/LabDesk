@@ -6,7 +6,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QLineEdit, QPushButton, QFileDialog,
     QMessageBox, QHBoxLayout, QScrollArea, QCheckBox, QComboBox,
-    QTableWidget, QTableWidgetItem, QHeaderView, QDialog, QApplication,
+    QTableWidget, QTableWidgetItem, QHeaderView, QDialog, QApplication, QLabel,
 )
 
 from PySide6.QtPrintSupport import QPrinterInfo
@@ -15,7 +15,10 @@ from .widgets import muted, card, page_header, field_label
 from . import tasks
 from .. import db
 from .. import report, whatsapp
-from .style import build_qss
+from .style import (
+    build_qss, PRODUCT_NAME, PRODUCT_TAGLINE, DEVELOPER, DEVELOPER_GITHUB, DEVELOPER_EMAILS,
+)
+from .. import __version__
 from ..roles import ROLES, role_label, can
 
 _LABEL_W = 200  # shared label-column width so all settings cards align
@@ -126,6 +129,7 @@ class SettingsPage(QWidget):
             col.addWidget(self._backup_card())
         if can(self.user["role"], "manage_users"):
             col.addWidget(self._users_card())
+        col.addWidget(self._about_card())
         col.addStretch(1)
 
         scroll.setWidget(host)
@@ -165,6 +169,26 @@ class SettingsPage(QWidget):
             self._add_field(form, f)
         w = QWidget(); w.setLayout(form)
         return card(w, title=title)
+
+    def _about_card(self):
+        """Product + developer credit (the lab's own branding is set above; this
+        is the fixed credit for whoever built the software)."""
+        col = QVBoxLayout(); col.setSpacing(6)
+        prod = QLabel(f"<b>{PRODUCT_NAME}</b> v{__version__} — {PRODUCT_TAGLINE}")
+        prod.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        col.addWidget(prod)
+        emails = "  ·  ".join(
+            f"<a href='mailto:{e}'>{e}</a>" for e in DEVELOPER_EMAILS)
+        info = QLabel(
+            f"Developed by <b>{DEVELOPER}</b><br>"
+            f"GitHub: <a href='https://{DEVELOPER_GITHUB}'>{DEVELOPER_GITHUB}</a><br>"
+            f"Email: {emails}")
+        info.setTextFormat(Qt.RichText)
+        info.setOpenExternalLinks(True)
+        info.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        col.addWidget(info)
+        w = QWidget(); w.setLayout(col)
+        return card(w, title="About")
 
     def _logo_card(self):
         form = self._form()

@@ -15,7 +15,8 @@ from .. import db
 # bundled product logo (also the per-lab fallback brand mark)
 ASSET_LOGO = Path(__file__).resolve().parent.parent / "assets" / "app_logo.png"
 from ..roles import can_view_page, role_label
-from .style import PRODUCT_NAME, PRODUCT_TAGLINE
+from .style import PRODUCT_NAME, PRODUCT_TAGLINE, DEVELOPER, DEVELOPER_GITHUB
+from .. import __version__
 from .dashboard import DashboardPage
 from .reception import ReceptionPage
 from .receipts import ReceiptsPage
@@ -124,6 +125,12 @@ class MainWindow(QMainWindow):
         )
         logout.clicked.connect(self.close)
         sb.addWidget(logout)
+
+        # developer credit footer
+        credit = QLabel(f"{PRODUCT_NAME} v{__version__}\nDeveloped by {DEVELOPER}\n{DEVELOPER_GITHUB}")
+        credit.setObjectName("SidebarCredit")
+        credit.setAlignment(Qt.AlignCenter)
+        sb.addWidget(credit)
 
         root.addWidget(sidebar)
 

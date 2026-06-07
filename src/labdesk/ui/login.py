@@ -6,8 +6,8 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLineEdit, QPushButton, QLabel, QMessageBox, QInputDialog,
 )
 
-from .. import db
-from .style import PRODUCT_NAME, PRODUCT_TAGLINE
+from .. import db, __version__
+from .style import PRODUCT_NAME, PRODUCT_TAGLINE, DEVELOPER, DEVELOPER_GITHUB
 
 
 class LoginDialog(QDialog):
@@ -63,6 +63,12 @@ class LoginDialog(QDialog):
         btn.clicked.connect(self.try_login)
         outer.addWidget(btn)
         outer.addStretch(2)
+
+        credit = QLabel(
+            f"{PRODUCT_NAME} v{__version__}  ·  Developed by {DEVELOPER}  ·  {DEVELOPER_GITHUB}")
+        credit.setObjectName("muted")
+        credit.setAlignment(Qt.AlignCenter)
+        outer.addWidget(credit)
 
         # Enter: username → move to password; password → sign in (once).
         self.password.returnPressed.connect(self.try_login)

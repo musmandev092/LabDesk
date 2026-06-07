@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QLineEdit,
     QComboBox, QPushButton, QHeaderView, QLabel, QMessageBox, QCheckBox,
     QDialog, QFrame, QInputDialog, QFileDialog, QFormLayout, QDoubleSpinBox,
-    QScrollArea, QMenu, QDateEdit,
+    QScrollArea, QMenu, QDateEdit, QListWidget, QListWidgetItem,
 )
 
 from .widgets import muted, page_header, money, num_item, selected_id, status_badge
@@ -47,18 +47,56 @@ class _PreviewDialog(QDialog):
 
 
 class _EditReceiptDialog(QDialog):
-    """Adjust a pending bill's discount, amount paid and payment method.
-    Subtotal (the tests) is fixed here — add/remove tests via a new receipt."""
-    def __init__(self, rec, currency="Rs.", parent=None):
+    """Edit a saved bill: add/remove tests, adjust discount, amount paid and
+    payment method. A test that already has results entered cannot be removed
+    (so a finalised result can never be orphaned)."""
+    def __init__(self, con, rec, currency="Rs.", parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"Edit bill {rec['lab_no'] or ''}")
-        self.setMinimumWidth(380)
-        self._sub = rec["subtotal"] or 0.0
+        self.con = con
+        self.rec = rec
         self.cur = currency
-        form = QFormLayout(self)
-        form.addRow("Patient", QLabel(rec["patient_name"] or ""))
-        self.sub_lbl = QLabel(money(self._sub, currency))
-        form.addRow("Subtotal", self.sub_lbl)
+        self.setWindowTitle(f"Edit bill {rec['lab_no'] or ''}")
+        self.setMinimumWidth(480)
+
+        # working copy of the line items; item_id is None for a freshly-added test
+        self.items = []
+        for it in con.execute(
+            "SELECT id, test_id, test_name, charge FROM receipt_items WHERE receipt_id=? ORDER BY id",
+            (rec["id"],),
+        ):
+            self.items.append({
+                "item_id": it["id"], "test_id": it["test_id"], "name": it["test_name"],
+                "charge": it["charge"] or 0.0, "has_results": self._has_results(it["id"]),
+            })
+        self._removed = []   # item_ids of existing rows the user removed
+
+        root = QVBoxLayout(self)
+        root.addWidget(QLabel(f"<b>{rec['patient_name'] or ''}</b>  —  {rec['lab_no'] or ''}"))
+
+        # current tests
+        self.tbl = QTableWidget(0, 3)
+        self.tbl.setHorizontalHeaderLabels(["Test", "Charge", ""])
+        self.tbl.verticalHeader().setVisible(False)
+        self.tbl.setEditTriggers(QTableWidget.NoEditTriggers)
+        th = self.tbl.horizontalHeader()
+        th.setSectionResizeMode(0, QHeaderView.Stretch)
+        th.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        th.setSectionResizeMode(2, QHeaderView.Fixed); self.tbl.setColumnWidth(2, 44)
+        self.tbl.setMaximumHeight(180)
+        root.addWidget(self.tbl)
+
+        # add a test (by name or number)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Add test by name or number…")
+        self.search.textChanged.connect(self._search_tests)
+        self.results = QListWidget(); self.results.setMaximumHeight(120); self.results.hide()
+        self.results.itemActivated.connect(self._add_from_list)
+        self.results.itemDoubleClicked.connect(self._add_from_list)
+        root.addWidget(self.search); root.addWidget(self.results)
+
+        # money
+        form = QFormLayout()
+        self.sub_lbl = QLabel(); form.addRow("Subtotal", self.sub_lbl)
         self.discount = QDoubleSpinBox(); self.discount.setMaximum(100); self.discount.setSuffix(" %")
         self.discount.setValue(rec["discount_pct"] or 0)
         self.discount.valueChanged.connect(self._recompute)
@@ -69,40 +107,123 @@ class _EditReceiptDialog(QDialog):
         self.paid.setValue(rec["paid"] or 0)
         self.paid.valueChanged.connect(self._recompute)
         form.addRow("Paid", self.paid)
-        self.method = QComboBox()
-        self.method.addItems(PAYMENT_METHODS)
+        self.method = QComboBox(); self.method.addItems(PAYMENT_METHODS)
         if rec["payment_method"]:
             self.method.setCurrentText(rec["payment_method"])
         form.addRow("Payment method", self.method)
         self.due_lbl = QLabel(); self.due_lbl.setStyleSheet("font-weight:800;color:#c0392b;")
         form.addRow("Due", self.due_lbl)
+        root.addLayout(form)
+
         btns = QHBoxLayout()
-        ok = QPushButton("Save changes"); ok.clicked.connect(self.accept)
+        ok = QPushButton("Save changes"); ok.clicked.connect(self._try_accept)
         cancel = QPushButton("Cancel"); cancel.setObjectName("ghost"); cancel.clicked.connect(self.reject)
         btns.addStretch(1); btns.addWidget(cancel); btns.addWidget(ok)
-        form.addRow(btns)
+        root.addLayout(btns)
+
+        self._refresh_table()
         self._recompute()
 
+    # ---- tests -----------------------------------------------------
+    def _has_results(self, item_id):
+        """True if any result/culture row exists for this line item."""
+        for tbl in ("results", "cultures"):
+            if self.con.execute(
+                f"SELECT 1 FROM {tbl} WHERE receipt_item_id=? LIMIT 1", (item_id,)).fetchone():
+                return True
+        return False
+
+    def _refresh_table(self):
+        self.tbl.setRowCount(0)
+        for i, c in enumerate(self.items):
+            r = self.tbl.rowCount(); self.tbl.insertRow(r)
+            self.tbl.setItem(r, 0, QTableWidgetItem(c["name"] or ""))
+            ci = QTableWidgetItem(f"{c['charge']:,.0f}")
+            ci.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.tbl.setItem(r, 1, ci)
+            btn = QPushButton("✕"); btn.setFixedSize(28, 26); btn.setCursor(Qt.PointingHandCursor)
+            if c["has_results"]:
+                btn.setEnabled(False)
+                btn.setToolTip("Results already entered — this test can't be removed")
+            else:
+                btn.setToolTip("Remove this test")
+                btn.clicked.connect(lambda _=False, idx=i: self._remove(idx))
+            self.tbl.setCellWidget(r, 2, btn)
+
+    def _remove(self, idx):
+        it = self.items[idx]
+        if it["has_results"]:
+            return
+        if it["item_id"] is not None:
+            self._removed.append(it["item_id"])
+        del self.items[idx]
+        self._refresh_table(); self._recompute()
+
+    def _search_tests(self, text):
+        text = (text or "").strip(); self.results.clear()
+        if len(text) < 1:
+            self.results.hide(); return
+        like = f"%{text}%"
+        rows = self.con.execute(
+            "SELECT id,name,charges,legacy_no FROM tests WHERE active=1 "
+            "AND (name LIKE ? OR CAST(legacy_no AS TEXT) LIKE ?) ORDER BY name LIMIT 30",
+            (like, like),
+        ).fetchall()
+        for r in rows:
+            no = f"#{r['legacy_no']}  " if r["legacy_no"] else ""
+            item = QListWidgetItem(f"{no}{r['name']}   —   {self.cur} {r['charges']:,.0f}")
+            item.setData(Qt.UserRole, (r["id"], r["name"], r["charges"]))
+            self.results.addItem(item)
+        self.results.setVisible(bool(rows))
+
+    def _add_from_list(self, item):
+        if item is None:
+            return
+        data = item.data(Qt.UserRole)
+        if not data:
+            return
+        tid, name, charge = data
+        if any(c["test_id"] == tid for c in self.items):
+            return  # already on the bill
+        self.items.append({"item_id": None, "test_id": tid, "name": name,
+                           "charge": charge or 0.0, "has_results": False})
+        self.search.clear(); self.results.clear(); self.results.hide()
+        self._refresh_table(); self._recompute()
+
+    # ---- money -----------------------------------------------------
+    def _subtotal(self):
+        return round(sum(c["charge"] for c in self.items), 2)
+
     def _net(self):
-        # round to whole paisa so a discount can't leave sub-cent residue that
-        # later shows as a "phantom due" (prints 0.00 but keeps due>0)
-        return round(max(0.0, self._sub - self._sub * self.discount.value() / 100.0), 2)
+        # round to whole paisa so a discount can't leave a sub-cent "phantom due"
+        sub = self._subtotal()
+        return round(max(0.0, sub - sub * self.discount.value() / 100.0), 2)
 
     def _recompute(self):
+        self.sub_lbl.setText(money(self._subtotal(), self.cur))
         net = self._net()
         due = round(max(0.0, net - self.paid.value()), 2)
         self.net_lbl.setText(money(net, self.cur))
         self.due_lbl.setText(money(due, self.cur))
 
+    def _try_accept(self):
+        if not self.items:
+            QMessageBox.warning(self, "Edit bill", "A bill must have at least one test.")
+            return
+        self.accept()
+
     def values(self):
         net = self._net()
         paid = round(self.paid.value(), 2)
         return {
+            "subtotal": self._subtotal(),
             "discount_pct": self.discount.value(),
             "net_amount": net,
             "paid": paid,
             "due": round(max(0.0, net - paid), 2),
             "payment_method": self.method.currentText(),
+            "removed_item_ids": list(self._removed),
+            "added": [c for c in self.items if c["item_id"] is None],
         }
 
 
@@ -515,18 +636,36 @@ class ReceiptsPage(QWidget):
         if rec["status"] == "delivered" and not self._is_admin:
             return  # a delivered bill can only be edited by an admin
         cur = db.currency(self.con)
-        dlg = _EditReceiptDialog(rec, cur, self)
+        dlg = _EditReceiptDialog(self.con, rec, cur, self)
         if dlg.exec() != QDialog.Accepted:
             return
         v = dlg.values()
         old_paid = rec["paid"] or 0.0
         delta = v["paid"] - old_paid
         try:
+            # remove deleted line items — guarded to never drop one that has
+            # results/cultures (defence in depth; the dialog already blocks it)
+            for iid in v["removed_item_ids"]:
+                self.con.execute(
+                    "DELETE FROM receipt_items WHERE id=? AND receipt_id=? "
+                    "AND id NOT IN (SELECT receipt_item_id FROM results) "
+                    "AND id NOT IN (SELECT receipt_item_id FROM cultures WHERE receipt_item_id IS NOT NULL)",
+                    (iid, rid))
+            # add newly-picked tests
+            for a in v["added"]:
+                self.con.execute(
+                    "INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) VALUES (?,?,?,?)",
+                    (rid, a["test_id"], a["name"], a["charge"]))
             self.con.execute(
-                "UPDATE receipts SET discount_pct=?, less=?, net_amount=?, paid=?, due=?, "
+                "UPDATE receipts SET subtotal=?, discount_pct=?, less=?, net_amount=?, paid=?, due=?, "
                 "payment_method=? WHERE id=?",
-                (v["discount_pct"], (rec["subtotal"] or 0) - v["net_amount"], v["net_amount"],
+                (v["subtotal"], v["discount_pct"], v["subtotal"] - v["net_amount"], v["net_amount"],
                  v["paid"], v["due"], v["payment_method"], rid))
+            # adding a test to an already-finalised bill makes the report incomplete
+            # again → send it back to the worklist as in-progress.
+            if v["added"] and (rec["status"] or "") in REPORT_READY:
+                self.con.execute(
+                    "UPDATE receipts SET status='in_progress' WHERE id=?", (rid,))
             # keep the ledger balanced for any change in money actually collected
             if abs(delta) > 1e-9:
                 if delta > 0:
@@ -547,9 +686,12 @@ class ReceiptsPage(QWidget):
                 pass
             QMessageBox.warning(self, "Edit bill", f"Could not save the changes:\n{e}")
             return
+        change = ""
+        if v["added"] or v["removed_item_ids"]:
+            change = f", +{len(v['added'])}/-{len(v['removed_item_ids'])} tests"
         db.log_audit(self.con, self.user["username"], "receipt_edited",
                      f"{rec['lab_no']} — disc {v['discount_pct']:g}%, net {v['net_amount']:.0f}, "
-                     f"paid {v['paid']:.0f}, due {v['due']:.0f}")
+                     f"paid {v['paid']:.0f}, due {v['due']:.0f}{change}")
         self.refresh()
 
     def void_receipt(self):

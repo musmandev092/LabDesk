@@ -12,6 +12,13 @@ _CHECK = Path(__file__).resolve().parent.parent / "assets" / "checkmark.png"
 PRODUCT_NAME = "LabDesk"
 PRODUCT_TAGLINE = "Laboratory Management System"
 
+# Developer / author credit (the lab's own branding is white-label; this is the
+# fixed credit for whoever built the software). Single source of truth — shown in
+# the sidebar footer, the login/setup screen and the Settings → About card.
+DEVELOPER = "M Usman"
+DEVELOPER_GITHUB = "github.com/mosman092"
+DEVELOPER_EMAILS = ("mosman00092@gmail.com", "mosman092@hotmail.com")
+
 # Brand / accent colours — used directly by some widgets (dashboard stat cards,
 # report colours). They read well on both light and dark surfaces, so they stay
 # fixed; only the *surfaces* (backgrounds/text/borders) change between themes.
@@ -89,6 +96,7 @@ QLabel#fieldlbl {{ color: {p['muted']}; font-size: 13px; }}
 #SidebarBrand {{ color: white; font-size: 17px; font-weight: 800; padding: 4px 14px 2px; }}
 #SidebarSub {{ color: {p['side_sub']}; font-size: 12px; padding: 0 14px 14px; qproperty-alignment: AlignCenter; }}
 #SidebarUser {{ color: #dbf1f2; padding: 8px 18px; font-size: 13px; }}
+#SidebarCredit {{ color: rgba(255,255,255,0.45); padding: 0 10px 12px; font-size: 11px; }}
 QStatusBar {{ min-height: 24px; padding-left: 8px; }}
 
 /* Cards */
