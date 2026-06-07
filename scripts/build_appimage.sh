@@ -174,9 +174,19 @@ fi
 
 # -- bundled CPython: drop what a GUI+sqlite+http app never uses ------------
 #    Tcl/Tk (tkinter package already gone; only _tkinter linked these libs)
-( cd "$PYLIB/.." 2>/dev/null && rm -f lib/libtcl*.so lib/libtk*.so 2>/dev/null || true )
-( cd "$PYLIB/.." 2>/dev/null && rm -rf lib/tcl* lib/tk* lib/itcl* lib/thread* lib/sqlite3* 2>/dev/null || true )
+PYHOME="$APPDIR/usr/python"
+( cd "$PYHOME/lib" 2>/dev/null && rm -f libtcl*.so libtk*.so 2>/dev/null || true )
+( cd "$PYHOME/lib" 2>/dev/null && rm -rf tcl* tk* itcl* thread* 2>/dev/null || true )
 rm -f "$PYLIB"/lib-dynload/_tkinter*.so "$PYLIB"/lib-dynload/_dbm*.so 2>/dev/null || true
+#    libpython3.12.so — python-build-standalone's interpreter binary statically
+#    embeds CPython and nothing in the bundle links the shared lib, so it's ~31MB
+#    of dead duplicate. Drop it ONLY when the binary truly doesn't need it.
+if ! ldd "$PYHOME/bin/python3.12" 2>/dev/null | grep -q "libpython3"; then
+  rm -f "$PYHOME"/lib/libpython3.*.so* "$PYHOME"/lib/libpython3.so 2>/dev/null || true
+  echo "   dropped unused libpython shared lib (binary is self-contained)"
+fi
+#    Qt metatypes — moc/QML build metadata (~15MB JSON), never read at runtime
+rm -rf "$QSP/Qt/metatypes" 2>/dev/null || true
 rm -rf "$PYLIB"/dbm 2>/dev/null || true
 #    curses terminfo DB (12 MB) — a GUI app never drops to a curses terminal
 rm -rf "$APPDIR/usr/python/share/terminfo" "$APPDIR/usr/share/terminfo" 2>/dev/null || true
