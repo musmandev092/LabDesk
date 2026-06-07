@@ -602,7 +602,7 @@ def _draw_test_table(d: Doc, lay, x0, y):
             ("UNIT", cw["unit"], Qt.AlignHCenter)]
     valcols = lay["hist_labels"] + [None]   # None => current
     each = (d.content_w - cw["test"] - cw["ref"] - cw["unit"]) / len(valcols)
-    th_h = 9.0
+    th_h = 11.0   # tall enough for "CURRENT" + a two-line date without clipping
     cx = x0
     thf = _font(7, bold=True, spacing_px=0.3)
     for label, w, al in cols:
@@ -615,9 +615,9 @@ def _draw_test_table(d: Doc, lay, x0, y):
         d.fill_rect(cx, y, each, th_h, TEAL_DARK if is_cur else TEAL)
         d.rect(cx, y, each, th_h, TEAL_DARK, 1)
         if is_cur:
-            d.text(cx, y + 1, each, 3.5, "CURRENT", thf, "#ffffff", Qt.AlignHCenter | Qt.AlignTop)
+            d.text(cx, y + 1.3, each, 3.2, "CURRENT", thf, "#ffffff", Qt.AlignHCenter | Qt.AlignTop)
             dd = _fmt_two(lay["cur_label"])
-            d.text(cx, y + 4.2, each, 4.2, dd, _font(6.2), "#ffffff",
+            d.text(cx, y + 4.6, each, 6.0, dd, _font(6.2), "#ffffff",
                    Qt.AlignHCenter | Qt.AlignTop)
         else:
             d.text(cx, y, each, th_h, _fmt_one(vl), _font(6.4), "#ffffff",
