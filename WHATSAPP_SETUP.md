@@ -93,13 +93,19 @@ QR that's shown and leave it.)
 
 | Field | Value |
 |---|---|
-| Gateway URL | `http://localhost:8080` |
+| Gateway URL | `http://localhost:8080` (use `https://…` if the gateway is on another computer — see security note) |
 | Access token | the **user token** from step 3 |
 | Country code | `92` |
-| Auto‑send… (checkbox) | tick to send automatically when results are saved |
+| Auto‑send report (checkbox) | tick to send the report automatically when results are saved |
+| Auto‑send bill (checkbox) | tick to send the cash receipt automatically when a bill is saved |
 
 Click **Save settings**, then **Test connection** → it should say
 *"Gateway reachable — WhatsApp is linked and ready."*
+
+> **Consent:** reports/bills are only sent to patients who have agreed. Each
+> patient has a **"Send reports & bills on WhatsApp"** toggle in **Reception**
+> (on by default, recorded with a timestamp). Untick it and nothing is sent to
+> that patient.
 
 ---
 
@@ -137,8 +143,11 @@ wuzapi auto‑starts on boot, so normally you do nothing.
   patient's number is correct.
 - **Logged out after a restart** → you changed (or didn't set) the two 32‑char
   keys, or deleted the `wuzapi-data` volume. Keep both stable.
-- **Gateway on another PC** → set LabDesk's Gateway URL to that PC, e.g.
-  `http://192.168.1.50:8080`, and open port 8080 there.
+- **Gateway on another PC** → set LabDesk's Gateway URL to that PC and open its
+  port. Prefer **`https://`** (e.g. behind a reverse proxy) — over plain
+  `http://` the patient PDF *and* your access token travel the network
+  unencrypted. LabDesk **warns** before saving a plain‑`http` URL that points
+  anywhere other than this same computer.
 
 ---
 
@@ -147,5 +156,12 @@ wuzapi auto‑starts on boot, so normally you do nothing.
 - wuzapi is free/open‑source (MIT) and enough for one lab.
 - Don't expose port 8080 to the public internet without a firewall; the user
   token is what protects it.
+- **Privacy:** delivery goes through WhatsApp (Meta), so reports/bills transit a
+  third party. Send only to consenting patients (the per‑patient toggle in
+  Reception) and cover WhatsApp delivery in your privacy policy.
+- **Token storage:** the access token is kept in a private `0600`
+  `~/.local/share/LabDesk/.secrets.json` file — never in the database or its
+  backups, and never logged.
 - `app/src/labdesk/whatsapp.py` is the only code that talks to the gateway —
-  it posts to `/chat/send/document` with the `token` header.
+  it posts to `/chat/send/document` with the `token` header, refuses cross‑host
+  redirects, and confirms delivery from the gateway's JSON reply.
