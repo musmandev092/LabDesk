@@ -176,8 +176,41 @@ EOF
 chmod +x "$APPDIR/AppRun"
 
 echo ">> building AppImage"
-ARCH=x86_64 "$TOOLS/appimagetool" --appimage-extract-and-run "$APPDIR" \
-    "$BUILD/$APPID-x86_64.AppImage"
+OUT="$BUILD/$APPID-x86_64.AppImage"
+LOG="$BUILD/.appimagetool.log"
+# Remove any prior artifact FIRST, for two reasons:
+#  1. unlinking frees the path even if an old build is still running (a busy
+#     executable can't be overwritten — ETXTBSY — but mksquashfs can create a
+#     fresh file at the now-free path);
+#  2. a leftover file then can't masquerade as a fresh successful build below.
+rm -f "$OUT"
 
-echo ">> done: $BUILD/$APPID-x86_64.AppImage"
-ls -lh "$BUILD/$APPID-x86_64.AppImage"
+set +e -o pipefail
+ARCH=x86_64 "$TOOLS/appimagetool" --appimage-extract-and-run "$APPDIR" "$OUT" 2>&1 | tee "$LOG"
+rc=${PIPESTATUS[0]}
+set -e
+
+# appimagetool exits 0 even when its mksquashfs child fails — so don't trust the
+# exit code alone. Fail loudly on a non-zero code, a squashfs error in the log,
+# or a missing / implausibly small output file.
+if [ "$rc" -ne 0 ]; then
+  echo "!! appimagetool failed (exit $rc) — see output above" >&2
+  exit "$rc"
+fi
+if grep -qiE 'mksquashfs .*exited with code|sfs_mksquashfs error|Text file busy' "$LOG"; then
+  echo "!! squashfs packaging failed (is a LabDesk AppImage still running / the file busy?)" >&2
+  exit 1
+fi
+if [ ! -s "$OUT" ]; then
+  echo "!! expected output not produced: $OUT" >&2
+  exit 1
+fi
+sz=$(stat -c%s "$OUT")
+if [ "$sz" -lt 10000000 ]; then
+  echo "!! output is implausibly small ($sz bytes) — build likely failed: $OUT" >&2
+  exit 1
+fi
+rm -f "$LOG"
+
+echo ">> done: $OUT"
+ls -lh "$OUT"
