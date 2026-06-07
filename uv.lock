@@ -7,21 +7,6 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "allied-lab"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "pyside6" },
-    { name = "weasyprint" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "pyside6", specifier = ">=6.7,<6.12" },
-    { name = "weasyprint", specifier = ">=69.0" },
-]
-
-[[package]]
 name = "brotli"
 version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -196,6 +181,21 @@ woff = [
     { name = "brotli", marker = "platform_python_implementation == 'CPython'" },
     { name = "brotlicffi", marker = "platform_python_implementation != 'CPython'" },
     { name = "zopfli" },
+]
+
+[[package]]
+name = "labdesk"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "pyside6" },
+    { name = "weasyprint" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pyside6", specifier = ">=6.7,<6.12" },
+    { name = "weasyprint", specifier = ">=69.0" },
 ]
 
 [[package]]
