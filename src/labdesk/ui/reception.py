@@ -318,6 +318,8 @@ class ReceptionPage(QWidget):
         self.find_results.show()
 
     def pick_patient(self, item):
+        if item is None:        # itemActivated can fire with no item (Enter on empty list)
+            return
         pid = item.data(Qt.UserRole)
         if pid is None:
             return
@@ -459,6 +461,9 @@ class ReceptionPage(QWidget):
                 return
 
     def add_from_list(self, item):
+        # itemActivated can fire with no item (Enter on a focused empty list, esp. Wayland)
+        if item is None:
+            return
         data = item.data(Qt.UserRole)
         if not data:
             return  # hint / empty-state row

@@ -955,6 +955,14 @@ try:
         check(rp2._selected_id() is not None, "receipts: selected row gives an id")
         rp2.table.clearSelection(); app.processEvents()
         check(rp2._selected_id() is None, "receipts: deselect -> _selected_id None (stale-action fix)")
+
+    # reception: itemActivated can fire with item=None (Enter on empty list, Wayland)
+    # — the handlers must not crash (regression: AttributeError on None.data)
+    from labdesk.ui.reception import ReceptionPage
+    rcp = ReceptionPage(con, _u)
+    rcp.add_from_list(None)          # would raise 'NoneType has no attribute data' before the fix
+    rcp.pick_patient(None)
+    check(True, "reception: add_from_list/pick_patient tolerate a None item")
 except Exception as e:  # pragma: no cover
     check(False, f"Qt section crashed: {e}")
 
