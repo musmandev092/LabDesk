@@ -277,7 +277,6 @@ def build_receipt(con, receipt_id: int) -> bytes:
     h2 = _font(13, bold=True, spacing_px=1.0)
     d.text(x0, y, d.content_w, 7, "CASH RECEIPT", h2, TEAL, Qt.AlignRight | Qt.AlignTop)
     meta_f = _font(9)
-    meta_fb = _font(9, bold=True)
     d.text(x0, y + 7.5, d.content_w, 5, f"Date: {(r['received_at'] or '')[:16]}", meta_f, MUTED,
            Qt.AlignRight | Qt.AlignTop)
     if reg_by:
@@ -411,7 +410,7 @@ def _report_letterhead(d: Doc, g, x0, y):
     al = (g("accred_logo_1") or "").strip()
     ry = y
     if al and Path(al).exists():
-        iw = d.image(x0 + d.content_w - 20, ry, al, 40)
+        d.image(x0 + d.content_w - 20, ry, al, 40)
         ry += px(40) + 1
     if regs:
         d.text(x0, ry, d.content_w, 3.4, regs, _font(7.3), MUTED, Qt.AlignRight | Qt.AlignTop)
@@ -509,21 +508,15 @@ def _measure_test(d: Doc, con, item, sex, receipt):
     hist_labels, hist_maps = R._history_for_item(con, item, receipt)
     cur_label = (receipt["received_at"] or "")[:10]
 
-    # columns: Test(26%) | Reference Range | Unit(12%) | [hist...] | Current
-    fixed = ["test", "ref", "unit"]
-    nhist = len(hist_labels)
+    # columns: Test(26%) | Reference Range | Unit(11%) | [hist...] | Current
     cw = {}
     cw["test"] = d.content_w * 0.26
     cw["unit"] = d.content_w * 0.11
-    valcols = nhist + 1
     rest = d.content_w - cw["test"] - cw["unit"]
     cw["ref"] = rest * 0.46
-    each_val = (rest - cw["ref"]) / valcols
     rows = []
-    name_f = _font(8.6)            # test name (weight 500-ish)
-    cell_f = _font(8.6, bold=True)
+    name_f = _font(8.6)            # test name
     ref_f = _font(7.8)
-    cur_f = _font(9.5, bold=True)
     for res in results:
         if "hidden" in res.keys() and res["hidden"]:
             continue
@@ -682,7 +675,6 @@ def _draw_blocks_after_table(d: Doc, lay, x0, y):
     rem = ((item["remarks"] if "remarks" in item.keys() else "") or "").strip()
     if rem:
         y += 2.5
-        lblf = _font(8, bold=True)
         bf = _font(8)
         inner = d.content_w - 6
         th = d.text_height(f"Remarks: {rem}", bf, inner, True)
