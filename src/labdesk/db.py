@@ -295,9 +295,18 @@ def init_db(
 
 
 def _sync_catalog_from_seed(con: sqlite3.Connection) -> None:
-    """Update an existing DB's catalog (tests + parameters + ranges) from the
-    shipped seed when the seed is newer. Patient/receipt/result/settings data is
-    untouched. Past reports keep their own snapshotted ranges, so this is safe.
+    """Bring a newer catalog version's *additions* into an existing DB — WITHOUT
+    ever overwriting the lab's own catalog.
+
+    After first run the lab OWNS its catalog. An app update may ship new tests in
+    a higher `catalog_version`; this only INSERTs tests/parameters this DB does
+    not already have (matched by id). Existing rows — prices (charges), reference
+    ranges, units, names, the active/retired flag — are NEVER modified or deleted.
+    So pushing a new AppImage + checksum can add tests but can never reset a price
+    or a range the lab edited. (Past reports keep their own snapshotted ranges.)
+
+    To push a *correction* to an existing test, change it in the in-app Test
+    Catalog editor — deliberately, by an admin — not silently via an update.
     """
     if not SEED_DB.exists():
         return
@@ -316,15 +325,8 @@ def _sync_catalog_from_seed(con: sqlite3.Connection) -> None:
 
     con.execute("ATTACH ? AS seed", (str(SEED_DB),))
     try:
-        # 1) refresh reference ranges + units on every parameter that exists in both
-        con.execute(
-            """UPDATE test_parameters SET
-                 ref_male   = (SELECT s.ref_male   FROM seed.test_parameters s WHERE s.id=test_parameters.id),
-                 ref_female = (SELECT s.ref_female FROM seed.test_parameters s WHERE s.id=test_parameters.id),
-                 units      = (SELECT s.units      FROM seed.test_parameters s WHERE s.id=test_parameters.id)
-               WHERE id IN (SELECT id FROM seed.test_parameters)"""
-        )
-        # 2) add tests/params that the seed has but this DB doesn't
+        # ADDITIVE ONLY: insert tests/params the seed has but this DB doesn't
+        # (matched by id). No UPDATE, no DELETE — the lab's edits are sacrosanct.
         tcols = [r[1] for r in con.execute('PRAGMA table_info("tests")')]
         scols = {r[1] for r in con.execute("PRAGMA seed.table_info('tests')")}
         cols = ", ".join(f'"{c}"' for c in tcols if c in scols)
@@ -338,11 +340,6 @@ def _sync_catalog_from_seed(con: sqlite3.Connection) -> None:
         con.execute(
             f'INSERT INTO test_parameters ({cols}) SELECT {cols} FROM seed.test_parameters '
             f'WHERE id NOT IN (SELECT id FROM test_parameters)'
-        )
-        # remove known junk placeholder parameters from older installs
-        con.execute(
-            "DELETE FROM test_parameters WHERE name IN "
-            "('b','bb','bbb','bbbb','bbbbb','bbbbbb') OR name LIKE '741%'"
         )
         con.execute(
             "INSERT INTO settings(key,value) VALUES ('catalog_version',?) "
