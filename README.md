@@ -71,7 +71,8 @@ src/labdesk/        (internal package name)
   app.py            bootstrap (wizard -> login -> main window)
   db.py             SQLite layer, schema, seeding, auth, white-label settings
   schema.sql        clean normalized schema
-  report.py         receipt + lab-report HTML, print & PDF
+  report.py         receipt + lab-report data/logic, print & PDF API
+  render.py         native Qt (QPainter→QPdfWriter) PDF rendering — no WeasyPrint
   seed.sqlite       catalog the app ships with (706 tests, no branding)
   ui/               one module per screen + setup_wizard + style
 scripts/

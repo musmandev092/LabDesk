@@ -136,6 +136,11 @@ def run(argv: list[str]) -> int:
         app.setWindowIcon(QIcon(str(APP_ICON)))
     app.setStyleSheet(QSS)
 
+    # Load the report font once here on the main thread; PDF building runs on a
+    # worker thread and must not touch QFontDatabase off-thread.
+    from . import render
+    render.preload()
+
     # Single instance: if LabDesk is already open, focus it and quit this launch.
     server = None
     if os.environ.get("LABDESK_SELFTEST") != "1":

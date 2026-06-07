@@ -1,11 +1,12 @@
-"""Report & receipt generation — full HTML/CSS rendered to PDF by WeasyPrint.
+"""Report & receipt generation.
 
-The two documents follow the supplied design mockups exactly (modern CSS: a
-branded letterhead, a rounded boxed patient card, a teal cumulative results
-table with a highlighted CURRENT column and inline ↑/↓ flags for the lab
-report; a slate "CASH RECEIPT" with an amount-in-words box and a totals panel
-for the bill). Inter is bundled (assets/fonts/Inter.ttf) so it renders the same
-offline. Printing rasterises the WeasyPrint PDF onto the chosen QPrinter.
+Two documents — a branded lab report (letterhead, rounded patient card, teal
+cumulative results table with a highlighted CURRENT column and inline ↑/↓ flags)
+and a "CASH RECEIPT" (amount-in-words box + totals panel). They are drawn
+natively with Qt (see render.py: QPainter → QPdfWriter), so the app needs no
+WeasyPrint/Pango/Cairo/fontTools/Pillow. Inter is bundled (assets/fonts) and
+embedded in the PDF. The HTML builders below are retained for content tests and
+are not used for rendering. Printing rasterises the PDF onto the chosen QPrinter.
 """
 from __future__ import annotations
 
@@ -17,9 +18,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-import weasyprint
-
-from . import db
+from . import db, render
 
 # ---------------------------------------------------------------------------
 # palette — matches the supplied design mockups
@@ -680,47 +679,28 @@ def build_receipt_html(con, receipt_id: int) -> str:
 # ---------------------------------------------------------------------------
 # Output — WeasyPrint PDF + raster-to-printer
 # ---------------------------------------------------------------------------
-def _pdf_bytes(html_text: str) -> bytes:
-    return weasyprint.HTML(string=html_text, base_url=str(ASSETS)).write_pdf()
-
-
-def export_pdf(html_text: str, path: str) -> None:
-    """Render a prepared HTML document to a PDF file."""
-    Path(path).write_bytes(_pdf_bytes(html_text))
-
-
 def export_report_pdf(con, receipt_id: int, path: str) -> None:
-    Path(path).write_bytes(_pdf_bytes(build_report_html(con, receipt_id)))
+    Path(path).write_bytes(render.build_report(con, receipt_id))
 
 
 def export_receipt_pdf(con, receipt_id: int, path: str) -> None:
-    Path(path).write_bytes(_pdf_bytes(build_receipt_html(con, receipt_id)))
+    Path(path).write_bytes(render.build_receipt(con, receipt_id))
 
 
-# Build the PDF bytes — the slow (~1-2s) WeasyPrint step. These are safe to run
-# on a background thread (see ui/tasks.py); the resulting bytes are then printed
-# or previewed on the UI thread.
+# Build the PDF bytes natively (QPainter → QPdfWriter). Safe to run on a
+# background thread (see ui/tasks.py); the bytes are printed/previewed on the UI
+# thread. QPainter/QPdfWriter do not require the GUI thread.
 def build_report_bytes(con, receipt_id: int) -> bytes:
-    return _pdf_bytes(build_report_html(con, receipt_id))
+    return render.build_report(con, receipt_id)
 
 
 def build_receipt_bytes(con, receipt_id: int) -> bytes:
-    return _pdf_bytes(build_receipt_html(con, receipt_id))
+    return render.build_receipt(con, receipt_id)
 
 
 def build_test_page_bytes(printer_name: str = "") -> bytes:
     """A small printer-test page, as PDF bytes."""
-    when = datetime.now().strftime("%d %b %Y %H:%M")
-    target = printer_name or "Ask each time (print dialog)"
-    body = (
-        f"<div style='border:2px solid #005f73;border-radius:8px;padding:24px;margin:24px;'>"
-        f"<h1 style='color:#005f73;margin:0 0 8px;'>LabDesk — Printer Test</h1>"
-        f"<p style='font-size:12pt;'>If you can read this, your printer is working.</p>"
-        f"<p style='color:#64748b;'>Printer: <b>{_esc(target)}</b><br>{_esc(when)}</p>"
-        f"<p style='color:#005f73;font-size:13pt;font-weight:700;'>✓ ↑ ↓ Rs. 1,234.50</p>"
-        f"</div>"
-    )
-    return _pdf_bytes(_doc("body{font-family:'Inter',sans-serif;color:#1e293b;}", body))
+    return render.build_test_page(printer_name)
 
 
 # Cap the raster DPI when sending to a hardware printer. At QPrinter's native

@@ -35,60 +35,12 @@ for pkg in PySide6 shiboken6 \
            pyside6_essentials-6.11.1.dist-info shiboken6-6.11.1.dist-info; do
   cp -a "$VENV_SP/$pkg" "$BUNDLE_SP/" 2>/dev/null || true
 done
-# WeasyPrint + its pure-Python dependencies (PDF rendering engine)
-for pkg in weasyprint pydyf tinycss2 tinyhtml5 cssselect2 webencodings \
-           pyphen PIL fontTools cffi pycparser brotli brotlicffi zopfli; do
-  cp -a "$VENV_SP/$pkg" "$BUNDLE_SP/" 2>/dev/null || true
-  cp -a "$VENV_SP/$pkg"-*.dist-info "$BUNDLE_SP/" 2>/dev/null || true
-done
-# top-level compiled extension modules (cffi backend, zopfli, brotli, etc.)
-for so in "$VENV_SP"/_cffi_backend*.so "$VENV_SP"/_brotli*.so "$VENV_SP"/zopfli*.so; do
-  [ -f "$so" ] && cp -a "$so" "$BUNDLE_SP/"
-done
-# manylinux ".libs" sidecars (Pillow ships libtiff/libjpeg/… in pillow.libs,
-# referenced via the extension's RPATH=$ORIGIN/../<pkg>.libs)
-for libsdir in "$VENV_SP"/*.libs; do
-  [ -d "$libsdir" ] && cp -a "$libsdir" "$BUNDLE_SP/"
-done
+# (WeasyPrint and its native stack — pango/cairo/glib/fontTools/Pillow/cffi —
+#  are gone: reports are now drawn natively with Qt, see src/labdesk/render.py.)
 
 # our app, vendored as a real (non-editable) package
 cp -a "$HERE/src/labdesk" "$BUNDLE_SP/labdesk"
-
-echo ">> bundling WeasyPrint native libraries (pango / glib / fontconfig …)"
-NATIVE="$APPDIR/usr/lib"
-mkdir -p "$NATIVE"
-# Best-effort, SIGPIPE-tolerant: relax -e/pipefail for this discovery block.
-set +e +o pipefail
-# WeasyPrint dlopens these 6; bundle them plus their transitive deps, minus the
-# core C runtime (glibc/ld/libstdc++ stay on the host to avoid ABI breakage).
-SEED_LIBS="libfontconfig.so.1 libgobject-2.0.so.0 libharfbuzz.so.0 \
-           libharfbuzz-subset.so.0 libpango-1.0.so.0 libpangoft2-1.0.so.0"
-EXCLUDE='^(libc|libm|libdl|libpthread|librt|libresolv|ld-linux|libstdc\+\+|libgcc_s)\.'
-LDC="$(/usr/bin/ldconfig -p 2>/dev/null)"
-declare -A SEEN
-queue=()
-for s in $SEED_LIBS; do
-  # ldconfig lines look like: "<TAB>soname (libc6,x86-64) => /path/soname"
-  p="$(printf '%s\n' "$LDC" | awk -v n="$s" '$1==n{print $NF}' | head -n1)"
-  [ -n "$p" ] && queue+=("$p")
-done
-while [ ${#queue[@]} -gt 0 ]; do
-  lib="${queue[0]}"; queue=("${queue[@]:1}")
-  base="$(basename "$lib")"
-  [ -n "${SEEN[$base]:-}" ] && continue
-  printf '%s\n' "$base" | grep -qE "$EXCLUDE" && continue
-  real="$(readlink -f "$lib")"
-  [ -f "$real" ] || continue
-  SEEN[$base]=1
-  cp -a "$real" "$NATIVE/$base"
-  # enqueue this lib's own NEEDED dependencies
-  deps="$(ldd "$real" 2>/dev/null | grep '=>')"
-  while read -r _name _arrow path _rest; do
-    [ -f "$path" ] && queue+=("$path")
-  done < <(printf '%s\n' "$deps")
-done
-echo "   bundled $(ls "$NATIVE" 2>/dev/null | wc -l) native libs"
-set -e -o pipefail
+mkdir -p "$APPDIR/usr/lib"   # kept for any Qt-needed libs the trim step may add
 
 echo ">> bundling Inter font + a minimal fontconfig config"
 mkdir -p "$APPDIR/usr/share/fonts"
