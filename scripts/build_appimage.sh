@@ -106,33 +106,96 @@ cat > "$APPDIR/usr/etc/fonts/fonts.conf" <<'FCEOF'
 </fontconfig>
 FCEOF
 
-echo ">> trimming bundle (caches, tests, static libs)"
+echo ">> trimming bundle (this is what keeps the AppImage small — see PROGRESS notes)"
+PYLIB="$APPDIR/usr/python/lib/python3.12"
+SP="$PYLIB/site-packages"
+QSP="$SP/PySide6"
+QTLIB="$QSP/Qt/lib"
+
+# -- byte-compiled caches --------------------------------------------------
 find "$APPDIR/usr/python" -depth -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
 find "$APPDIR/usr/python" -type f -name '*.pyc' -delete 2>/dev/null || true
-# drop heavy PySide6 modules the app never imports (keep core/gui/widgets/print + sqlite)
-SP="$APPDIR/usr/python/lib/python3.12/site-packages/PySide6"
-if [ -d "$SP" ]; then
-  # Only remove clearly-independent heavy modules. Keep Network/OpenGL/Sql etc.
-  # because QtGui/QtWidgets/QtPrintSupport may link against them.
-  # NOTE: QtPdf is KEPT — report.py rasterises the WeasyPrint PDF to the printer.
-  for mod in Qt3D* QtWeb* QtQuick* QtQml* QtMultimedia* QtCharts* QtDataVisualization* \
-             QtBluetooth* QtNfc* QtPositioning* QtLocation* QtSensors* QtSerialPort* \
-             QtRemoteObjects* QtScxml* QtSpatialAudio* QtTextToSpeech* \
-             QtDesigner* QtHelp* QtQuick3D*; do
-    rm -rf "$SP"/$mod 2>/dev/null || true
-  done
-  rm -rf "$SP/Qt/qml" "$SP/Qt/translations" 2>/dev/null || true
+
+# -- stdlib + pip the bundled runtime never needs --------------------------
+( cd "$PYLIB" && rm -rf ensurepip idlelib lib2to3 tkinter turtledemo turtle.py \
+      pydoc_data test 2>/dev/null || true )
+find "$SP" -mindepth 1 -maxdepth 2 -type d \( -name test -o -name tests \) -exec rm -rf {} + 2>/dev/null || true
+rm -rf "$SP"/pip "$SP"/pip-*.dist-info "$SP"/setuptools "$SP"/pkg_resources \
+       "$SP"/_distutils_hack "$SP"/setuptools-*.dist-info 2>/dev/null || true
+
+# -- WeasyPrint deps the English/TTF render path doesn't use ----------------
+#    brotli/zopfli are WOFF/WOFF2 (de)compression; the bundled font is TTF.
+rm -f  "$SP"/_brotli.cpython-*.so 2>/dev/null || true
+rm -rf "$SP"/brotli "$SP"/brotli-*.dist-info "$SP"/zopfli "$SP"/zopfli-*.dist-info 2>/dev/null || true
+#    Pillow AVIF: ~5MB codec for a format no lab logo uses (lazy-loaded plugin).
+rm -f  "$SP"/PIL/_avif.cpython-*.so "$SP"/PIL/AvifImagePlugin.py 2>/dev/null || true
+rm -f  "$SP"/pillow.libs/libavif-*.so* 2>/dev/null || true
+#    Hyphenation: keep English only (reports are issued in English).
+if [ -d "$SP/pyphen/dictionaries" ]; then
+  ( cd "$SP/pyphen/dictionaries" && \
+    find . -maxdepth 1 -name 'hyph_*.dic' ! -name 'hyph_en*.dic' -delete 2>/dev/null || true )
 fi
-# remove matching shared libs for the trimmed modules
-QTLIB="$SP/Qt/lib"
-if [ -d "$QTLIB" ]; then
-  for pat in Qt63D Qt6Web Qt6Quick Qt6Qml Qt6Multimedia Qt6Charts Qt6DataVisualization \
-             Qt6Bluetooth Qt6Nfc Qt6Positioning Qt6Location Qt6Sensors Qt6SerialPort \
-             Qt6RemoteObjects Qt6Scxml Qt6SpatialAudio Qt6TextToSpeech Qt6Designer \
-             Qt6Help Qt6Quick3D; do
-    rm -f "$QTLIB/lib${pat}"*.so* 2>/dev/null || true
+
+if [ -d "$QSP" ]; then
+  # -- PySide6 dev/CLI tools + build-time artifacts (not needed at runtime) --
+  ( cd "$QSP" && rm -rf assistant linguist lupdate lrelease qmlls qmlformat qmllint \
+        qmlimportscanner qmltyperegistrar qsb balsam balsamui deploy.py android_deploy.py \
+        project examples scripts glue doc include typesystems metatypes Designer designer \
+        rcc uic lconvert lprodump qml QtAsyncio svgtoqml lib 2>/dev/null || true )
+  rm -f "$QSP"/*.pyi "$QSP"/libpyside6qml.abi3.so* 2>/dev/null || true
+
+  # -- Python bindings: keep ONLY the modules the app imports ----------------
+  KEEP_MODS="QtCore QtGui QtNetwork QtPdf QtPdfWidgets QtPrintSupport QtWidgets"
+  for so in "$QSP"/*.abi3.so; do
+    [ -e "$so" ] || continue
+    m="$(basename "$so" .abi3.so)"
+    case " $KEEP_MODS " in *" $m "*) : ;; *) rm -f "$so" ;; esac
   done
+
+  # -- Qt resources / plugins the app never loads ----------------------------
+  rm -rf "$QSP/Qt/resources" "$QSP/Qt/libexec" "$QSP/Qt/qml" "$QSP/Qt/translations" 2>/dev/null || true
+  ( cd "$QSP/Qt/plugins" 2>/dev/null && rm -rf \
+        sceneparsers assetimporters renderers renderplugins geometryloaders \
+        sqldrivers qmltooling qmllint scxmldatamodel multimedia geoservices position \
+        canbus wayland-shell-integration wayland-graphics-integration-server \
+        wayland-graphics-integration-client wayland-decoration-client \
+        egldeviceintegrations sensors texttospeech webview designer vectorimageformats \
+        2>/dev/null || true )
+  # platform plugins: keep only xcb (desktop) + offscreen (headless/self-test)
+  ( cd "$QSP/Qt/plugins/platforms" 2>/dev/null && \
+    find . -maxdepth 1 -name 'libq*.so' ! -name 'libqxcb.so' ! -name 'libqoffscreen.so' \
+        -delete 2>/dev/null || true )
+  # drop the dangling virtual-keyboard / ibus input-context plugins (keep compose)
+  rm -f "$QSP/Qt/plugins/platforminputcontexts/libqtvirtualkeyboardplugin.so" \
+        "$QSP/Qt/plugins/platforminputcontexts/libibusplatforminputcontextplugin.so" 2>/dev/null || true
+
+  # -- FFmpeg (QtMultimedia only; ~56MB of dup copies) -----------------------
+  rm -f "$QTLIB"/libav*.so* 2>/dev/null || true
+
+  # -- remove every libQt6*.so left unreachable from the kept bindings+plugins
+  #    (computed via ldd closure so it self-adapts across Qt versions). icu* and
+  #    other non-Qt libs are dependencies and are preserved automatically.
+  if [ -d "$QTLIB" ]; then
+    export LD_LIBRARY_PATH="$QTLIB:$APPDIR/usr/lib:${LD_LIBRARY_PATH:-}"
+    need="$(mktemp)"; q="$(mktemp)"
+    for m in $KEEP_MODS; do [ -f "$QSP/$m.abi3.so" ] && echo "$QSP/$m.abi3.so" >> "$q"; done
+    find "$QSP/Qt/plugins" -name '*.so' >> "$q" 2>/dev/null
+    : > "$need"
+    while [ -s "$q" ]; do
+      f="$(head -n1 "$q")"; sed -i 1d "$q"
+      for d in $(ldd "$f" 2>/dev/null | grep -oE 'libQt6[A-Za-z]+\.so\.6' | sort -u); do
+        grep -qxF "$d" "$need" && continue
+        echo "$d" >> "$need"; [ -f "$QTLIB/$d" ] && echo "$QTLIB/$d" >> "$q"
+      done
+    done
+    for lib in "$QTLIB"/libQt6*.so.6; do
+      [ -e "$lib" ] || continue
+      grep -qxF "$(basename "$lib")" "$need" || rm -f "$lib"*
+    done
+    rm -f "$need" "$q"
+  fi
 fi
+echo "   trimmed bundle: $(du -sh "$APPDIR/usr" | cut -f1)"
 
 echo ">> installing app icon (microscope logo)"
 ICON_SRC="$HERE/src/labdesk/assets/app_icon_256.png"
@@ -186,7 +249,14 @@ LOG="$BUILD/.appimagetool.log"
 rm -f "$OUT"
 
 set +e -o pipefail
-ARCH=x86_64 "$TOOLS/appimagetool" --appimage-extract-and-run "$APPDIR" "$OUT" 2>&1 | tee "$LOG"
+# The bundled mksquashfs only ships zstd, so push it to max level (22, vs the
+# level-15 default) with 1 MiB blocks for the best ratio it can manage. Costs a
+# little build + first-launch time; payload is mostly already-stripped ELF.
+ARCH=x86_64 "$TOOLS/appimagetool" --appimage-extract-and-run \
+    --comp zstd \
+    --mksquashfs-opt -b --mksquashfs-opt 1M \
+    --mksquashfs-opt -Xcompression-level --mksquashfs-opt 22 \
+    "$APPDIR" "$OUT" 2>&1 | tee "$LOG"
 rc=${PIPESTATUS[0]}
 set -e
 
