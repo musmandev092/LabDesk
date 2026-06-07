@@ -118,6 +118,17 @@ if [ -d "$QSP" ]; then
   # consumers so the ldd closure can remove libQt6Network too
   rm -f "$QSP/Qt/plugins/generic/libqtuiotouchplugin.so" \
         "$QSP/Qt/plugins/imageformats/libqpdf.so" 2>/dev/null || true
+  # evdev input + GTK theme integration: a desktop app on xcb needs neither
+  rm -rf "$QSP/Qt/plugins/generic" "$QSP/Qt/plugins/platformthemes" 2>/dev/null || true
+  # SVG unused → drop svg plugins so the closure removes libQt6Svg too
+  rm -f "$QSP/Qt/plugins/iconengines/libqsvgicon.so" \
+        "$QSP/Qt/plugins/imageformats/libqsvg.so" 2>/dev/null || true
+  # imageformats: png is built into QtGui; keep jpeg/gif/ico/webp for logos, drop
+  # the exotic decoders (icns/tga/tiff/wbmp)
+  rm -f "$QSP/Qt/plugins/imageformats/libqicns.so" \
+        "$QSP/Qt/plugins/imageformats/libqtga.so" \
+        "$QSP/Qt/plugins/imageformats/libqtiff.so" \
+        "$QSP/Qt/plugins/imageformats/libqwbmp.so" 2>/dev/null || true
   # platform plugins: keep only xcb (desktop) + offscreen (headless/self-test)
   ( cd "$QSP/Qt/plugins/platforms" 2>/dev/null && \
     find . -maxdepth 1 -name 'libq*.so' ! -name 'libqxcb.so' ! -name 'libqoffscreen.so' \
