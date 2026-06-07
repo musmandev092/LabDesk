@@ -127,7 +127,7 @@ if [ -d "$QSP" ]; then
         "$QSP/Qt/plugins/platforminputcontexts/libibusplatforminputcontextplugin.so" 2>/dev/null || true
 
   # -- FFmpeg (QtMultimedia only; ~56MB of dup copies) -----------------------
-  rm -f "$QTLIB"/libav*.so* 2>/dev/null || true
+  rm -f "$QTLIB"/libav*.so* "$QTLIB"/libsw*.so* "$QTLIB"/libpostproc*.so* 2>/dev/null || true
 
   # -- remove every libQt6*.so left unreachable from the kept bindings+plugins
   #    (computed via ldd closure so it self-adapts across Qt versions). icu* and
