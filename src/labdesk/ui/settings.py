@@ -11,11 +11,11 @@ from PySide6.QtWidgets import (
 
 from PySide6.QtPrintSupport import QPrinterInfo
 
-from .widgets import h1, muted, card, page_header, field_label
+from .widgets import muted, card, page_header, field_label
 from . import tasks
 from .. import db
 from .. import report, whatsapp
-from .style import build_qss, THEMES
+from .style import build_qss
 from ..roles import ROLES, role_label, can
 
 _LABEL_W = 200  # shared label-column width so all settings cards align

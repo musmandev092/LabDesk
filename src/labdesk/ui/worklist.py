@@ -2,16 +2,16 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QEvent
-from PySide6.QtGui import QColor, QShortcut, QKeySequence
+from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTableWidget, QTableWidgetItem,
     QLineEdit, QComboBox, QPushButton, QHeaderView, QLabel, QScrollArea,
-    QFrame, QGridLayout, QMessageBox, QCheckBox, QPlainTextEdit,
+    QFrame, QGridLayout, QMessageBox, QCheckBox, QPlainTextEdit, QFileDialog,
 )
 
 from PySide6.QtWidgets import QSizePolicy
 
-from .widgets import h1, h2, muted, card, money, page_header
+from .widgets import h2, muted, card, page_header, selected_id, status_badge
 from . import wa, tasks
 from .. import db, report
 
@@ -146,7 +146,7 @@ class WorklistPage(QWidget):
     def refresh_list(self):
         q = f"%{self.search.text().strip()}%"
         st = self.status_filter.currentData() or "All"
-        sql = ("SELECT * FROM receipts WHERE COALESCE(voided,0)=0 "
+        sql = (f"SELECT * FROM receipts WHERE {db.NOT_VOIDED} "
                "AND (COALESCE(patient_name,'') LIKE ? OR COALESCE(lab_no,'') LIKE ?)")
         args = [q, q]
         if st != "All":
@@ -161,23 +161,10 @@ class WorklistPage(QWidget):
             self.table.setItem(i, 0, QTableWidgetItem(r["lab_no"] or ""))
             self.table.setItem(i, 1, QTableWidgetItem(r["patient_name"] or ""))
             self.table.setItem(i, 2, QTableWidgetItem((r["received_at"] or "")[:16]))
-            st_item = QTableWidgetItem((r["status"] or "").title())
-            colors = {"pending": "#b9770e", "in_progress": "#0e7c86",
-                      "reported": "#1f9d55", "delivered": "#6b7280"}
-            col = colors.get(r["status"] or "")
-            if col:
-                st_item.setForeground(QColor(col))
-                f = st_item.font(); f.setBold(True); st_item.setFont(f)
-            self.table.setItem(i, 3, st_item)
+            self.table.setItem(i, 3, status_badge(r["status"] or ""))
 
     def _selected_id(self):
-        # derive from the actual selection (NOT currentRow) so a deselect doesn't
-        # leave a stale receipt loaded
-        sel = self.table.selectionModel().selectedRows()
-        if not sel:
-            return None
-        r = sel[0].row()
-        return self._ids[r] if 0 <= r < len(self._ids) else None
+        return selected_id(self.table, self._ids)
 
     # ---------------------------------------------------------------
     def load_receipt(self):
@@ -430,20 +417,16 @@ class WorklistPage(QWidget):
         printer = db.get_setting(self.con, "default_printer", "")
         labno = self._lab_no(rid)
 
-        def done(ok, result):
-            if not ok:
-                QMessageBox.warning(self, "Print", f"Could not prepare the report:\n{result}")
-                return
+        def ready(result):
             report.print_bytes(result, self, "Print Report", printer)
             db.log_audit(self.con, self.user["username"], "printed_report", labno)
 
-        tasks.run_in_background(self, lambda con: report.build_report_bytes(con, rid), done,
-                                clicked=self.print_btn, busy_text="Preparing…")
+        tasks.build_pdf(self, lambda con: report.build_report_bytes(con, rid), ready,
+                        clicked=self.print_btn, busy_text="Preparing…", error_title="Print")
 
     def save_pdf(self):
         if self.current_receipt is None:
             return
-        from PySide6.QtWidgets import QFileDialog
         rid = self.current_receipt
         r = self.con.execute("SELECT lab_no FROM receipts WHERE id=?", (rid,)).fetchone()
         default = f"{(r['lab_no'] if r else 'report')}.pdf"

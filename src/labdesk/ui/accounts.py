@@ -1,14 +1,14 @@
 """Accounts: income/expense summary, expense entry, outstanding dues."""
 from __future__ import annotations
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QTableWidget, QTableWidgetItem,
     QLineEdit, QDoubleSpinBox, QPushButton, QHeaderView, QLabel, QGridLayout,
-    QDateEdit, QMessageBox,
+    QDateEdit, QMessageBox, QInputDialog,
 )
 
-from .widgets import h1, h2, muted, card, stat_card, money, page_header, field_label
+from .widgets import stat_card, money, page_header, field_label, num_item
 from .. import db
 
 
@@ -66,18 +66,18 @@ class AccountsPage(QWidget):
         return w
 
     def refresh_summary(self):
-        c = self.con; cur = db.get_setting(c, "currency", "Rs.")
+        c = self.con; cur = db.currency(c)
         f = self.from_date.date().toString("yyyy-MM-dd")
         t = self.to_date.date().toString("yyyy-MM-dd")
         income = c.execute(
             "SELECT COALESCE(SUM(paid),0) FROM receipts "
-            "WHERE COALESCE(voided,0)=0 AND date(received_at) BETWEEN ? AND ?",
+            f"WHERE {db.NOT_VOIDED} AND date(received_at) BETWEEN ? AND ?",
             (f, t)).fetchone()[0]
         expense = c.execute(
             "SELECT COALESCE(SUM(amount),0) FROM expenses WHERE date BETWEEN ? AND ?",
             (f, t)).fetchone()[0]
         due = c.execute(
-            "SELECT COALESCE(SUM(due),0) FROM receipts WHERE due>0 AND COALESCE(voided,0)=0"
+            f"SELECT COALESCE(SUM(due),0) FROM receipts WHERE due>0 AND {db.NOT_VOIDED}"
         ).fetchone()[0]
         self.c_income.value_label.setText(money(income, cur))
         self.c_expense.value_label.setText(money(expense, cur))
@@ -91,21 +91,21 @@ class AccountsPage(QWidget):
         methods = c.execute(
             "SELECT COALESCE(NULLIF(TRIM(payment_method),''),'Cash') AS m, "
             "COUNT(*) AS n, COALESCE(SUM(paid),0) AS total FROM receipts "
-            "WHERE COALESCE(voided,0)=0 AND paid>0 AND date(received_at) BETWEEN ? AND ? "
+            f"WHERE {db.NOT_VOIDED} AND paid>0 AND date(received_at) BETWEEN ? AND ? "
             "GROUP BY m ORDER BY total DESC", (f, t)).fetchall()
         self.method_table.setRowCount(0)
         for m in methods:
             i = self.method_table.rowCount(); self.method_table.insertRow(i)
             self.method_table.setItem(i, 0, QTableWidgetItem(m["m"]))
-            self.method_table.setItem(i, 1, self._num(str(m["n"])))
-            self.method_table.setItem(i, 2, self._num(f"{m['total']:,.0f}"))
+            self.method_table.setItem(i, 1, num_item(str(m["n"])))
+            self.method_table.setItem(i, 2, num_item(f"{m['total']:,.0f}"))
         # total row
         i = self.method_table.rowCount(); self.method_table.insertRow(i)
         tot_item = QTableWidgetItem("Total")
         fnt = tot_item.font(); fnt.setBold(True); tot_item.setFont(fnt)
         self.method_table.setItem(i, 0, tot_item)
-        self.method_table.setItem(i, 1, self._num(str(sum(m["n"] for m in methods))))
-        tot_amt = self._num(f"{sum(m['total'] for m in methods):,.0f}")
+        self.method_table.setItem(i, 1, num_item(str(sum(m["n"] for m in methods))))
+        tot_amt = num_item(f"{sum(m['total'] for m in methods):,.0f}")
         tot_amt.setFont(fnt)
         self.method_table.setItem(i, 2, tot_amt)
 
@@ -156,12 +156,6 @@ class AccountsPage(QWidget):
         self.exp_head.clear(); self.exp_detail.clear(); self.exp_amount.setValue(0)
         self.refresh_expenses()
 
-    @staticmethod
-    def _num(text):
-        it = QTableWidgetItem(text)
-        it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        return it
-
     def refresh_expenses(self):
         rows = self.con.execute("SELECT * FROM expenses ORDER BY date DESC, id DESC LIMIT 500").fetchall()
         self.exp_table.setRowCount(0)
@@ -170,7 +164,7 @@ class AccountsPage(QWidget):
             self.exp_table.setItem(i, 0, QTableWidgetItem(r["date"] or ""))
             self.exp_table.setItem(i, 1, QTableWidgetItem(r["head"] or ""))
             self.exp_table.setItem(i, 2, QTableWidgetItem(r["detail"] or ""))
-            self.exp_table.setItem(i, 3, self._num(f"{r['amount']:,.0f}"))
+            self.exp_table.setItem(i, 3, num_item(f"{r['amount']:,.0f}"))
 
     # ---- dues ----
     def _dues_tab(self):
@@ -195,7 +189,7 @@ class AccountsPage(QWidget):
 
     def refresh_dues(self):
         rows = self.con.execute(
-            "SELECT * FROM receipts WHERE due>0 AND COALESCE(voided,0)=0 ORDER BY id DESC"
+            f"SELECT * FROM receipts WHERE due>0 AND {db.NOT_VOIDED} ORDER BY id DESC"
         ).fetchall()
         self.due_table.setRowCount(0); self._due_ids = []
         for r in rows:
@@ -203,18 +197,17 @@ class AccountsPage(QWidget):
             self._due_ids.append(r["id"])
             self.due_table.setItem(i, 0, QTableWidgetItem(r["lab_no"] or ""))
             self.due_table.setItem(i, 1, QTableWidgetItem(r["patient_name"] or ""))
-            self.due_table.setItem(i, 2, self._num(f"{r['net_amount']:,.0f}"))
-            self.due_table.setItem(i, 3, self._num(f"{r['paid']:,.0f}"))
-            self.due_table.setItem(i, 4, self._num(f"{r['due']:,.0f}"))
+            self.due_table.setItem(i, 2, num_item(f"{r['net_amount']:,.0f}"))
+            self.due_table.setItem(i, 3, num_item(f"{r['paid']:,.0f}"))
+            self.due_table.setItem(i, 4, num_item(f"{r['due']:,.0f}"))
         self.recover_btn.setEnabled(False)
 
     def recover_due(self):
-        from PySide6.QtWidgets import QInputDialog
         r = self.due_table.currentRow()
         if not (0 <= r < len(self._due_ids)):
             return
         rid = self._due_ids[r]
-        rec = self.con.execute("SELECT * FROM receipts WHERE id=?", (rid,)).fetchone()
+        rec = self.con.execute("SELECT lab_no, due FROM receipts WHERE id=?", (rid,)).fetchone()
         if not rec or not rec["due"] or rec["due"] <= 0:
             return
         amount, ok = QInputDialog.getDouble(
@@ -223,16 +216,7 @@ class AccountsPage(QWidget):
             float(rec["due"]), 0.0, float(rec["due"]), 2)
         if not ok or amount <= 0:
             return
-        new_paid = (rec["paid"] or 0) + amount
-        new_due = max(0.0, (rec["net_amount"] or 0) - new_paid)
-        self.con.execute(
-            "UPDATE receipts SET paid=?, due=? WHERE id=?", (new_paid, new_due, rid))
-        self.con.execute(
-            "INSERT INTO ledger(kind,ref_id,detail,credit) VALUES ('due_recovery',?,?,?)",
-            (rid, f"Due recovered {rec['lab_no']}", amount))
-        self.con.commit()
-        db.log_audit(self.con, self.user["username"], "due_received",
-                     f"{rec['lab_no']} — {money(amount)} (due now {money(new_due)})")
+        db.receive_due(self.con, rid, amount, self.user["username"])
         self.refresh_dues(); self.refresh_summary()
 
     def on_show(self):

@@ -1,13 +1,12 @@
 """Doctors: referring-doctor directory with add/edit/delete."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QDialog, QFormLayout, QLineEdit, QMessageBox, QHeaderView, QLabel,
 )
 
-from .widgets import h1, muted, page_header
+from .widgets import page_header
 from .. import db
 from ..roles import can
 

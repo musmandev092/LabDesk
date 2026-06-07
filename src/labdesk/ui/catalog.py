@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QColor
 
-from .widgets import h1, muted, page_header, like_term
+from .widgets import muted, page_header, like_term
 from . import tasks
 from .. import db
 from ..constants import SPECIMEN_PRESETS

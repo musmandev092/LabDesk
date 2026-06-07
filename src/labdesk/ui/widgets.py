@@ -2,11 +2,16 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QFrame, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QSizePolicy,
+    QFrame, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QSizePolicy, QTableWidgetItem,
 )
 
 from .style import PRIMARY, PRIMARY_DARK, MUTED, BORDER
+
+# status → (display colour) for receipt/worklist tables (single source of truth)
+STATUS_COLORS = {"pending": "#b9770e", "in_progress": "#0e7c86",
+                 "reported": "#1f9d55", "delivered": "#6b7280"}
 
 
 def _fixed_v(w: QWidget) -> QWidget:
@@ -106,3 +111,35 @@ def money(value: float, currency: str = "Rs.") -> str:
     if value < 0:
         return f"- {currency} {abs(value):,.0f}"
     return f"{currency} {value:,.0f}"
+
+
+def num_item(text: str, color: str | None = None) -> QTableWidgetItem:
+    """A right-aligned, optionally-coloured table cell for money/number columns."""
+    it = QTableWidgetItem(text)
+    it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    if color:
+        it.setForeground(QColor(color))
+    return it
+
+
+def selected_id(table, ids):
+    """The id (from a parallel ``ids`` list) of the table's selected row, or None.
+
+    Derived from the actual selection (NOT currentRow): a cleared selection
+    leaves currentRow set, which would otherwise act on a stale row."""
+    sel = table.selectionModel().selectedRows()
+    if not sel:
+        return None
+    r = sel[0].row()
+    return ids[r] if 0 <= r < len(ids) else None
+
+
+def status_badge(status: str, voided: bool = False) -> QTableWidgetItem:
+    """A bold, colour-coded status cell shared by the receipt/worklist tables."""
+    text = "Voided" if voided else (status or "").replace("_", " ").title()
+    it = QTableWidgetItem(text)
+    col = "#c0392b" if voided else STATUS_COLORS.get(status or "")
+    if col:
+        it.setForeground(QColor(col))
+        fnt = it.font(); fnt.setBold(True); it.setFont(fnt)
+    return it

@@ -4,21 +4,19 @@ from __future__ import annotations
 import os
 import tempfile
 
-from PySide6.QtCore import Qt, QDate
-from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QLineEdit,
     QComboBox, QPushButton, QHeaderView, QLabel, QDateEdit, QMessageBox, QCheckBox,
-    QDialog, QFrame,
+    QDialog, QFrame, QInputDialog, QFileDialog, QFormLayout, QDoubleSpinBox,
 )
 
-from .widgets import h1, muted, page_header, money
+from .widgets import muted, page_header, money, num_item, selected_id, status_badge
 from . import wa, tasks
 from .. import db, report
+from ..constants import PAYMENT_METHODS
 from ..roles import can
 
-STATUS_COLORS = {"pending": "#b9770e", "in_progress": "#0e7c86",
-                 "reported": "#1f9d55", "delivered": "#6b7280"}
 # a report can be previewed/printed only once results are in
 REPORT_READY = ("reported", "delivered")
 
@@ -50,7 +48,6 @@ class _EditReceiptDialog(QDialog):
     Subtotal (the tests) is fixed here — add/remove tests via a new receipt."""
     def __init__(self, rec, currency="Rs.", parent=None):
         super().__init__(parent)
-        from PySide6.QtWidgets import QFormLayout, QDoubleSpinBox
         self.setWindowTitle(f"Edit bill {rec['lab_no'] or ''}")
         self.setMinimumWidth(380)
         self._sub = rec["subtotal"] or 0.0
@@ -70,7 +67,6 @@ class _EditReceiptDialog(QDialog):
         self.paid.valueChanged.connect(self._recompute)
         form.addRow("Paid", self.paid)
         self.method = QComboBox()
-        from ..constants import PAYMENT_METHODS
         self.method.addItems(PAYMENT_METHODS)
         if rec["payment_method"]:
             self.method.setCurrentText(rec["payment_method"])
@@ -212,13 +208,6 @@ class ReceiptsPage(QWidget):
         self.dues_only.setChecked(bool(dues))
         self.refresh()
 
-    def _num(self, text, color=None):
-        it = QTableWidgetItem(text)
-        it.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        if color:
-            it.setForeground(QColor(color))
-        return it
-
     def refresh(self):
         q = f"%{self.search.text().strip()}%"
         sql = ("SELECT * FROM receipts WHERE (COALESCE(patient_name,'') LIKE ? "
@@ -228,13 +217,12 @@ class ReceiptsPage(QWidget):
         if st and st != "All":
             sql += " AND status=?"; args.append(st)
         if self.today_only.isChecked():
-            sql += (" AND received_at >= date('now','localtime')"
-                    " AND received_at < date('now','localtime','+1 day')")
+            sql += f" AND {db.RECEIVED_TODAY}"
         if self.dues_only.isChecked():
-            sql += " AND due>0 AND COALESCE(voided,0)=0"
+            sql += f" AND due>0 AND {db.NOT_VOIDED}"
         sql += " ORDER BY id DESC LIMIT 1000"
         rows = self.con.execute(sql, args).fetchall()
-        cur = db.get_setting(self.con, "currency", "Rs.")
+        cur = db.currency(self.con)
         self.table.setRowCount(0); self._ids = []
         tot_net = tot_paid = tot_due = 0.0
         for r in rows:
@@ -244,17 +232,11 @@ class ReceiptsPage(QWidget):
             self.table.setItem(i, 1, QTableWidgetItem((r["received_at"] or "")[:16]))
             self.table.setItem(i, 2, QTableWidgetItem(r["patient_name"] or ""))
             self.table.setItem(i, 3, QTableWidgetItem(r["dr_name"] or ""))
-            self.table.setItem(i, 4, self._num(f"{r['net_amount']:,.0f}"))
-            self.table.setItem(i, 5, self._num(f"{r['paid']:,.0f}"))
-            self.table.setItem(i, 6, self._num(f"{r['due']:,.0f}", "#c0392b" if r["due"] else None))
+            self.table.setItem(i, 4, num_item(f"{r['net_amount']:,.0f}"))
+            self.table.setItem(i, 5, num_item(f"{r['paid']:,.0f}"))
+            self.table.setItem(i, 6, num_item(f"{r['due']:,.0f}", "#c0392b" if r["due"] else None))
             voided = ("voided" in r.keys() and r["voided"])
-            st_item = QTableWidgetItem(
-                "Voided" if voided else (r["status"] or "").replace("_", " ").title())
-            col = "#c0392b" if voided else STATUS_COLORS.get(r["status"] or "")
-            if col:
-                st_item.setForeground(QColor(col))
-                fnt = st_item.font(); fnt.setBold(True); st_item.setFont(fnt)
-            self.table.setItem(i, 7, st_item)
+            self.table.setItem(i, 7, status_badge(r["status"] or "", voided))
             if not voided:   # voided bills don't count toward the money totals
                 tot_net += r["net_amount"] or 0
                 tot_paid += r["paid"] or 0
@@ -267,14 +249,7 @@ class ReceiptsPage(QWidget):
         self._update_buttons()
 
     def _selected_id(self):
-        # derive from the actual selection (NOT currentRow): clearSelection /
-        # Ctrl-click-deselect empties the selection but leaves currentRow set,
-        # which would otherwise keep buttons live + act on a stale receipt.
-        sel = self.table.selectionModel().selectedRows()
-        if not sel:
-            return None
-        r = sel[0].row()
-        return self._ids[r] if 0 <= r < len(self._ids) else None
+        return selected_id(self.table, self._ids)
 
     def _update_buttons(self):
         rid = self._selected_id()
@@ -318,10 +293,7 @@ class ReceiptsPage(QWidget):
         build = report.build_receipt_bytes if kind == "receipt" else report.build_report_bytes
         labno = self._lab_no(rid)
 
-        def done(ok, result):
-            if not ok:
-                QMessageBox.warning(self, "Preview", f"Could not build the preview:\n{result}")
-                return
+        def ready(result):
             tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)  # 0600
             tmp.write(result); tmp.close()
             db.log_audit(self.con, self.user["username"], "previewed_" + kind, labno)
@@ -333,8 +305,8 @@ class ReceiptsPage(QWidget):
                 except OSError:
                     pass
 
-        tasks.run_in_background(self, lambda con: build(con, rid), done,
-                                clicked=clicked, busy_text="Opening…")
+        tasks.build_pdf(self, lambda con: build(con, rid), ready,
+                        clicked=clicked, busy_text="Opening…", error_title="Preview")
 
     def preview(self):
         self._preview("report")
@@ -371,15 +343,12 @@ class ReceiptsPage(QWidget):
         printer = db.get_setting(self.con, "default_printer", "")
         labno = self._lab_no(rid)
 
-        def done(ok, result):
-            if not ok:
-                QMessageBox.warning(self, "Print", f"Could not prepare the document:\n{result}")
-                return
+        def ready(result):
             report.print_bytes(result, self, title, printer)
             db.log_audit(self.con, self.user["username"], "printed_" + kind, labno)
 
-        tasks.run_in_background(self, lambda con: build(con, rid), done,
-                                clicked=clicked, busy_text="Preparing…")
+        tasks.build_pdf(self, lambda con: build(con, rid), ready,
+                        clicked=clicked, busy_text="Preparing…", error_title="Print")
 
     def reprint(self):
         self._print("receipt")
@@ -388,15 +357,14 @@ class ReceiptsPage(QWidget):
         self._print("report")
 
     def receive_due(self):
-        from PySide6.QtWidgets import QInputDialog
         rid = self._selected_id()
         if rid is None:
             return
         r = self.con.execute(
-            "SELECT lab_no, net_amount, paid, due FROM receipts WHERE id=?", (rid,)).fetchone()
+            "SELECT lab_no, due FROM receipts WHERE id=?", (rid,)).fetchone()
         if not r or not r["due"] or r["due"] <= 0:
             return
-        cur = db.get_setting(self.con, "currency", "Rs.")
+        cur = db.currency(self.con)
         # prompt for the actual amount received (supports partial payments; cannot exceed due)
         amount, ok = QInputDialog.getDouble(
             self, "Receive payment",
@@ -404,16 +372,7 @@ class ReceiptsPage(QWidget):
             float(r["due"]), 0.0, float(r["due"]), 2)
         if not ok or amount <= 0:
             return
-        new_paid = (r["paid"] or 0) + amount
-        new_due = max(0.0, (r["net_amount"] or 0) - new_paid)
-        self.con.execute(
-            "INSERT INTO ledger(kind,ref_id,detail,credit,date) "
-            "VALUES ('due_recovery',?,?,?,date('now','localtime'))",
-            (rid, f"Due recovered {r['lab_no']}", amount))
-        self.con.execute("UPDATE receipts SET paid=?, due=? WHERE id=?", (new_paid, new_due, rid))
-        self.con.commit()
-        db.log_audit(self.con, self.user["username"], "due_received",
-                     f"{r['lab_no']} — {money(amount, cur)} (due now {money(new_due, cur)})")
+        db.receive_due(self.con, rid, amount, self.user["username"])
         self.refresh()
 
     def mark_delivered(self):
@@ -439,7 +398,7 @@ class ReceiptsPage(QWidget):
         rec = self.con.execute("SELECT * FROM receipts WHERE id=?", (rid,)).fetchone()
         if not rec or ("voided" in rec.keys() and rec["voided"]) or rec["status"] == "delivered":
             return
-        cur = db.get_setting(self.con, "currency", "Rs.")
+        cur = db.currency(self.con)
         dlg = _EditReceiptDialog(rec, cur, self)
         if dlg.exec() != QDialog.Accepted:
             return
@@ -478,7 +437,6 @@ class ReceiptsPage(QWidget):
         self.refresh()
 
     def void_receipt(self):
-        from PySide6.QtWidgets import QInputDialog
         rid = self._selected_id()
         if rid is None:
             return
@@ -507,7 +465,6 @@ class ReceiptsPage(QWidget):
         self.refresh()
 
     def export_csv(self):
-        from PySide6.QtWidgets import QFileDialog
         import csv
         path, _ = QFileDialog.getSaveFileName(self, "Export receipts to CSV", "receipts.csv",
                                               "CSV (*.csv)")

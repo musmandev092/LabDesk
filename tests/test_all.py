@@ -760,6 +760,34 @@ check(con.execute("SELECT 1 FROM test_parameters WHERE id=?", (_hid,)).fetchone(
       "in-use parameter survives the rejected delete (rollback)")
 check("parameters_edited" in ACTION_LABELS, "Logs has a label for 'parameters_edited'")
 
+# ---- refactor pass: shared helpers behave identically ----
+section("refactor: shared db/widgets helpers")
+# db.currency + SQL fragment constants
+check(db.currency(con) == db.get_setting(con, "currency", "Rs."), "db.currency matches setting")
+check("voided" in db.NOT_VOIDED and "+1 day" in db.RECEIVED_TODAY,
+      "db SQL fragments defined (NOT_VOIDED / RECEIVED_TODAY)")
+# db.receive_due: ledger credit + paid/due update + audit, shared by Receipts & Accounts
+_rdp = con.execute("INSERT INTO patients(name,sex) VALUES('RD Pt','Male')").lastrowid
+_rdr = con.execute(
+    "INSERT INTO receipts(patient_id,lab_no,patient_name,sex,status,net_amount,paid,due) "
+    "VALUES(?,?,?,?,?,?,?,?)", (_rdp, "LAB_RDX", "RD Pt", "Male", "reported", 1000, 400, 600)).lastrowid
+con.commit()
+_res = db.receive_due(con, _rdr, 250, "admin")
+check(_res == ("LAB_RDX", 650.0, 350.0), "db.receive_due returns (lab_no, new_paid, new_due)")
+_chk = con.execute("SELECT paid, due FROM receipts WHERE id=?", (_rdr,)).fetchone()
+check(_chk["paid"] == 650 and _chk["due"] == 350, "db.receive_due updates paid/due")
+check(con.execute("SELECT credit FROM ledger WHERE ref_id=? AND kind='due_recovery'",
+                  (_rdr,)).fetchone()[0] == 250, "db.receive_due writes ledger credit")
+check(db.receive_due(con, _rdr, 0, "admin") is None, "db.receive_due ignores zero amount")
+# widgets helpers
+from labdesk.ui.widgets import num_item, status_badge  # noqa: E402
+from PySide6.QtCore import Qt as _QtA  # noqa: E402
+_ni = num_item("1,234", "#c0392b")
+check(_ni.text() == "1,234" and int(_ni.textAlignment()) & int(_QtA.AlignRight),
+      "num_item is right-aligned")
+check(status_badge("in_progress").text() == "In Progress", "status_badge formats status")
+check(status_badge("x", voided=True).text() == "Voided", "status_badge shows Voided")
+
 
 # ============================================================================
 # 11b) Themes / caption templates / send_text / timeout / new settings

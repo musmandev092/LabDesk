@@ -341,9 +341,24 @@ def _ensure_indexes(con: sqlite3.Connection) -> None:
             pass   # e.g. duplicate lab_no already present on a legacy DB
 
 
+# SQL fragment: receipts that are not voided (voided column is added post-v1, so
+# COALESCE guards the NULL). Use inside WHERE clauses to exclude voided bills.
+NOT_VOIDED = "COALESCE(voided,0)=0"
+
+# SQL fragment: rows whose received_at falls in today (local time). Written as a
+# half-open range so a plain index on received_at can be used (no date() wrap).
+RECEIVED_TODAY = ("received_at >= date('now','localtime') "
+                  "AND received_at < date('now','localtime','+1 day')")
+
+
 def get_setting(con: sqlite3.Connection, key: str, default: str = "") -> str:
     row = con.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
     return row[0] if row and row[0] is not None else default
+
+
+def currency(con: sqlite3.Connection) -> str:
+    """The configured currency symbol (defaults to 'Rs.')."""
+    return get_setting(con, "currency", "Rs.")
 
 
 def set_setting(con: sqlite3.Connection, key: str, value: str) -> None:
@@ -579,6 +594,28 @@ def delete_panel(con: sqlite3.Connection, panel_id: int) -> None:
     con.execute("UPDATE panels SET active=0 WHERE id=?", (panel_id,))
     con.execute("DELETE FROM panel_items WHERE panel_id=?", (panel_id,))
     con.commit()
+
+
+def receive_due(con: sqlite3.Connection, receipt_id: int, amount: float, username: str):
+    """Record a (partial) due payment on a receipt: ledger credit + updated
+    paid/due, audited. Returns (lab_no, new_paid, new_due) or None if nothing
+    is owed. Shared by the Receipts page and the Accounts dues tab."""
+    r = con.execute(
+        "SELECT lab_no, net_amount, paid, due FROM receipts WHERE id=?", (receipt_id,)).fetchone()
+    if not r or not r["due"] or r["due"] <= 0 or amount <= 0:
+        return None
+    new_paid = (r["paid"] or 0) + amount
+    new_due = max(0.0, (r["net_amount"] or 0) - new_paid)
+    con.execute(
+        "INSERT INTO ledger(kind,ref_id,detail,credit,date) "
+        "VALUES ('due_recovery',?,?,?,date('now','localtime'))",
+        (receipt_id, f"Due recovered {r['lab_no']}", amount))
+    con.execute("UPDATE receipts SET paid=?, due=? WHERE id=?", (new_paid, new_due, receipt_id))
+    con.commit()
+    cur = currency(con)
+    log_audit(con, username, "due_received",
+              f"{r['lab_no']} — {cur} {amount:,.0f} (due now {cur} {new_due:,.0f})")
+    return (r["lab_no"], new_paid, new_due)
 
 
 # ---- in-app parameter editor ------------------------------------------------

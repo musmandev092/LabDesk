@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QGridLayout
 
-from .widgets import page_header, stat_card, money, card, h2, muted
-from .style import ACCENT, DANGER, PRIMARY_DARK, AMBER
+from .widgets import page_header, stat_card, money, card, muted
+from .style import ACCENT, PRIMARY_DARK, AMBER
 from .. import db
 
 
@@ -53,22 +53,19 @@ class DashboardPage(QWidget):
 
     def on_show(self):
         c = self.con
-        currency = db.get_setting(c, "currency", "Rs.")
+        currency = db.currency(c)
         lab = db.get_setting(c, "lab_name", "") or "your laboratory"
         self.sub.setText(f"Welcome back — {lab}")
         n_rec = c.execute(
-            "SELECT COUNT(*) FROM receipts WHERE COALESCE(voided,0)=0 "
-            "AND received_at >= date('now','localtime') "
-            "AND received_at < date('now','localtime','+1 day')"
+            f"SELECT COUNT(*) FROM receipts WHERE {db.NOT_VOIDED} AND {db.RECEIVED_TODAY}"
         ).fetchone()[0]
         income = c.execute(
-            "SELECT COALESCE(SUM(paid),0) FROM receipts WHERE COALESCE(voided,0)=0 "
-            "AND received_at >= date('now','localtime') "
-            "AND received_at < date('now','localtime','+1 day')"
+            f"SELECT COALESCE(SUM(paid),0) FROM receipts "
+            f"WHERE {db.NOT_VOIDED} AND {db.RECEIVED_TODAY}"
         ).fetchone()[0]
         pending = c.execute(
             "SELECT COUNT(*) FROM receipts WHERE status IN ('pending','in_progress') "
-            "AND COALESCE(voided,0)=0"
+            f"AND {db.NOT_VOIDED}"
         ).fetchone()[0]
         n_tests = c.execute("SELECT COUNT(*) FROM tests WHERE active=1").fetchone()[0]
         self.c_receipts.value_label.setText(str(n_rec))

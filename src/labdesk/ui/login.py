@@ -4,6 +4,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLineEdit, QPushButton, QLabel, QMessageBox, QFrame,
+    QInputDialog,
 )
 
 from .. import db
@@ -101,7 +102,6 @@ class LoginDialog(QDialog):
 
     def _force_password_change(self, user) -> bool:
         """Make a user with must_change_password set a new one before entering."""
-        from PySide6.QtWidgets import QInputDialog
         QMessageBox.information(self, "Set a new password",
                                "For security, please set a new password before continuing.")
         while True:

@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 
 from PySide6.QtWidgets import QSizePolicy
 
-from .widgets import h1, h2, muted, card, page_header
+from .widgets import h2, card, page_header
 from . import tasks
 from .. import db
 

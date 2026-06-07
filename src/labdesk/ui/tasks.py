@@ -107,6 +107,23 @@ def run_in_background(parent, work, on_done, *, clicked=None, lock=(), busy_text
     QThreadPool.globalInstance().start(task)
 
 
+def build_pdf(parent, build, on_ready, *, clicked=None, lock=(),
+              busy_text="Working…", error_title="Document"):
+    """Build something (usually PDF bytes) via ``build(con)`` off the UI thread,
+    then call ``on_ready(result)`` on success. On failure, show one uniform
+    warning dialog — saves every caller repeating the ok/error branch."""
+    from PySide6.QtWidgets import QMessageBox
+
+    def _done(ok, result):
+        if not ok:
+            QMessageBox.warning(parent, error_title,
+                                f"Could not prepare the document:\n{result}")
+            return
+        on_ready(result)
+
+    run_in_background(parent, build, _done, clicked=clicked, lock=lock, busy_text=busy_text)
+
+
 def debounce(owner, slot, ms: int = 250):
     """Return a callable that fires ``slot`` only after ``ms`` of quiet, so a
     search box hits the DB once after typing stops, not on every keystroke. The

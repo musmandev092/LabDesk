@@ -1,19 +1,20 @@
 """Reception / Billing: register a patient visit, pick tests, take payment."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit, QComboBox,
     QSpinBox, QDoubleSpinBox, QPushButton, QTableWidget, QTableWidgetItem,
     QHeaderView, QLabel, QCompleter, QMessageBox, QListWidget, QListWidgetItem,
-    QInputDialog, QCheckBox,
+    QInputDialog, QCheckBox, QMenu,
 )
 
 from PySide6.QtWidgets import QSizePolicy
 
 import sqlite3
 
-from .widgets import h1, h2, muted, card, money, page_header, field_label
+from .widgets import muted, card, money, page_header, field_label
 from . import tasks, wa
 from .. import db, report, roles, whatsapp
 from ..constants import (
@@ -201,7 +202,6 @@ class ReceptionPage(QWidget):
         root.addLayout(body, 1)
 
         # keyboard shortcuts: Ctrl+S save & print, Ctrl+Enter save (no print)
-        from PySide6.QtGui import QShortcut, QKeySequence
         QShortcut(QKeySequence("Ctrl+S"), self, activated=lambda: self.save(do_print=True))
         QShortcut(QKeySequence("Ctrl+Return"), self, activated=lambda: self.save(do_print=False))
         QShortcut(QKeySequence("Ctrl+Enter"), self, activated=lambda: self.save(do_print=False))
@@ -343,10 +343,10 @@ class ReceptionPage(QWidget):
 
     def _show_previous_visits(self, pid):
         """List this patient's recent receipts so reception sees their history."""
-        cur = db.get_setting(self.con, "currency", "Rs.")
+        cur = db.currency(self.con)
         rows = self.con.execute(
             "SELECT lab_no, received_at, net_amount, due, status FROM receipts "
-            "WHERE patient_id=? AND COALESCE(voided,0)=0 ORDER BY id DESC LIMIT 12", (pid,)
+            f"WHERE patient_id=? AND {db.NOT_VOIDED} ORDER BY id DESC LIMIT 12", (pid,)
         ).fetchall()
         self.prev_visits.clear()
         if not rows:
@@ -396,7 +396,7 @@ class ReceptionPage(QWidget):
     def search_tests(self, text=None):
         text = (self.test_search.text() if text is None else text).strip()
         self.results.clear()
-        cur = db.get_setting(self.con, "currency", "Rs.")
+        cur = db.currency(self.con)
         if len(text) < 1:
             self.results.addItem(self._hint_item("Start typing a test name above to see matches…"))
             return
@@ -414,7 +414,6 @@ class ReceptionPage(QWidget):
 
     def _show_panel_menu(self):
         """Drop down the saved panels; picking one adds all its tests to the cart."""
-        from PySide6.QtWidgets import QMenu
         panels = db.list_panels(self.con)
         menu = QMenu(self)
         if not panels:
@@ -498,7 +497,7 @@ class ReceptionPage(QWidget):
         self.recompute()
 
     def recompute(self):
-        cur = db.get_setting(self.con, "currency", "Rs.")
+        cur = db.currency(self.con)
         sub = sum(c["charge"] for c in self.cart)
         disc = sub * self.discount.value() / 100.0
         net = max(0.0, sub - disc)
