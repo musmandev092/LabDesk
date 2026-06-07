@@ -269,8 +269,12 @@ def _patient_card(d: Doc, x, y, pairs, *, card_pad=(5, 6), gap=(4, 6),
         # let a long value spill into the column gap (not the last column) so names
         # like "Muhammad Usman Khan" don't clip, matching the CSS grid overflow
         vw = col_w + (gh - 1) if c < cols - 1 else col_w
+        # elide overlong values (e.g. a long specimen) so they never run past the
+        # cell/card edge — '…' instead of overflowing text
+        sval = str(val) if val else "—"
+        sval = d.fm(v_font).elidedText(sval, Qt.ElideRight, mm(vw))
         d.text(cx, cy, col_w, l_h, lbl.upper(), l_font, MUTED, Qt.AlignLeft | Qt.AlignVCenter)
-        d.text(cx, cy + l_h + 0.6, vw, v_h, (str(val) if val else "—"), v_font, INK,
+        d.text(cx, cy + l_h + 0.6, vw, v_h, sval, v_font, INK,
                Qt.AlignLeft | Qt.AlignVCenter)
     return card_h
 
@@ -515,7 +519,6 @@ def _report_footer(d: Doc, con, g, page_no, total):
         sw = (d.content_w - 34) / len(sigs)
         for i, (n, t) in enumerate(sigs):
             sx = x0 + 17 + i * sw
-            d.hline(sx + sw * 0.15, cy - 4.5, sw * 0.7, INK, 1)
             d.text(sx, cy - 4.2, sw, 4, n, _font(8.5, bold=True), INK, Qt.AlignHCenter | Qt.AlignTop)
             d.text(sx, cy - 0.4, sw, 3.5, t, _font(7.3), MUTED, Qt.AlignHCenter | Qt.AlignTop)
 
