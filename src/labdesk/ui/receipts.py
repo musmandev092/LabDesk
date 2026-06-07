@@ -126,17 +126,19 @@ class ReceiptsPage(QWidget):
         # receipt (bill) actions — available as soon as a saved receipt is selected
         self.prev_rcpt_btn = _btn("Preview receipt", self.preview_receipt)
         self.print_rcpt_btn = _btn("Print receipt", self.reprint)
+        self.pdf_rcpt_btn = _btn("Save receipt PDF", self.save_receipt_pdf)
         self.wa_rcpt_btn = _btn("WhatsApp receipt", self.whatsapp_receipt)
         # report actions — only once results are entered (report ready)
         self.prev_rpt_btn = _btn("Preview report", self.preview)
         self.print_rpt_btn = _btn("Print report", self.print_report)
+        self.pdf_rpt_btn = _btn("Save report PDF", self.save_report_pdf)
         self.wa_rpt_btn = _btn("WhatsApp report", self.whatsapp_report)
         self.pay_btn = _btn("Receive due", self.receive_due)
         self.deliver_btn = _btn("Mark delivered", self.mark_delivered)
         self.edit_btn = _btn("Edit bill", self.edit_receipt)
         self.void_btn = _btn("Void", self.void_receipt)
-        self._report_btns = (self.prev_rpt_btn, self.print_rpt_btn, self.wa_rpt_btn)
-        self._receipt_btns = (self.prev_rcpt_btn, self.print_rcpt_btn, self.wa_rcpt_btn)
+        self._report_btns = (self.prev_rpt_btn, self.print_rpt_btn, self.pdf_rpt_btn, self.wa_rpt_btn)
+        self._receipt_btns = (self.prev_rcpt_btn, self.print_rcpt_btn, self.pdf_rcpt_btn, self.wa_rcpt_btn)
 
         tb = QHBoxLayout(); tb.setSpacing(8)
         rcpt_lbl = QLabel("Receipt:"); rcpt_lbl.setObjectName("muted"); tb.addWidget(rcpt_lbl)
@@ -153,6 +155,9 @@ class ReceiptsPage(QWidget):
         tb.addWidget(self.deliver_btn)
         # editing the bill (discount/paid/method) and voiding are manager/admin actions
         self._can_edit_bill = can(self.user["role"], "apply_discount")
+        # once a bill/report is delivered, only an admin may edit it — a technician
+        # (manager) can edit only while it is still pending/reported.
+        self._is_admin = can(self.user["role"], "manage_users")
         if self._can_edit_bill:
             tb.addWidget(self.edit_btn)
         else:
@@ -274,9 +279,11 @@ class ReceiptsPage(QWidget):
                 b.setEnabled(ready)
                 b.setToolTip("" if ready else "Report not ready yet (results pending)")
             self.pay_btn.setEnabled(bool(row["due"] and row["due"] > 0))
-            self.deliver_btn.setEnabled(ready and (row["status"] or "") != "delivered")
-            # bill can be edited until it's been handed over (delivered)
-            self.edit_btn.setEnabled(self._can_edit_bill and (row["status"] or "") != "delivered")
+            delivered = (row["status"] or "") == "delivered"
+            self.deliver_btn.setEnabled(ready and not delivered)
+            # a manager/admin can edit a bill before it's handed over; once it's
+            # been delivered only an admin may edit it (technicians are locked out).
+            self.edit_btn.setEnabled(self._can_edit_bill and (self._is_admin or not delivered))
             self.void_btn.setEnabled(True)
         else:
             for b in (*self._report_btns, self.pay_btn, self.deliver_btn,
@@ -348,6 +355,37 @@ class ReceiptsPage(QWidget):
     def print_report(self):
         self._print("report")
 
+    def _save_pdf(self, kind):
+        """Export the receipt or report to a PDF chosen by the user (background)."""
+        rid = self._selected_id()
+        if rid is None:
+            return
+        labno = self._lab_no(rid)
+        stem = labno if not labno.startswith("#") else f"receipt_{rid}"
+        default = f"{stem}-{kind}.pdf"
+        path, _ = QFileDialog.getSaveFileName(self, f"Save {kind} PDF", default, "PDF (*.pdf)")
+        if not path:
+            return
+        export = report.export_receipt_pdf if kind == "receipt" else report.export_report_pdf
+        clicked = self.pdf_rcpt_btn if kind == "receipt" else self.pdf_rpt_btn
+
+        def done(ok, result):
+            if ok:
+                db.log_audit(self.con, self.user["username"], "exported_pdf",
+                             f"{labno} {kind} → {path}")
+                QMessageBox.information(self, "PDF", f"Saved:\n{path}")
+            else:
+                QMessageBox.warning(self, "PDF", f"Could not save the PDF:\n{result}")
+
+        tasks.run_in_background(self, lambda con: export(con, rid, path), done,
+                                clicked=clicked, busy_text="Saving…")
+
+    def save_receipt_pdf(self):
+        self._save_pdf("receipt")
+
+    def save_report_pdf(self):
+        self._save_pdf("report")
+
     def receive_due(self):
         rid = self._selected_id()
         if rid is None:
@@ -388,8 +426,10 @@ class ReceiptsPage(QWidget):
         if rid is None:
             return
         rec = self.con.execute("SELECT * FROM receipts WHERE id=?", (rid,)).fetchone()
-        if not rec or ("voided" in rec.keys() and rec["voided"]) or rec["status"] == "delivered":
-            return
+        if not rec or ("voided" in rec.keys() and rec["voided"]):
+            return  # a voided bill is read-only
+        if rec["status"] == "delivered" and not self._is_admin:
+            return  # a delivered bill can only be edited by an admin
         cur = db.currency(self.con)
         dlg = _EditReceiptDialog(rec, cur, self)
         if dlg.exec() != QDialog.Accepted:

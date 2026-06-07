@@ -6,7 +6,7 @@ from PySide6.QtGui import QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTableWidget, QTableWidgetItem,
     QLineEdit, QComboBox, QPushButton, QHeaderView, QLabel, QScrollArea,
-    QGridLayout, QMessageBox, QCheckBox, QPlainTextEdit, QFileDialog,
+    QGridLayout, QMessageBox, QCheckBox, QPlainTextEdit,
 )
 
 from PySide6.QtWidgets import QSizePolicy
@@ -90,18 +90,17 @@ class WorklistPage(QWidget):
 
         btns = QHBoxLayout()
         self.save_btn = QPushButton("Save results"); self.save_btn.clicked.connect(self.save_results)
-        self.print_btn = QPushButton("Print report"); self.print_btn.setObjectName("ghost")
-        self.print_btn.clicked.connect(self.print_report)
-        self.pdf_btn = QPushButton("Save PDF"); self.pdf_btn.setObjectName("ghost")
-        self.pdf_btn.clicked.connect(self.save_pdf)
-        self.wa_btn = QPushButton("Send WhatsApp"); self.wa_btn.setObjectName("ghost")
-        self.wa_btn.clicked.connect(self.send_whatsapp)
-        for b in (self.save_btn, self.print_btn, self.pdf_btn, self.wa_btn):
-            b.setEnabled(False)
+        self.save_btn.setEnabled(False)
         btns.addStretch(1)
-        btns.addWidget(self.wa_btn); btns.addWidget(self.pdf_btn)
-        btns.addWidget(self.print_btn); btns.addWidget(self.save_btn)
+        btns.addWidget(self.save_btn)
         rl.addLayout(btns)
+        # Worklist is for entering & saving results only. Printing, PDF export and
+        # WhatsApp delivery of the report all live on the Receipts / Reports page.
+        self.report_hint = muted(
+            "Print, save as PDF or send the report on WhatsApp from the "
+            "Receipts / Reports page (once results are saved).")
+        self.report_hint.setWordWrap(True)
+        rl.addWidget(self.report_hint)
         split.addWidget(right)
         split.setSizes([430, 650])
         root.addWidget(split, 1)
@@ -137,8 +136,7 @@ class WorklistPage(QWidget):
                 w.setParent(None); w.deleteLater()
         self.entry_layout.addStretch(1)
         self._editors = {}; self._show = {}; self._remarks = {}
-        for b in (self.save_btn, self.print_btn, self.pdf_btn, self.wa_btn):
-            b.setEnabled(False)
+        self.save_btn.setEnabled(False)
 
     # ---------------------------------------------------------------
     def on_show(self):
@@ -198,8 +196,7 @@ class WorklistPage(QWidget):
             else:
                 self.entry_layout.addWidget(self._build_test_block(it, sex))
         self.entry_layout.addStretch(1)
-        for b in (self.save_btn, self.print_btn, self.pdf_btn, self.wa_btn):
-            b.setEnabled(True)
+        self.save_btn.setEnabled(True)
 
     def _culture_note(self, item):
         lbl = muted(
@@ -366,22 +363,11 @@ class WorklistPage(QWidget):
         # optional auto-send on WhatsApp — runs in the background, reports when done
         if db.get_setting(c, "whatsapp_auto", "0") == "1":
             rid = self.current_receipt
-            wa.send_async(self, c, "report", rid, clicked=self.wa_btn, lock_buttons=(self.wa_btn,),
+            wa.send_async(self, c, "report", rid,
                           on_done=lambda ok, m: db.log_audit(
                               self.con, self.user["username"], "whatsapp_report",
                               ("sent" if ok else "failed") + f" (auto) — {lab_no or rid}"))
         self.refresh_list()
-
-    def send_whatsapp(self):
-        if self.current_receipt is None:
-            return
-        rid = self.current_receipt
-        # background send — keeps the window responsive
-        wa.send_async(self, self.con, "report", rid,
-                      clicked=self.wa_btn, lock_buttons=(self.wa_btn,),
-                      on_done=lambda ok, m: db.log_audit(
-                          self.con, self.user["username"], "whatsapp_report",
-                          ("sent" if ok else "failed") + f" — receipt {rid}"))
 
     def _snapshot_static_lines(self, sex):
         """Persist H/L/continuation lines (no editor) so reports render fully."""
@@ -406,41 +392,3 @@ class WorklistPage(QWidget):
                         (it["id"], p["id"], p["seq"], p["part_type"], p["group_head"],
                          p["name"], p["units"], p["superscript"], ref, None),
                     )
-
-    def _lab_no(self, rid):
-        r = self.con.execute("SELECT lab_no FROM receipts WHERE id=?", (rid,)).fetchone()
-        return (r["lab_no"] if r and r["lab_no"] else f"#{rid}")
-
-    def print_report(self):
-        if self.current_receipt is None:
-            return
-        rid = self.current_receipt
-        printer = db.get_setting(self.con, "default_printer", "")
-        labno = self._lab_no(rid)
-        try:
-            report.print_doc(self.con, rid, "report", self, "Print Report", printer)
-            db.log_audit(self.con, self.user["username"], "printed_report", labno)
-        except Exception as e:  # noqa: BLE001
-            QMessageBox.warning(self, "Print", f"Could not print:\n{e}")
-
-    def save_pdf(self):
-        if self.current_receipt is None:
-            return
-        rid = self.current_receipt
-        r = self.con.execute("SELECT lab_no FROM receipts WHERE id=?", (rid,)).fetchone()
-        default = f"{(r['lab_no'] if r else 'report')}.pdf"
-        path, _ = QFileDialog.getSaveFileName(self, "Save report PDF", default, "PDF (*.pdf)")
-        if not path:
-            return
-
-        labno = self._lab_no(rid)
-
-        def done(ok, result):
-            if ok:
-                db.log_audit(self.con, self.user["username"], "exported_pdf", f"{labno} → {path}")
-                QMessageBox.information(self, "PDF", f"Saved:\n{path}")
-            else:
-                QMessageBox.warning(self, "PDF", f"Could not save the PDF:\n{result}")
-
-        tasks.run_in_background(self, lambda con: report.export_report_pdf(con, rid, path), done,
-                                clicked=self.pdf_btn, busy_text="Saving…")

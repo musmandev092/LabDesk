@@ -119,7 +119,7 @@ class ReceptionPage(QWidget):
         # test search
         search_row = QHBoxLayout(); search_row.setContentsMargins(0, 0, 0, 0); search_row.setSpacing(8)
         self.test_search = QLineEdit()
-        self.test_search.setPlaceholderText("Search test to add… (type, then double-click)")
+        self.test_search.setPlaceholderText("Search test by name or number… (type, then double-click)")
         self.test_search.setMinimumHeight(38)
         self.test_search.textChanged.connect(tasks.debounce(self, self.search_tests))
         self.panel_btn = QPushButton("Add panel ▾"); self.panel_btn.setObjectName("ghost")
@@ -407,17 +407,22 @@ class ReceptionPage(QWidget):
         self.results.clear()
         cur = db.currency(self.con)
         if len(text) < 1:
-            self.results.addItem(self._hint_item("Start typing a test name above to see matches…"))
+            self.results.addItem(self._hint_item("Start typing a test name or number above to see matches…"))
             return
+        like = f"%{text}%"
+        # match on the test name OR its (legacy) test number — staff often know
+        # tests by the number from the old system.
         rows = self.con.execute(
-            "SELECT id,name,charges FROM tests WHERE active=1 AND name LIKE ? "
-            "ORDER BY name LIMIT 40", (f"%{text}%",),
+            "SELECT id,name,charges,legacy_no FROM tests WHERE active=1 "
+            "AND (name LIKE ? OR CAST(legacy_no AS TEXT) LIKE ?) "
+            "ORDER BY name LIMIT 40", (like, like),
         ).fetchall()
         if not rows:
             self.results.addItem(self._hint_item(f"No tests match “{text}”."))
             return
         for r in rows:
-            it = QListWidgetItem(f"{r['name']}   —   {cur} {r['charges']:,.0f}")
+            no = f"#{r['legacy_no']}  " if r["legacy_no"] else ""
+            it = QListWidgetItem(f"{no}{r['name']}   —   {cur} {r['charges']:,.0f}")
             it.setData(Qt.UserRole, (r["id"], r["name"], r["charges"]))
             self.results.addItem(it)
 
