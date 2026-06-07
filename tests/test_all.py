@@ -634,6 +634,88 @@ for _a in ("receipt_voided", "report_delivered", "exported_csv",
     check(_a in ACTION_LABELS, f"Logs has a label for '{_a}'")
 
 
+# ---- deferred-features batch 2: panels / reconciliation / visits / edit-bill ----
+section("deferred features: panels, cash reconciliation, previous visits, edit bill")
+# --- test panels / profiles ---
+_pt1 = con.execute("SELECT id,name,charges FROM tests WHERE active=1 ORDER BY id LIMIT 1").fetchone()
+_pt2 = con.execute("SELECT id,name,charges FROM tests WHERE active=1 ORDER BY id LIMIT 1 OFFSET 1").fetchone()
+_pid = db.save_panel(con, "Fever Profile", [_pt1["id"], _pt2["id"]])
+check(_pid > 0, "save_panel creates a panel")
+_pmembers = db.panel_tests(con, _pid)
+check(len(_pmembers) == 2, "panel_tests returns the two members")
+check({m["id"] for m in _pmembers} == {_pt1["id"], _pt2["id"]}, "panel members match the tests added")
+check(any(p["id"] == _pid for p in db.list_panels(con)), "list_panels includes the new panel")
+# update: drop to one test + rename
+db.save_panel(con, "Fever Panel", [_pt1["id"]], _pid)
+check(len(db.panel_tests(con, _pid)) == 1, "save_panel update replaces members")
+check(con.execute("SELECT name FROM panels WHERE id=?", (_pid,)).fetchone()[0] == "Fever Panel",
+      "save_panel update renames the panel")
+# delete (soft) hides it from list_panels and clears members
+db.delete_panel(con, _pid)
+check(not any(p["id"] == _pid for p in db.list_panels(con)), "delete_panel retires the panel")
+check(con.execute("SELECT COUNT(*) FROM panel_items WHERE panel_id=?", (_pid,)).fetchone()[0] == 0,
+      "delete_panel removes member rows")
+try:
+    db.save_panel(con, "  ", [_pt1["id"]])
+    check(False, "save_panel rejects a blank name")
+except ValueError:
+    check(True, "save_panel rejects a blank name")
+
+# --- cash reconciliation: per-method breakdown equals total income for the range ---
+_today = con.execute("SELECT date('now','localtime')").fetchone()[0]
+_rc1 = _make_receipt("03007770001", sub=400, paid=400, status="reported")
+con.execute("UPDATE receipts SET payment_method='Card', received_at=datetime('now','localtime') "
+            "WHERE id=?", (_rc1,))
+_rc2 = _make_receipt("03007770002", sub=600, paid=600, status="reported")
+con.execute("UPDATE receipts SET payment_method='Cash', received_at=datetime('now','localtime') "
+            "WHERE id=?", (_rc2,))
+con.commit()
+_methods = con.execute(
+    "SELECT COALESCE(NULLIF(TRIM(payment_method),''),'Cash') AS m, COUNT(*) n, "
+    "COALESCE(SUM(paid),0) total FROM receipts "
+    "WHERE COALESCE(voided,0)=0 AND paid>0 AND date(received_at)=? GROUP BY m", (_today,)).fetchall()
+_income = con.execute(
+    "SELECT COALESCE(SUM(paid),0) FROM receipts WHERE COALESCE(voided,0)=0 AND date(received_at)=?",
+    (_today,)).fetchone()[0]
+check(sum(m["total"] for m in _methods) == _income, "reconciliation breakdown sums to income")
+check(any(m["m"] == "Card" and m["total"] >= 400 for m in _methods), "Card collection counted")
+
+# --- patient previous-visits query (reception) ---
+_pvpid = con.execute("SELECT patient_id FROM receipts WHERE id=?", (_rc2,)).fetchone()[0]
+con.execute("INSERT INTO receipts(patient_id,lab_no,patient_name,sex,status,net_amount,paid,due) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (_pvpid, "LAB_PV_2", "PV Patient", "Male", "reported", 300, 300, 0))
+con.commit()
+_visits = con.execute(
+    "SELECT lab_no FROM receipts WHERE patient_id=? AND COALESCE(voided,0)=0 ORDER BY id DESC", (_pvpid,)
+).fetchall()
+check(len(_visits) >= 2, "previous-visits query returns the patient's receipts")
+
+# --- edit pending bill: recompute net/due + ledger adjustment ---
+_er = _make_receipt("03008880001", sub=1000, paid=400, status="pending")
+con.execute("UPDATE receipts SET discount_pct=0, net_amount=1000, due=600, subtotal=1000 WHERE id=?",
+            (_er,)); con.commit()
+# apply 10% discount and pay 900 total
+_sub = con.execute("SELECT subtotal FROM receipts WHERE id=?", (_er,)).fetchone()[0]
+_newnet = _sub - _sub * 10 / 100.0
+_newpaid = 900.0
+_newdue = max(0.0, _newnet - _newpaid)
+_oldpaid = con.execute("SELECT paid FROM receipts WHERE id=?", (_er,)).fetchone()[0]
+con.execute("UPDATE receipts SET discount_pct=10, net_amount=?, paid=?, due=? WHERE id=?",
+            (_newnet, _newpaid, _newdue, _er))
+con.execute("INSERT INTO ledger(kind,ref_id,detail,credit) VALUES('adjustment',?,?,?)",
+            (_er, "edit", _newpaid - _oldpaid))
+con.commit()
+_row = con.execute("SELECT net_amount,paid,due FROM receipts WHERE id=?", (_er,)).fetchone()
+check(abs(_row["net_amount"] - 900.0) < 1e-6, "edit bill recomputes net after discount")
+check(abs(_row["due"] - 0.0) < 1e-6, "edit bill clears due when fully paid")
+check(con.execute("SELECT credit FROM ledger WHERE ref_id=? AND kind='adjustment'",
+                  (_er,)).fetchone()[0] == 500, "edit bill writes a ledger adjustment for extra paid")
+
+for _a in ("panel_created", "panel_updated", "panel_deleted", "receipt_edited"):
+    check(_a in ACTION_LABELS, f"Logs has a label for '{_a}'")
+
+
 # ============================================================================
 # 11b) Themes / caption templates / send_text / timeout / new settings
 # ============================================================================

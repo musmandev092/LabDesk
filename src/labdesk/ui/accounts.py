@@ -50,7 +50,19 @@ class AccountsPage(QWidget):
         self.c_due = stat_card("Outstanding (all-time)", "Rs. 0", "#b9770e")
         grid.addWidget(self.c_income, 0, 0); grid.addWidget(self.c_expense, 0, 1)
         grid.addWidget(self.c_net, 0, 2); grid.addWidget(self.c_due, 0, 3)
-        lay.addLayout(grid); lay.addStretch(1)
+        lay.addLayout(grid)
+        # cash reconciliation: collected money broken down by payment method
+        lay.addSpacing(8)
+        lay.addWidget(field_label("Collection by payment method (paid in range)"))
+        self.method_table = QTableWidget(0, 3)
+        self.method_table.setHorizontalHeaderLabels(["Method", "Receipts", "Collected (Rs.)"])
+        self.method_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.method_table.verticalHeader().setVisible(False)
+        self.method_table.setAlternatingRowColors(True)
+        self.method_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.method_table.setMaximumHeight(220)
+        lay.addWidget(self.method_table)
+        lay.addStretch(1)
         return w
 
     def refresh_summary(self):
@@ -75,6 +87,27 @@ class AccountsPage(QWidget):
         self.c_net.value_label.setStyleSheet(
             f"font-size: 30px; font-weight: 800; color: {net_color};")
         self.c_due.value_label.setText(money(due, cur))
+        # cash reconciliation breakdown by payment method
+        methods = c.execute(
+            "SELECT COALESCE(NULLIF(TRIM(payment_method),''),'Cash') AS m, "
+            "COUNT(*) AS n, COALESCE(SUM(paid),0) AS total FROM receipts "
+            "WHERE COALESCE(voided,0)=0 AND paid>0 AND date(received_at) BETWEEN ? AND ? "
+            "GROUP BY m ORDER BY total DESC", (f, t)).fetchall()
+        self.method_table.setRowCount(0)
+        for m in methods:
+            i = self.method_table.rowCount(); self.method_table.insertRow(i)
+            self.method_table.setItem(i, 0, QTableWidgetItem(m["m"]))
+            self.method_table.setItem(i, 1, self._num(str(m["n"])))
+            self.method_table.setItem(i, 2, self._num(f"{m['total']:,.0f}"))
+        # total row
+        i = self.method_table.rowCount(); self.method_table.insertRow(i)
+        tot_item = QTableWidgetItem("Total")
+        fnt = tot_item.font(); fnt.setBold(True); tot_item.setFont(fnt)
+        self.method_table.setItem(i, 0, tot_item)
+        self.method_table.setItem(i, 1, self._num(str(sum(m["n"] for m in methods))))
+        tot_amt = self._num(f"{sum(m['total'] for m in methods):,.0f}")
+        tot_amt.setFont(fnt)
+        self.method_table.setItem(i, 2, tot_amt)
 
     # ---- expenses ----
     def _expenses_tab(self):

@@ -289,5 +289,20 @@ CREATE TABLE IF NOT EXISTS wa_messages (
 );
 CREATE INDEX IF NOT EXISTS ix_wa_messages_at ON wa_messages(at);
 
+-- ---------------------------------------------------------------------------
+-- Test panels / profiles (a named bundle of tests, e.g. "Fever Profile")
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS panels (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    name    TEXT NOT NULL,
+    active  INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS panel_items (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    panel_id  INTEGER NOT NULL REFERENCES panels(id) ON DELETE CASCADE,
+    test_id   INTEGER NOT NULL REFERENCES tests(id)
+);
+CREATE INDEX IF NOT EXISTS ix_panel_items ON panel_items(panel_id);
+
 -- Schema version marker
 INSERT OR IGNORE INTO settings(key, value) VALUES ('schema_version', '1');

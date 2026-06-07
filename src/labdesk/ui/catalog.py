@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTableWidget, QTableWidgetItem,
     QLineEdit, QPushButton, QHeaderView, QDialog, QFormLayout, QDoubleSpinBox,
     QComboBox, QPlainTextEdit, QLabel, QMessageBox, QSizePolicy, QCheckBox,
+    QListWidget, QListWidgetItem, QInputDialog,
 )
 from PySide6.QtGui import QColor
 
@@ -61,6 +62,147 @@ class TestDialog(QDialog):
         }
 
 
+class PanelsDialog(QDialog):
+    """Manage test panels / profiles — named bundles of tests added together."""
+    def __init__(self, con, user, parent=None):
+        super().__init__(parent)
+        self.con = con
+        self.user = user
+        self.setWindowTitle("Test panels / profiles")
+        self.resize(720, 520)
+        self._panel_id = None
+
+        root = QHBoxLayout(self)
+        # left: list of panels
+        left = QVBoxLayout()
+        left.addWidget(QLabel("Panels"))
+        self.panel_list = QListWidget()
+        self.panel_list.currentItemChanged.connect(self._load_panel)
+        left.addWidget(self.panel_list, 1)
+        lb = QHBoxLayout()
+        new = QPushButton("New"); new.clicked.connect(self._new_panel)
+        self.del_btn = QPushButton("Delete"); self.del_btn.setObjectName("ghost")
+        self.del_btn.clicked.connect(self._delete_panel); self.del_btn.setEnabled(False)
+        lb.addWidget(new); lb.addWidget(self.del_btn)
+        left.addLayout(lb)
+        root.addLayout(left, 2)
+
+        # right: editor
+        right = QVBoxLayout()
+        right.addWidget(QLabel("Panel name"))
+        self.name = QLineEdit(); self.name.setPlaceholderText("e.g. Fever Profile")
+        right.addWidget(self.name)
+        right.addWidget(QLabel("Tests in this panel (tick to include)"))
+        self.test_search = QLineEdit(); self.test_search.setPlaceholderText("Filter tests…")
+        self.test_search.textChanged.connect(self._filter_tests)
+        right.addWidget(self.test_search)
+        self.tests = QListWidget()
+        right.addWidget(self.tests, 1)
+        save = QPushButton("Save panel"); save.clicked.connect(self._save)
+        close = QPushButton("Close"); close.setObjectName("ghost"); close.clicked.connect(self.accept)
+        rb = QHBoxLayout(); rb.addStretch(1); rb.addWidget(close); rb.addWidget(save)
+        right.addLayout(rb)
+        root.addLayout(right, 3)
+
+        self._load_all_tests()
+        self._refresh_panels()
+        self._new_panel()
+
+    def _load_all_tests(self):
+        self._all_tests = self.con.execute(
+            "SELECT id, name FROM tests WHERE active=1 ORDER BY name COLLATE NOCASE").fetchall()
+
+    def _populate_tests(self, checked_ids):
+        checked = set(checked_ids or [])
+        self.tests.clear()
+        for t in self._all_tests:
+            it = QListWidgetItem(t["name"])
+            it.setData(Qt.UserRole, t["id"])
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setCheckState(Qt.Checked if t["id"] in checked else Qt.Unchecked)
+            self.tests.addItem(it)
+        self._filter_tests(self.test_search.text())
+
+    def _filter_tests(self, text):
+        text = (text or "").strip().lower()
+        for i in range(self.tests.count()):
+            it = self.tests.item(i)
+            it.setHidden(bool(text) and text not in it.text().lower())
+
+    def _checked_ids(self):
+        out = []
+        for i in range(self.tests.count()):
+            it = self.tests.item(i)
+            if it.checkState() == Qt.Checked:
+                out.append(it.data(Qt.UserRole))
+        return out
+
+    def _refresh_panels(self):
+        self.panel_list.blockSignals(True)
+        self.panel_list.clear()
+        for p in db.list_panels(self.con):
+            n = len(db.panel_tests(self.con, p["id"]))
+            it = QListWidgetItem(f"{p['name']}  ({n})")
+            it.setData(Qt.UserRole, p["id"])
+            self.panel_list.addItem(it)
+        self.panel_list.blockSignals(False)
+
+    def _new_panel(self):
+        self._panel_id = None
+        self.panel_list.clearSelection()
+        self.name.clear()
+        self._populate_tests([])
+        self.del_btn.setEnabled(False)
+        self.name.setFocus()
+
+    def _load_panel(self, item, _prev=None):
+        if item is None:
+            return
+        pid = item.data(Qt.UserRole)
+        if pid is None:
+            return
+        row = self.con.execute("SELECT * FROM panels WHERE id=?", (pid,)).fetchone()
+        if not row:
+            return
+        self._panel_id = pid
+        self.name.setText(row["name"] or "")
+        self._populate_tests([t["id"] for t in db.panel_tests(self.con, pid)])
+        self.del_btn.setEnabled(True)
+
+    def _save(self):
+        name = self.name.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Panel", "Give the panel a name.")
+            return
+        ids = self._checked_ids()
+        if not ids:
+            QMessageBox.warning(self, "Panel", "Tick at least one test for the panel.")
+            return
+        pid = db.save_panel(self.con, name, ids, self._panel_id)
+        db.log_audit(self.con, self.user["username"],
+                     "panel_updated" if self._panel_id else "panel_created",
+                     f"{name} ({len(ids)} tests)")
+        self._panel_id = pid
+        self._refresh_panels()
+        # re-select the saved panel
+        for i in range(self.panel_list.count()):
+            if self.panel_list.item(i).data(Qt.UserRole) == pid:
+                self.panel_list.setCurrentRow(i)
+                break
+        QMessageBox.information(self, "Panel", f"Saved “{name}”.")
+
+    def _delete_panel(self):
+        if self._panel_id is None:
+            return
+        name = self.name.text().strip()
+        if QMessageBox.question(self, "Panel", f"Delete panel “{name}”?") != QMessageBox.Yes:
+            return
+        db.delete_panel(self.con, self._panel_id)
+        db.log_audit(self.con, self.user["username"], "panel_deleted", name)
+        self._refresh_panels()
+        self._new_panel()
+
+
 class CatalogPage(QWidget):
     def __init__(self, con, user):
         super().__init__()
@@ -74,10 +216,13 @@ class CatalogPage(QWidget):
         edit = QPushButton("Edit"); edit.setObjectName("ghost"); edit.clicked.connect(self.edit)
         self.retire_btn = QPushButton("Retire / Restore"); self.retire_btn.setObjectName("ghost")
         self.retire_btn.clicked.connect(self.toggle_retire)
+        self.panels_btn = QPushButton("Panels…"); self.panels_btn.setObjectName("ghost")
+        self.panels_btn.clicked.connect(self.manage_panels)
         if not can(user["role"], "edit_catalog"):
             add.hide(); edit.hide(); self.retire_btn.hide()  # read-only for lower roles
+            self.panels_btn.hide()
             self.tests_readonly = True
-        header, self.sub = page_header("Test Catalog", "", add, edit, self.retire_btn)
+        header, self.sub = page_header("Test Catalog", "", add, edit, self.retire_btn, self.panels_btn)
         lay.addWidget(header)
 
         bar = QHBoxLayout()
@@ -208,6 +353,11 @@ class CatalogPage(QWidget):
             self.con.commit()
             db.log_audit(self.con, self.user["username"], "test_updated", v["name"])
             self.refresh()
+
+    def manage_panels(self):
+        if not can(self.user["role"], "edit_catalog"):
+            return
+        PanelsDialog(self.con, self.user, self).exec()
 
     def toggle_retire(self):
         if not can(self.user["role"], "edit_catalog"):

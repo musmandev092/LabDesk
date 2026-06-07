@@ -61,8 +61,12 @@ ACTION_LABELS = {
     "test_deactivated": ("Test retired", "#c0392b"),
     "test_activated": ("Test restored", "#1f9d55"),
     "receipt_voided": ("Receipt voided", "#c0392b"),
+    "receipt_edited": ("Bill edited", "#b9770e"),
     "report_delivered": ("Report delivered", "#1f9d55"),
     "exported_csv": ("CSV exported", "#0a5f67"),
+    "panel_created": ("Panel created", "#0e7c86"),
+    "panel_updated": ("Panel edited", "#0e7c86"),
+    "panel_deleted": ("Panel deleted", "#c0392b"),
     "logs_cleared": ("Logs cleared", "#c0392b"),
 }
 

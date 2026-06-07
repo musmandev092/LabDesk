@@ -45,6 +45,64 @@ class _PreviewDialog(QDialog):
         lay.addWidget(view)
 
 
+class _EditReceiptDialog(QDialog):
+    """Adjust a pending bill's discount, amount paid and payment method.
+    Subtotal (the tests) is fixed here — add/remove tests via a new receipt."""
+    def __init__(self, rec, currency="Rs.", parent=None):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QFormLayout, QDoubleSpinBox
+        self.setWindowTitle(f"Edit bill {rec['lab_no'] or ''}")
+        self.setMinimumWidth(380)
+        self._sub = rec["subtotal"] or 0.0
+        self.cur = currency
+        form = QFormLayout(self)
+        form.addRow("Patient", QLabel(rec["patient_name"] or ""))
+        self.sub_lbl = QLabel(money(self._sub, currency))
+        form.addRow("Subtotal", self.sub_lbl)
+        self.discount = QDoubleSpinBox(); self.discount.setMaximum(100); self.discount.setSuffix(" %")
+        self.discount.setValue(rec["discount_pct"] or 0)
+        self.discount.valueChanged.connect(self._recompute)
+        form.addRow("Discount", self.discount)
+        self.net_lbl = QLabel(); self.net_lbl.setStyleSheet("font-weight:800;color:#0a5f67;")
+        form.addRow("Net payable", self.net_lbl)
+        self.paid = QDoubleSpinBox(); self.paid.setMaximum(1_000_000); self.paid.setPrefix(f"{currency} ")
+        self.paid.setValue(rec["paid"] or 0)
+        self.paid.valueChanged.connect(self._recompute)
+        form.addRow("Paid", self.paid)
+        self.method = QComboBox()
+        self.method.addItems(["Cash", "Card", "Easypaisa", "JazzCash", "Bank", "Other"])
+        if rec["payment_method"]:
+            self.method.setCurrentText(rec["payment_method"])
+        form.addRow("Payment method", self.method)
+        self.due_lbl = QLabel(); self.due_lbl.setStyleSheet("font-weight:800;color:#c0392b;")
+        form.addRow("Due", self.due_lbl)
+        btns = QHBoxLayout()
+        ok = QPushButton("Save changes"); ok.clicked.connect(self.accept)
+        cancel = QPushButton("Cancel"); cancel.setObjectName("ghost"); cancel.clicked.connect(self.reject)
+        btns.addStretch(1); btns.addWidget(cancel); btns.addWidget(ok)
+        form.addRow(btns)
+        self._recompute()
+
+    def _net(self):
+        return max(0.0, self._sub - self._sub * self.discount.value() / 100.0)
+
+    def _recompute(self):
+        net = self._net()
+        due = max(0.0, net - self.paid.value())
+        self.net_lbl.setText(money(net, self.cur))
+        self.due_lbl.setText(money(due, self.cur))
+
+    def values(self):
+        net = self._net()
+        return {
+            "discount_pct": self.discount.value(),
+            "net_amount": net,
+            "paid": self.paid.value(),
+            "due": max(0.0, net - self.paid.value()),
+            "payment_method": self.method.currentText(),
+        }
+
+
 class ReceiptsPage(QWidget):
     def __init__(self, con, user):
         super().__init__()
@@ -72,6 +130,7 @@ class ReceiptsPage(QWidget):
         self.wa_rpt_btn = _btn("WhatsApp report", self.whatsapp_report)
         self.pay_btn = _btn("Receive due", self.receive_due)
         self.deliver_btn = _btn("Mark delivered", self.mark_delivered)
+        self.edit_btn = _btn("Edit bill", self.edit_receipt)
         self.void_btn = _btn("Void", self.void_receipt)
         self._report_btns = (self.prev_rpt_btn, self.print_rpt_btn, self.wa_rpt_btn)
         self._receipt_btns = (self.prev_rcpt_btn, self.print_rcpt_btn, self.wa_rcpt_btn)
@@ -89,6 +148,12 @@ class ReceiptsPage(QWidget):
         tb.addWidget(sep2)
         tb.addWidget(self.pay_btn)
         tb.addWidget(self.deliver_btn)
+        # editing the bill (discount/paid/method) and voiding are manager/admin actions
+        self._can_edit_bill = can(self.user["role"], "apply_discount")
+        if self._can_edit_bill:
+            tb.addWidget(self.edit_btn)
+        else:
+            self.edit_btn.hide()
         if can(self.user["role"], "delete"):
             tb.addWidget(self.void_btn)   # voiding a bill is a manager/admin action
         else:
@@ -228,9 +293,12 @@ class ReceiptsPage(QWidget):
                 b.setToolTip("" if ready else "Report not ready yet (results pending)")
             self.pay_btn.setEnabled(bool(row["due"] and row["due"] > 0))
             self.deliver_btn.setEnabled(ready and (row["status"] or "") != "delivered")
+            # bill can be edited until it's been handed over (delivered)
+            self.edit_btn.setEnabled(self._can_edit_bill and (row["status"] or "") != "delivered")
             self.void_btn.setEnabled(True)
         else:
-            for b in (*self._report_btns, self.pay_btn, self.deliver_btn, self.void_btn):
+            for b in (*self._report_btns, self.pay_btn, self.deliver_btn,
+                      self.edit_btn, self.void_btn):
                 b.setEnabled(False)
 
     # ---------------------------------------------------------------
@@ -359,6 +427,53 @@ class ReceiptsPage(QWidget):
             "delivered_by=? WHERE id=?", (self.user["username"], rid))
         self.con.commit()
         db.log_audit(self.con, self.user["username"], "report_delivered", r["lab_no"] or f"#{rid}")
+        self.refresh()
+
+    def edit_receipt(self):
+        if not self._can_edit_bill:
+            return
+        rid = self._selected_id()
+        if rid is None:
+            return
+        rec = self.con.execute("SELECT * FROM receipts WHERE id=?", (rid,)).fetchone()
+        if not rec or ("voided" in rec.keys() and rec["voided"]) or rec["status"] == "delivered":
+            return
+        cur = db.get_setting(self.con, "currency", "Rs.")
+        dlg = _EditReceiptDialog(rec, cur, self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        v = dlg.values()
+        old_paid = rec["paid"] or 0.0
+        delta = v["paid"] - old_paid
+        try:
+            self.con.execute(
+                "UPDATE receipts SET discount_pct=?, less=?, net_amount=?, paid=?, due=?, "
+                "payment_method=? WHERE id=?",
+                (v["discount_pct"], (rec["subtotal"] or 0) - v["net_amount"], v["net_amount"],
+                 v["paid"], v["due"], v["payment_method"], rid))
+            # keep the ledger balanced for any change in money actually collected
+            if abs(delta) > 1e-9:
+                if delta > 0:
+                    self.con.execute(
+                        "INSERT INTO ledger(kind,ref_id,detail,credit,date) "
+                        "VALUES ('adjustment',?,?,?,date('now','localtime'))",
+                        (rid, f"Bill edit {rec['lab_no']} — extra paid", delta))
+                else:
+                    self.con.execute(
+                        "INSERT INTO ledger(kind,ref_id,detail,debit,date) "
+                        "VALUES ('adjustment',?,?,?,date('now','localtime'))",
+                        (rid, f"Bill edit {rec['lab_no']} — refund", -delta))
+            self.con.commit()
+        except Exception as e:  # noqa: BLE001
+            try:
+                self.con.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+            QMessageBox.warning(self, "Edit bill", f"Could not save the changes:\n{e}")
+            return
+        db.log_audit(self.con, self.user["username"], "receipt_edited",
+                     f"{rec['lab_no']} — disc {v['discount_pct']:g}%, net {v['net_amount']:.0f}, "
+                     f"paid {v['paid']:.0f}, due {v['due']:.0f}")
         self.refresh()
 
     def void_receipt(self):

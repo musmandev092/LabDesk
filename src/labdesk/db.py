@@ -535,3 +535,47 @@ def verify_user(con: sqlite3.Connection, username: str, password: str):
     except Exception:  # noqa: BLE001
         pass
     return None
+
+
+# ---- test panels / profiles -------------------------------------------------
+def list_panels(con: sqlite3.Connection, include_inactive: bool = False):
+    """Named test bundles (e.g. "Fever Profile"), newest-friendly alphabetical."""
+    q = "SELECT * FROM panels"
+    if not include_inactive:
+        q += " WHERE active=1"
+    q += " ORDER BY name COLLATE NOCASE"
+    return con.execute(q).fetchall()
+
+
+def panel_tests(con: sqlite3.Connection, panel_id: int):
+    """The tests in a panel (only ones that still exist), alphabetical."""
+    return con.execute(
+        "SELECT t.id, t.name, t.charges FROM panel_items pi "
+        "JOIN tests t ON t.id = pi.test_id "
+        "WHERE pi.panel_id=? ORDER BY t.name COLLATE NOCASE", (panel_id,)
+    ).fetchall()
+
+
+def save_panel(con: sqlite3.Connection, name: str, test_ids, panel_id: int | None = None) -> int:
+    """Create or update a panel and its member tests in one transaction."""
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("panel name is required")
+    ids = [int(t) for t in test_ids]
+    if panel_id is None:
+        panel_id = con.execute(
+            "INSERT INTO panels(name, active) VALUES (?,1)", (name,)).lastrowid
+    else:
+        con.execute("UPDATE panels SET name=?, active=1 WHERE id=?", (name, panel_id))
+        con.execute("DELETE FROM panel_items WHERE panel_id=?", (panel_id,))
+    for tid in ids:
+        con.execute("INSERT INTO panel_items(panel_id, test_id) VALUES (?,?)", (panel_id, tid))
+    con.commit()
+    return panel_id
+
+
+def delete_panel(con: sqlite3.Connection, panel_id: int) -> None:
+    """Soft-delete (retire) a panel; member rows go with it."""
+    con.execute("UPDATE panels SET active=0 WHERE id=?", (panel_id,))
+    con.execute("DELETE FROM panel_items WHERE panel_id=?", (panel_id,))
+    con.commit()

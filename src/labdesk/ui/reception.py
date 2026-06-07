@@ -95,20 +95,35 @@ class ReceptionPage(QWidget):
         self.linked_lbl = muted("")
         self.linked_lbl.hide()
         self.wa_optout = QCheckBox("Patient opted out of WhatsApp (don't send reports)")
+        # previous visits of a picked returning patient (hidden until one is chosen)
+        self.prev_lbl = muted("Previous visits")
+        self.prev_lbl.hide()
+        self.prev_visits = QListWidget()
+        self.prev_visits.setMaximumHeight(108)
+        self.prev_visits.setEditTriggers(QListWidget.NoEditTriggers)
+        self.prev_visits.hide()
         patient_card = card(self.find, self.find_results, self.linked_lbl, pform,
-                            self.wa_optout, title="Patient")
+                            self.wa_optout, self.prev_lbl, self.prev_visits, title="Patient")
         patient_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         left.addWidget(patient_card)
 
         # test search
+        search_row = QHBoxLayout(); search_row.setContentsMargins(0, 0, 0, 0); search_row.setSpacing(8)
         self.test_search = QLineEdit()
         self.test_search.setPlaceholderText("Search test to add… (type, then double-click)")
         self.test_search.setMinimumHeight(38)
         self.test_search.textChanged.connect(tasks.debounce(self, self.search_tests))
+        self.panel_btn = QPushButton("Add panel ▾"); self.panel_btn.setObjectName("ghost")
+        self.panel_btn.setMinimumHeight(38)
+        self.panel_btn.setToolTip("Add every test in a saved panel / profile at once")
+        self.panel_btn.clicked.connect(self._show_panel_menu)
+        search_row.addWidget(self.test_search, 1)
+        search_row.addWidget(self.panel_btn)
+        search_w = QWidget(); search_w.setLayout(search_row)
         self.results = QListWidget()
         self.results.itemActivated.connect(self.add_from_list)
         self.results.itemDoubleClicked.connect(self.add_from_list)
-        add_card = card(self.test_search, self.results, title="Add tests")
+        add_card = card(search_w, self.results, title="Add tests")
         # let the results list grow to fill the card and the column
         add_card.layout().setStretch(add_card.layout().count() - 1, 1)
         left.addWidget(add_card, 1)
@@ -269,6 +284,7 @@ class ReceptionPage(QWidget):
         if self._existing_patient_id is not None:
             self._existing_patient_id = None
             self.linked_lbl.hide()
+            self.prev_lbl.hide(); self.prev_visits.hide()
 
     def search_patients(self, text=None):
         text = (self.find.text() if text is None else text).strip()
@@ -319,8 +335,32 @@ class ReceptionPage(QWidget):
         self.linked_lbl.setText(
             f"✓ Linked to existing patient {r['mr_no'] or ''} — new visit will join their history")
         self.linked_lbl.show()
+        self._show_previous_visits(pid)
         self.find.clear()
         self.find_results.hide()
+
+    def _show_previous_visits(self, pid):
+        """List this patient's recent receipts so reception sees their history."""
+        cur = db.get_setting(self.con, "currency", "Rs.")
+        rows = self.con.execute(
+            "SELECT lab_no, received_at, net_amount, due, status FROM receipts "
+            "WHERE patient_id=? AND COALESCE(voided,0)=0 ORDER BY id DESC LIMIT 12", (pid,)
+        ).fetchall()
+        self.prev_visits.clear()
+        if not rows:
+            self.prev_lbl.hide(); self.prev_visits.hide()
+            return
+        for r in rows:
+            when = (r["received_at"] or "")[:10]
+            due = f" · due {money(r['due'], cur)}" if r["due"] else ""
+            st = (r["status"] or "").replace("_", " ")
+            it = QListWidgetItem(
+                f"{r['lab_no'] or ''}  ·  {when}  ·  {money(r['net_amount'] or 0, cur)}  ·  {st}{due}")
+            if r["due"]:
+                it.setForeground(Qt.red)
+            self.prev_visits.addItem(it)
+        self.prev_lbl.setText(f"Previous visits ({len(rows)})")
+        self.prev_lbl.show(); self.prev_visits.show()
 
     # ---- specimen options driven by the chosen tests --------------
     def update_specimen_options(self):
@@ -369,6 +409,44 @@ class ReceptionPage(QWidget):
             it = QListWidgetItem(f"{r['name']}   —   {cur} {r['charges']:,.0f}")
             it.setData(Qt.UserRole, (r["id"], r["name"], r["charges"]))
             self.results.addItem(it)
+
+    def _show_panel_menu(self):
+        """Drop down the saved panels; picking one adds all its tests to the cart."""
+        from PySide6.QtWidgets import QMenu
+        panels = db.list_panels(self.con)
+        menu = QMenu(self)
+        if not panels:
+            act = menu.addAction("No panels yet — create them in Test Catalog")
+            act.setEnabled(False)
+        else:
+            for p in panels:
+                menu.addAction(p["name"], lambda _=False, pid=p["id"], nm=p["name"]: self._add_panel(pid, nm))
+        menu.exec(self.panel_btn.mapToGlobal(self.panel_btn.rect().bottomLeft()))
+
+    def _add_panel(self, panel_id, name):
+        rows = db.panel_tests(self.con, panel_id)
+        added = 0
+        for r in rows:
+            if any(c["test_id"] == r["id"] for c in self.cart):
+                continue
+            self.cart.append({"test_id": r["id"], "name": r["name"], "charge": r["charges"]})
+            added += 1
+        self.refresh_cart()
+        skipped = len(rows) - added
+        msg = f"Added {added} test(s) from “{name}”."
+        if skipped:
+            msg += f" {skipped} already in the cart."
+        self.statusBar_message(msg)
+
+    def statusBar_message(self, msg):
+        """Surface a brief status note via the main window's status bar if present."""
+        w = self.window()
+        if hasattr(w, "statusBar"):
+            try:
+                w.statusBar().showMessage(msg, 4000)
+                return
+            except Exception:  # noqa: BLE001
+                pass
 
     def _add_top_test(self):
         """Enter in the test search box adds the first matching test."""
@@ -584,6 +662,7 @@ class ReceptionPage(QWidget):
         self.cart = []
         self._existing_patient_id = None
         self.linked_lbl.hide()
+        self.prev_lbl.hide(); self.prev_visits.hide()
         for w in (self.name, self.tel, self.address, self.mr_no, self.test_search, self.find):
             w.clear()
         self.find_results.hide()
