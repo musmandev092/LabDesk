@@ -57,7 +57,14 @@ class AccountsPage(QWidget):
         lay.addWidget(field_label("Collection by payment method (paid in range)"))
         self.method_table = QTableWidget(0, 3)
         self.method_table.setHorizontalHeaderLabels(["Method", "Receipts", "Collected (Rs.)"])
-        self.method_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        _mh = self.method_table.horizontalHeader()
+        _mh.setSectionResizeMode(0, QHeaderView.Stretch)   # Method grows
+        # fixed, generous widths for the numeric columns so the bold "Collected
+        # (Rs.)" header can never be clipped at the table's right edge
+        _mh.setSectionResizeMode(1, QHeaderView.Fixed)
+        _mh.setSectionResizeMode(2, QHeaderView.Fixed)
+        self.method_table.setColumnWidth(1, 100)
+        self.method_table.setColumnWidth(2, 150)
         self.method_table.verticalHeader().setVisible(False)
         self.method_table.setAlternatingRowColors(True)
         self.method_table.setEditTriggers(QTableWidget.NoEditTriggers)

@@ -16,7 +16,8 @@ from . import tasks
 from .. import db
 from .. import report, whatsapp
 from .style import (
-    build_qss, PRODUCT_NAME, PRODUCT_TAGLINE, DEVELOPER, DEVELOPER_GITHUB, DEVELOPER_EMAILS,
+    build_qss, apply_theme, PRODUCT_NAME, PRODUCT_TAGLINE, DEVELOPER, DEVELOPER_GITHUB,
+    DEVELOPER_EMAILS,
 )
 from .. import __version__
 from ..roles import ROLES, role_label, can
@@ -248,7 +249,7 @@ class SettingsPage(QWidget):
         theme = self.theme_combo.currentData() or "light"
         app = QApplication.instance()
         if app is not None:
-            app.setStyleSheet(build_qss(theme))
+            apply_theme(app, theme)
 
     def _whatsapp_card(self):
         form = self._form()

@@ -108,7 +108,7 @@ class ReceptionPage(QWidget):
         self.linked_lbl.hide()
         # Positive consent, default ON (giving a number implies the patient wants
         # WhatsApp delivery). Unticking opts them out; the choice is timestamped.
-        self.wa_consent = QCheckBox("Send reports & bills to this patient on WhatsApp")
+        self.wa_consent = QCheckBox("Send reports and bills to this patient on WhatsApp")
         self.wa_consent.setChecked(True)
         self.wa_consent.setToolTip(
             "Reports/bills are delivered through WhatsApp (Meta). Untick if the "

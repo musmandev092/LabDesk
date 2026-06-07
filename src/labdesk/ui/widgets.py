@@ -91,7 +91,8 @@ def stat_card(title: str, value: str, color: str = PRIMARY, on_click=None) -> QF
         hint = QLabel("Open →"); hint.setStyleSheet(f"color:{color};font-weight:700;font-size:12px;")
         lay.addWidget(hint)
         f.setCursor(Qt.PointingHandCursor)
-        f.setStyleSheet("QFrame#statcard:hover { border-color: %s; background: #f3fafa; }" % color)
+        # highlight the border on hover only — a fixed light fill washes out in dark mode
+        f.setStyleSheet("QFrame#statcard:hover { border-color: %s; }" % color)
         f.mousePressEvent = lambda e, cb=on_click: cb()
     else:
         lay.addStretch(1)

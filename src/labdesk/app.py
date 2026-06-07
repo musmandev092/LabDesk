@@ -12,7 +12,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
 from . import db
-from .ui.style import QSS, PRODUCT_NAME, build_qss
+from .ui.style import QSS, PRODUCT_NAME, build_qss, apply_theme
 from .ui.login import LoginDialog
 from .ui.setup_wizard import SetupWizard
 from .ui.main_window import MainWindow
@@ -136,7 +136,7 @@ def run(argv: list[str]) -> int:
     app.setDesktopFileName("LabDesk")
     if APP_ICON.exists():
         app.setWindowIcon(QIcon(str(APP_ICON)))
-    app.setStyleSheet(QSS)
+    apply_theme(app, "light")   # splash is light; the saved theme is applied below
 
     # Load the report font once here on the main thread; PDF building runs on a
     # worker thread and must not touch QFontDatabase off-thread.
@@ -176,7 +176,7 @@ def run(argv: list[str]) -> int:
     # show a one-time "installed" / "updated" notice when run as an AppImage.
     notice = _integrate_appimage(con)
     # apply the saved theme now that we can read settings (splash was light)
-    app.setStyleSheet(build_qss(db.get_setting(con, "theme", "light")))
+    apply_theme(app, db.get_setting(con, "theme", "light"))
     if splash is not None:
         splash.close()
     if notice and os.environ.get("LABDESK_SELFTEST") != "1":

@@ -114,6 +114,7 @@ QPushButton:pressed {{ background: {p['primary_dark']}; }}
 QPushButton:disabled {{ background: {p['disabled_bg']}; color: {p['disabled_text']}; }}
 QPushButton#ghost {{ background: transparent; color: {p['ghost_text']}; border: 1.5px solid {p['primary']}; }}
 QPushButton#ghost:hover {{ background: {p['primary_light']}; }}
+QPushButton#ghost:disabled {{ background: transparent; color: {p['muted']}; border: 1.5px solid {p['border']}; }}
 QPushButton#danger {{ background: {p['danger']}; border: 1.5px solid transparent; }}
 QPushButton#danger:hover {{ background: #99291c; }}
 QPushButton#linkbtn {{ background: transparent; color: {p['ghost_text']}; border: none; padding: 6px; font-weight: 700; }}
@@ -217,6 +218,37 @@ QSplitter::handle {{ background: transparent; width: 14px; }}
     border-radius: 16px;
 }}
 """
+
+
+def apply_theme(app, theme: str = "light") -> None:
+    """Apply a theme fully: the stylesheet AND a matching QPalette.
+
+    The stylesheet alone leaves *unstyled* container widgets (scroll-area
+    viewports, bare QWidgets used as layout hosts) painting with the default
+    palette — which is white, so they wash out under the dark theme. Setting the
+    palette too makes those surfaces follow the theme.
+    """
+    from PySide6.QtGui import QPalette, QColor
+    p = THEMES.get(theme, _LIGHT)
+    app.setStyleSheet(build_qss(theme))
+    pal = QPalette()
+    text = QColor(p["text"])
+    pal.setColor(QPalette.Window, QColor(p["bg"]))
+    pal.setColor(QPalette.WindowText, text)
+    pal.setColor(QPalette.Base, QColor(p["input_bg"]))
+    pal.setColor(QPalette.AlternateBase, QColor(p["alt"]))
+    pal.setColor(QPalette.Text, text)
+    pal.setColor(QPalette.Button, QColor(p["bg"]))
+    pal.setColor(QPalette.ButtonText, text)
+    pal.setColor(QPalette.ToolTipBase, QColor(p["card"]))
+    pal.setColor(QPalette.ToolTipText, text)
+    pal.setColor(QPalette.PlaceholderText, QColor(p["muted"]))
+    pal.setColor(QPalette.Highlight, QColor(p["primary"]))
+    pal.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+    pal.setColor(QPalette.Disabled, QPalette.WindowText, QColor(p["muted"]))
+    pal.setColor(QPalette.Disabled, QPalette.Text, QColor(p["muted"]))
+    pal.setColor(QPalette.Disabled, QPalette.ButtonText, QColor(p["muted"]))
+    app.setPalette(pal)
 
 
 # Default (light) stylesheet — kept for any code that imports QSS directly.
