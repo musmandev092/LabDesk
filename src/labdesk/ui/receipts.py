@@ -71,7 +71,7 @@ class _EditReceiptDialog(QDialog):
         self._removed = []   # item_ids of existing rows the user removed
 
         root = QVBoxLayout(self)
-        root.addWidget(QLabel(f"<b>{rec['patient_name'] or ''}</b>  —  {rec['lab_no'] or ''}"))
+        root.addWidget(QLabel(f"Patient: <b>{rec['patient_name'] or ''}</b>"))
 
         # current tests
         self.tbl = QTableWidget(0, 3)
@@ -141,14 +141,24 @@ class _EditReceiptDialog(QDialog):
             ci = QTableWidgetItem(f"{c['charge']:,.0f}")
             ci.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.tbl.setItem(r, 1, ci)
-            btn = QPushButton("✕"); btn.setFixedSize(28, 26); btn.setCursor(Qt.PointingHandCursor)
+            btn = QPushButton("✕"); btn.setFixedSize(26, 24); btn.setCursor(Qt.PointingHandCursor)
             if c["has_results"]:
                 btn.setEnabled(False)
                 btn.setToolTip("Results already entered — this test can't be removed")
+                btn.setStyleSheet(
+                    "QPushButton{background:transparent;color:#8a949c;"
+                    "border:1px solid #3a4a56;border-radius:6px;padding:0;}")
             else:
                 btn.setToolTip("Remove this test")
+                btn.setStyleSheet(
+                    "QPushButton{background:transparent;color:#c0392b;border:1px solid #e3b4ae;"
+                    "border-radius:6px;font-weight:bold;padding:0;}"
+                    "QPushButton:hover{background:#c0392b;color:white;border-color:#c0392b;}")
                 btn.clicked.connect(lambda _=False, idx=i: self._remove(idx))
-            self.tbl.setCellWidget(r, 2, btn)
+            # center the small button in the cell
+            wrap = QWidget(); wl = QHBoxLayout(wrap)
+            wl.setContentsMargins(0, 0, 0, 0); wl.addWidget(btn, 0, Qt.AlignCenter)
+            self.tbl.setCellWidget(r, 2, wrap)
 
     def _remove(self, idx):
         it = self.items[idx]
