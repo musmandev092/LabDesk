@@ -656,8 +656,7 @@ def build_receipt_html(con, receipt_id: int) -> str:
     summary = (
         f"<div class='summary'><div class='notes'>"
         f"<div class='words'><b>Amount in words:</b><br><i>{_esc(_amount_in_words(net))}</i></div>"
-        f"<div class='remarks'><b>Remarks:</b><br>Please present this receipt to collect your report. "
-        f"Reports are issued strictly following final verification and signature by the consultant pathologist.</div>"
+        f"<div class='remarks'><b>Remarks:</b><br>{_esc(g('receipt_remarks'))}</div>"
         f"</div><div class='totals'><table class='tot'>"
         f"<tr><td class='lbl'>Total:</td><td class='val'>{subtotal:,.2f}</td></tr>"
         f"<tr><td class='lbl'>Discount:</td><td class='val'>{discount:,.2f}</td></tr>"
@@ -670,9 +669,10 @@ def build_receipt_html(con, receipt_id: int) -> str:
            if change > 0 else "")
         + "</table></div></div>"
     )
+    note = g("receipt_footer_note")
     footer = (
         f"<table class='rfoot'><tr><td>{_esc(g('lab_name'))} © {_esc(year)}</td>"
-        f"<td style='text-align:right;'><i>Computer-generated document. No signature required.</i></td>"
+        f"<td style='text-align:right;'><i>{_esc(note)}</i></td>"
         f"</tr></table>"
     )
     body = footer + header + _patient_card(r, include_reporting=False) + items_table + summary

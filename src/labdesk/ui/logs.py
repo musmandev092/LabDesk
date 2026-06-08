@@ -81,11 +81,12 @@ class LogsPage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(12)
-        verify = QPushButton("Verify integrity"); verify.setObjectName("ghost")
-        verify.clicked.connect(self.verify_integrity)
-        clear = QPushButton("Clear old logs…"); clear.setObjectName("ghost")
-        clear.clicked.connect(self.clear_old)
-        header, self.sub = page_header("Logs", "Audit trail of activity", verify, clear)
+        self.verify_btn = QPushButton("Verify integrity"); self.verify_btn.setObjectName("ghost")
+        self.verify_btn.clicked.connect(self.verify_integrity)
+        self.clear_btn = QPushButton("Clear old logs…"); self.clear_btn.setObjectName("ghost")
+        self.clear_btn.clicked.connect(self.clear_old)
+        header, self.sub = page_header("Logs", "Audit trail of activity",
+                                       self.verify_btn, self.clear_btn)
         root.addWidget(header)
 
         bar = QHBoxLayout()
@@ -151,24 +152,42 @@ class LogsPage(QWidget):
         self.summary.setText(f"{n} entr{'y' if n == 1 else 'ies'} shown (newest first, max 1000)")
 
     def verify_integrity(self):
-        ok, bad = db.verify_audit_chain(self.con)
-        if ok:
-            QMessageBox.information(self, "Logs",
-                                    "Audit log integrity OK — the hash chain is intact.")
-        else:
-            QMessageBox.warning(self, "Logs",
-                                f"Integrity check FAILED near entry #{bad}. "
-                                "The audit log appears to have been altered or truncated.")
+        # Hashing the whole chain grows with the log — run it off the UI thread.
+        def done(work_ok, result):
+            if not work_ok:
+                QMessageBox.warning(self, "Logs", f"Could not verify the log:\n{result}")
+                return
+            ok, bad = result
+            if ok:
+                QMessageBox.information(self, "Logs",
+                                        "Audit log integrity OK — the hash chain is intact.")
+            else:
+                QMessageBox.warning(self, "Logs",
+                                    f"Integrity check FAILED near entry #{bad}. "
+                                    "The audit log appears to have been altered or truncated.")
+        tasks.run_in_background(self, lambda con: db.verify_audit_chain(con), done,
+                                clicked=self.verify_btn, lock=(self.clear_btn,),
+                                busy_text="Verifying…")
 
     def clear_old(self):
         if QMessageBox.question(
             self, "Clear logs", "Delete audit-log entries older than 90 days?"
         ) != QMessageBox.Yes:
             return
-        self.con.execute("DELETE FROM audit_log WHERE at < datetime('now','localtime','-90 days')")
-        self.con.commit()
-        db.log_audit(self.con, self.user["username"], "logs_cleared",
-                     "removed entries older than 90 days")
-        # re-anchor the hash chain so 'Verify integrity' stays valid after the purge
-        db.rechain_audit(self.con)
-        self.refresh()
+        user = self.user["username"]
+
+        def work(con):
+            con.execute("DELETE FROM audit_log WHERE at < datetime('now','localtime','-90 days')")
+            con.commit()
+            db.log_audit(con, user, "logs_cleared", "removed entries older than 90 days")
+            # re-anchor the hash chain so 'Verify integrity' stays valid after the purge
+            db.rechain_audit(con)
+            return True
+
+        def done(work_ok, result):
+            if not work_ok:
+                QMessageBox.warning(self, "Clear logs", f"Could not clear logs:\n{result}")
+            self.refresh()
+
+        tasks.run_in_background(self, work, done, clicked=self.clear_btn,
+                                lock=(self.verify_btn,), busy_text="Clearing…")

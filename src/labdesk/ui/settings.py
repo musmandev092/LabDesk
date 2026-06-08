@@ -84,6 +84,10 @@ REPORT_FIELDS = [
     ("signatory_2_name", "Signatory 2 — name"),
     ("signatory_2_title", "Signatory 2 — title"),
 ]
+RECEIPT_FIELDS = [
+    ("receipt_remarks", "Remarks line", "Shown under the bill's Remarks heading"),
+    ("receipt_footer_note", "Footer note", "Small italic line at the bottom of the bill"),
+]
 LOGO_FIELDS = [
     ("logo_path", "Main logo"),
     ("accred_logo_1", "Secondary logo"),
@@ -122,6 +126,7 @@ class SettingsPage(QWidget):
         col.addWidget(self._printer_card())
         col.addWidget(self._text_card("Special-day discount", PROMO_FIELDS))
         col.addWidget(self._text_card("Report footer", REPORT_FIELDS))
+        col.addWidget(self._text_card("Receipt footer", RECEIPT_FIELDS))
         col.addWidget(self._whatsapp_card())
         col.addWidget(self._security_card())
         # Backup/restore replaces the entire database — gate it behind an explicit
@@ -380,8 +385,10 @@ class SettingsPage(QWidget):
 
     def _backup_card(self):
         now = QPushButton("Back up now"); now.setObjectName("ghost"); now.clicked.connect(self._backup_now)
+        self._backup_btn = now
         restore = QPushButton("Restore from file…"); restore.setObjectName("ghost")
         restore.clicked.connect(self._restore_db)
+        self._restore_btn = restore
         row = QHBoxLayout(); row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(now); row.addWidget(restore); row.addStretch(1)
         w = QWidget(); w.setLayout(row)
@@ -394,12 +401,22 @@ class SettingsPage(QWidget):
     def _backup_now(self):
         if not can(self.user["role"], "manage_backups"):
             return  # defence in depth — backup/restore is admin-only
-        p = db.backup_db("manual")
-        if p:
-            db.log_audit(self.con, self.user["username"], "backup_created", str(p))
-            QMessageBox.information(self, "Backup", f"Backup saved:\n{p}")
-        else:
-            QMessageBox.warning(self, "Backup", "Could not create a backup.")
+        user = self.user["username"]
+
+        def work(con):
+            p = db.backup_db("manual")            # makes its own connections; con unused
+            if p:
+                db.log_audit(con, user, "backup_created", str(p))
+            return p
+
+        def done(work_ok, result):
+            if work_ok and result:
+                QMessageBox.information(self, "Backup", f"Backup saved:\n{result}")
+            else:
+                QMessageBox.warning(self, "Backup", "Could not create a backup.")
+
+        tasks.run_in_background(self, work, done, clicked=self._backup_btn,
+                                lock=(self._restore_btn,), busy_text="Backing up…")
 
     def _restore_db(self):
         if not can(self.user["role"], "manage_backups"):
@@ -415,12 +432,17 @@ class SettingsPage(QWidget):
             "the current data is kept). You must close and reopen LabDesk afterwards. Continue?",
         ) != QMessageBox.Yes:
             return
-        if db.restore_db(path):
-            db.log_audit(self.con, self.user["username"], "db_restored", path)
-            QMessageBox.information(self, "Restore",
-                                   "Database restored. Please close and reopen LabDesk now.")
-        else:
-            QMessageBox.warning(self, "Restore", "Restore failed (file unreadable?).")
+        def done(work_ok, result):
+            if work_ok and result:
+                db.log_audit(self.con, self.user["username"], "db_restored", path)
+                QMessageBox.information(self, "Restore",
+                                       "Database restored. Please close and reopen LabDesk now.")
+            else:
+                QMessageBox.warning(self, "Restore", "Restore failed (file unreadable?).")
+
+        tasks.run_in_background(self, lambda con: db.restore_db(path), done,
+                                clicked=self._restore_btn, lock=(self._backup_btn,),
+                                busy_text="Restoring…")
 
     def _reset_user_pw(self):
         if not can(self.user["role"], "manage_users"):
@@ -519,20 +541,22 @@ class SettingsPage(QWidget):
                     "your access token would be sent to that host. Save anyway?",
                 ) != QMessageBox.Yes:
                     return
-        for key, le in self.inputs.items():
-            if key == "whatsapp_api_key":
-                continue  # handled separately (secret file, never the DB)
-            db.set_setting(self.con, key, le.text().strip())
-        # WhatsApp token → private 0600 secret file; purge any legacy plaintext DB copy
-        db.set_secret("whatsapp_api_key", self.inputs["whatsapp_api_key"].text().strip())
-        db.set_setting(self.con, "whatsapp_api_key", "")
-        db.set_setting(self.con, "whatsapp_auto", "1" if self.wa_auto.isChecked() else "0")
-        db.set_setting(self.con, "whatsapp_auto_receipt",
-                       "1" if self.wa_auto_receipt.isChecked() else "0")
+        # Collect every field into one mapping and write it in a SINGLE transaction.
+        # Saving key-by-key used to fsync ~30 times and froze the UI for a beat.
         theme = self.theme_combo.currentData() or "light"
-        db.set_setting(self.con, "theme", theme)
-        self._apply_theme_preview()
-        db.set_setting(self.con, "default_printer", self.printer_combo.currentData() or "")
+        prev_theme = db.get_setting(self.con, "theme", "light")
+        updates = {key: le.text().strip()
+                   for key, le in self.inputs.items() if key != "whatsapp_api_key"}
+        updates["whatsapp_api_key"] = ""   # token lives in the secret file, never the DB
+        updates["whatsapp_auto"] = "1" if self.wa_auto.isChecked() else "0"
+        updates["whatsapp_auto_receipt"] = "1" if self.wa_auto_receipt.isChecked() else "0"
+        updates["theme"] = theme
+        updates["default_printer"] = self.printer_combo.currentData() or ""
+        db.set_settings(self.con, updates)                 # one commit — no freeze
+        # WhatsApp token → private 0600 secret file (kept out of the DB)
+        db.set_secret("whatsapp_api_key", self.inputs["whatsapp_api_key"].text().strip())
+        if theme != prev_theme:
+            self._apply_theme_preview()                    # only restyle when it changed
         db.log_audit(self.con, self.user["username"], "settings_saved", f"theme={theme}")
         QMessageBox.information(self, "Settings", "Saved.")
 

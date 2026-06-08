@@ -59,6 +59,11 @@ DEFAULT_SETTINGS = {
     "signatory_2_name": "",
     "signatory_2_title": "Consultant Pathologist",
     "dept_band": "HEMATOLOGY  |  CHEMICAL PATHOLOGY  |  HORMONES  |  MOLECULAR BIOLOGY  |  HISTOPATHOLOGY",
+    # cash-receipt footer text (was hard-coded in report.py; now lab-editable)
+    "receipt_footer_note": "Computer-generated document. No signature required.",
+    "receipt_remarks": ("Please present this receipt to collect your report. Reports are "
+                        "issued strictly following final verification and signature by the "
+                        "consultant pathologist."),
     # Appearance
     "theme": "light",            # "light" | "dark"
     # security: auto-lock the screen after N minutes idle (0 = off)
@@ -406,6 +411,21 @@ def set_setting(con: sqlite3.Connection, key: str, value: str) -> None:
         "INSERT INTO settings(key, value) VALUES (?,?) "
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         (key, value),
+    )
+    con.commit()
+
+
+def set_settings(con: sqlite3.Connection, mapping) -> None:
+    """Upsert many settings in ONE transaction (a single commit). set_setting()
+    fsyncs on every call, so saving a whole form key-by-key did ~30 disk syncs and
+    visibly froze the UI; this writes them all at once."""
+    items = list(mapping.items())
+    if not items:
+        return
+    con.executemany(
+        "INSERT INTO settings(key, value) VALUES (?,?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        items,
     )
     con.commit()
 
