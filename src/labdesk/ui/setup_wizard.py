@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 
 from .. import db
 from .style import PRODUCT_NAME
-from .widgets import field_label
+from .widgets import field_label, fit_to_screen
 
 
 class SetupWizard(QDialog):
@@ -21,8 +21,11 @@ class SetupWizard(QDialog):
         super().__init__(parent)
         self.con = con
         self.setWindowTitle(f"Welcome to {PRODUCT_NAME}")
-        self.setMinimumSize(680, 760)
-        self.resize(700, 880)
+        # A 760-px minimum height made the first-run wizard impossible to fit on a
+        # 1366x768 laptop. The form lives in a QScrollArea (below), so a small floor
+        # is safe — it scrolls instead of overflowing.
+        self.setMinimumSize(560, 480)
+        fit_to_screen(self, 700, 880)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(40, 32, 40, 28)

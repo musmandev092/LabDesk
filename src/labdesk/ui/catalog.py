@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QColor
 
-from .widgets import muted, page_header, like_term
+from .widgets import muted, page_header, like_term, fit_to_screen
 from . import tasks
 from .. import db
 from ..constants import SPECIMEN_PRESETS
@@ -73,7 +73,7 @@ class ParametersDialog(QDialog):
         self.user = user
         self.test_id = test_id
         self.setWindowTitle(f"Parameters — {test_name}")
-        self.resize(860, 560)
+        fit_to_screen(self, 860, 560)
         lay = QVBoxLayout(self)
         lay.addWidget(muted(
             "Define the lines that appear on this test's report. "
@@ -191,7 +191,7 @@ class PanelsDialog(QDialog):
         self.con = con
         self.user = user
         self.setWindowTitle("Test panels / profiles")
-        self.resize(720, 520)
+        fit_to_screen(self, 720, 520)
         self._panel_id = None
 
         root = QHBoxLayout(self)
@@ -363,7 +363,10 @@ class CatalogPage(QWidget):
         split.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.tests = QTableWidget(0, 3)
         self.tests.setHorizontalHeaderLabels(["Test", "Charges (Rs.)", "Category"])
-        self.tests.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        _th = self.tests.horizontalHeader()
+        _th.setSectionResizeMode(0, QHeaderView.Stretch)            # Test name fills
+        _th.setSectionResizeMode(1, QHeaderView.ResizeToContents)   # "Charges (Rs.)" no longer clipped
+        _th.setSectionResizeMode(2, QHeaderView.ResizeToContents)   # Category
         self.tests.setSelectionBehavior(QTableWidget.SelectRows)
         self.tests.setEditTriggers(QTableWidget.NoEditTriggers)
         self.tests.itemSelectionChanged.connect(self.show_params)

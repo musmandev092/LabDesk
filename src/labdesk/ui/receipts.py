@@ -10,7 +10,10 @@ from PySide6.QtWidgets import (
     QScrollArea, QMenu, QDateEdit, QListWidget, QListWidgetItem,
 )
 
-from .widgets import muted, page_header, money, num_item, selected_id, status_badge, like_term
+from .widgets import (
+    muted, page_header, money, num_item, selected_id, status_badge, like_term, fit_to_screen,
+    FlowLayout,
+)
 from . import wa, tasks
 from .. import db, report, render
 from ..constants import PAYMENT_METHODS
@@ -26,7 +29,7 @@ class _PreviewDialog(QDialog):
     def __init__(self, pages, parent=None, title="Preview"):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.resize(840, 1040)
+        fit_to_screen(self, 840, 1040)   # scroll area below; clamp so it fits short screens
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         host = QWidget()
@@ -82,7 +85,10 @@ class _EditReceiptDialog(QDialog):
         th.setSectionResizeMode(0, QHeaderView.Stretch)
         th.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         th.setSectionResizeMode(2, QHeaderView.Fixed); self.tbl.setColumnWidth(2, 44)
-        self.tbl.setMaximumHeight(180)
+        # Taller so a typical multi-test bill shows its rows cleanly instead of
+        # cramming ~1.5 rows behind a scrollbar; longer bills scroll past ~7 rows.
+        self.tbl.setMinimumHeight(180)
+        self.tbl.setMaximumHeight(300)
         root.addWidget(self.tbl)
 
         # add a test (by name or number)
@@ -272,7 +278,10 @@ class ReceiptsPage(QWidget):
         self._report_btns = (self.prev_rpt_btn, self.print_rpt_btn, self.pdf_rpt_btn, self.wa_rpt_btn)
         self._receipt_btns = (self.prev_rcpt_btn, self.print_rcpt_btn, self.pdf_rcpt_btn, self.wa_rcpt_btn)
 
-        tb = QHBoxLayout(); tb.setSpacing(8)
+        # FlowLayout so this 12-button action bar WRAPS to more rows on narrow
+        # windows instead of forcing a ~1870px minimum (which made the whole app
+        # unusable below ~2100px wide — wider than most laptop screens).
+        tb = FlowLayout(hspacing=8, vspacing=6)
         rcpt_lbl = QLabel("Receipt:"); rcpt_lbl.setObjectName("muted"); tb.addWidget(rcpt_lbl)
         for b in self._receipt_btns:
             tb.addWidget(b)
@@ -298,7 +307,6 @@ class ReceiptsPage(QWidget):
             tb.addWidget(self.void_btn)   # voiding a bill is a manager/admin action
         else:
             self.void_btn.hide()
-        tb.addStretch(1)
         root.addLayout(tb)
 
         # filters

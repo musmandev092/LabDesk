@@ -7,13 +7,21 @@ from PySide6.QtCore import Qt, QEvent, QTimer
 from PySide6.QtGui import QPixmap, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget,
-    QPushButton, QLabel, QButtonGroup, QApplication, QDialog,
+    QPushButton, QLabel, QButtonGroup, QApplication, QDialog, QScrollArea, QFrame,
+    QSizePolicy,
 )
 
-from .. import db
+from .. import db, render
 
 # bundled product logo (also the per-lab fallback brand mark)
 ASSET_LOGO = Path(__file__).resolve().parent.parent / "assets" / "app_logo.png"
+
+
+def _autocrop(pm: QPixmap) -> QPixmap:
+    """Sidebar wrapper around the shared logo autocrop (``render.autocrop_image``), so
+    the sidebar brand mark and the printed report/receipt letterhead trim margins with
+    exactly the same logic — one source of truth."""
+    return QPixmap.fromImage(render.autocrop_image(pm.toImage()))
 from ..roles import can_view_page, role_label
 from .style import PRODUCT_NAME, PRODUCT_TAGLINE, DEVELOPER, DEVELOPER_GITHUB
 from .. import __version__
@@ -51,7 +59,14 @@ class MainWindow(QMainWindow):
         lab = db.get_setting(con, "lab_name", "") or PRODUCT_NAME
         # window title = just the lab's own name (cleaner than repeating "Laboratory")
         self.setWindowTitle(lab)
-        self.resize(1240, 800)
+        # Rule 3 (split-screen snapping): a logical minimum WIDTH of 1280 so the app
+        # stays usable when snapped to a half-screen layout (e.g. half of a 2560
+        # monitor). The wrapping toolbar + scroll view keep all content within 1280,
+        # so nothing is clipped at the minimum. The minimum HEIGHT is kept at 640
+        # (not 720) so a 1280x720 panel whose taskbar leaves ~680 px usable doesn't
+        # push the window bottom under the taskbar; the page scrolls if shorter.
+        self.setMinimumSize(1280, 640)
+        self.resize(1280, 820)        # windowed-fallback size; showMaximized() at launch
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -63,6 +78,7 @@ class MainWindow(QMainWindow):
         sidebar = QWidget()
         sidebar.setObjectName("Sidebar")
         sidebar.setFixedWidth(230)
+        self._sidebar = sidebar          # kept for the responsive resizeEvent (Rule 5)
         sb = QVBoxLayout(sidebar)
         sb.setContentsMargins(0, 0, 0, 0)
         sb.setSpacing(0)
@@ -75,7 +91,13 @@ class MainWindow(QMainWindow):
         if not pm.isNull():
             logo = QLabel()
             logo.setObjectName("SidebarLogo")
-            logo.setPixmap(pm.scaledToHeight(96, Qt.SmoothTransformation))
+            # 1) trim any white/transparent margins baked into the logo file (the
+            #    reason it looked tiny inside a big white box), then 2) fit it to the
+            #    card's inner box (≈190px wide, ≤132px tall) keeping aspect so it's as
+            #    large as possible and NEVER clipped. The old scaledToHeight(96) locked
+            #    height and ignored width, so a wide logo overflowed and was cut.
+            pm = _autocrop(pm)
+            logo.setPixmap(pm.scaled(190, 132, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             logo.setAlignment(Qt.AlignHCenter)
             sb.addWidget(logo)
             sb.addSpacing(8)
@@ -138,7 +160,20 @@ class MainWindow(QMainWindow):
         content = QWidget()
         cl = QVBoxLayout(content)
         cl.setContentsMargins(22, 18, 22, 18)
-        cl.addWidget(self.stack)
+        # Wrap the page area in a scroll view so the window can shrink BELOW the
+        # content's natural width (e.g. a snapped half-screen) and scroll, instead
+        # of the layout forcing the window wider than the monitor. On normal-width
+        # screens the page fills the viewport and no scrollbar shows.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(self.stack)
+        # Rule 2 (vertical-space utilisation): the page area expands in BOTH axes so
+        # it soaks up the extra height on 16:10 / 3:2 panels instead of leaving dead
+        # space. The pages' own tables already expand to fill this.
+        scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        cl.addWidget(scroll, 1)
         root.addWidget(content, 1)
 
         # Alt+1..9 jump straight to a sidebar page
@@ -207,6 +242,18 @@ class MainWindow(QMainWindow):
             self._logged_out = True
             db.log_audit(self.con, self.user["username"], "logout", "session ended")
         super().closeEvent(event)
+
+    # Rule 5 (responsive resizing): collapse the 230 px sidebar when the window gets
+    # narrow so the page keeps its working width. The 1280 minimum means this is a
+    # graceful-degradation safety net for out-of-spec widths (e.g. fractional Wayland
+    # scaling pushing the logical width down); navigation stays available via Alt+1..9.
+    _SIDEBAR_MIN_WIDTH = 1180
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        sidebar = getattr(self, "_sidebar", None)
+        if sidebar is not None:
+            sidebar.setVisible(self.width() >= self._SIDEBAR_MIN_WIDTH)
 
     def go(self, idx: int):
         self.stack.setCurrentIndex(idx)

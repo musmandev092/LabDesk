@@ -129,6 +129,13 @@ def _setup_crash_logging() -> None:
 
 def run(argv: list[str]) -> int:
     _setup_crash_logging()
+    # High-DPI: pass the OS's exact fractional scale through (e.g. 150% -> 1.5) so a
+    # window never gets rounded UP past the screen. This is already the Qt 6 default;
+    # setting it explicitly is portable and must happen before QApplication is built.
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QGuiApplication
+    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(argv)
     app.setApplicationName(PRODUCT_NAME)
     app.setOrganizationName(PRODUCT_NAME)
@@ -205,7 +212,9 @@ def run(argv: list[str]) -> int:
         return 0
 
     win = MainWindow(con, login.user)
-    win.show()
+    # Maximize so a data-dense table app uses the whole screen; the content now
+    # reflows (wrapping toolbar) and scrolls, so this fits every resolution.
+    win.showMaximized()
 
     return app.exec()
 

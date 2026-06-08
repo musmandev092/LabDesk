@@ -1,13 +1,116 @@
 """Small reusable UI helpers."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QPoint, QRect, QSize
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QFrame, QLabel, QVBoxLayout, QHBoxLayout, QWidget, QSizePolicy, QTableWidgetItem,
+    QApplication, QFrame, QLabel, QLayout, QVBoxLayout, QHBoxLayout, QWidget,
+    QSizePolicy, QTableWidgetItem,
 )
 
 from .style import PRIMARY
+
+
+class FlowLayout(QLayout):
+    """Lay widgets left-to-right and WRAP to the next row when horizontal space
+    runs out (Qt's classic flow layout). Its minimum width is just the widest
+    single child, so a long button toolbar can shrink to one-button width and
+    wrap instead of forcing the whole window wider than the screen.
+    """
+    def __init__(self, parent=None, *, margin=0, hspacing=8, vspacing=6):
+        super().__init__(parent)
+        self._items = []
+        self._hspace = hspacing
+        self._vspace = vspacing
+        self.setContentsMargins(margin, margin, margin, margin)
+
+    def addItem(self, item):            # noqa: N802 (Qt override)
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):            # noqa: N802
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index):            # noqa: N802
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self):      # noqa: N802
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):        # noqa: N802
+        return True
+
+    def heightForWidth(self, width):    # noqa: N802
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect):        # noqa: N802
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self):                 # noqa: N802
+        return self.minimumSize()
+
+    def minimumSize(self):              # noqa: N802
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        m = self.contentsMargins()
+        return size + QSize(m.left() + m.right(), m.top() + m.bottom())
+
+    def _do_layout(self, rect, *, test_only):
+        m = self.contentsMargins()
+        area = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
+        x, y, line_h = area.x(), area.y(), 0
+        for item in self._items:
+            hint = item.sizeHint()
+            next_x = x + hint.width() + self._hspace
+            if next_x - self._hspace > area.right() and line_h > 0:
+                x = area.x()
+                y = y + line_h + self._vspace
+                next_x = x + hint.width() + self._hspace
+                line_h = 0
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), hint))
+            x = next_x
+            line_h = max(line_h, hint.height())
+        return y + line_h - rect.y() + m.bottom()
+
+
+def fit_to_screen(widget, w: int, h: int, *, margin: float = 0.94) -> None:
+    """Clamp a top-level *dialog's* opening size so it never exceeds the screen.
+
+    Sizes are device-independent (logical) pixels — Qt 6 applies DPI scaling on top.
+    A fixed resize(.., 1040) overflows a 1366x768 laptop (≈700 px usable height);
+    this clamps to availableGeometry() (which excludes the taskbar/dock). Tall content
+    should live in a QScrollArea so clamping the height scrolls rather than hides.
+
+    Uses ONLY resize() — never move()/setGeometry() — so window placement is left to
+    the layout/window-manager (per the native-layout rule).
+    """
+    screen = widget.screen() or QApplication.primaryScreen()
+    if screen is None:                      # headless / offscreen — nothing to clamp to
+        widget.resize(w, h)
+        return
+    avail = screen.availableGeometry()
+    widget.resize(min(w, int(avail.width() * margin)), min(h, int(avail.height() * margin)))
+
+
+def max_width_center(inner, max_w: int):
+    """Wrap `inner` so it never exceeds `max_w` logical px and stays horizontally
+    centred (stretch | inner | stretch). Used for forms: on a 4K/ultrawide screen a
+    single-line field would otherwise stretch across the whole width (sparse, ugly),
+    and on a narrow screen an uncapped form can overflow — capping fixes both.
+    """
+    inner.setMaximumWidth(max_w)
+    wrap = QWidget()
+    lay = QHBoxLayout(wrap)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.addStretch(1)
+    lay.addWidget(inner)
+    lay.addStretch(1)
+    return wrap
 
 # status → (display colour) for receipt/worklist tables (single source of truth)
 STATUS_COLORS = {"pending": "#b9770e", "in_progress": "#0e7c86",

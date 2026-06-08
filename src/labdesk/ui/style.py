@@ -17,7 +17,7 @@ PRODUCT_TAGLINE = "Laboratory Management System"
 # the sidebar footer, the login/setup screen and the Settings → About card.
 DEVELOPER = "M Usman"
 DEVELOPER_GITHUB = "github.com/mosman092"
-DEVELOPER_EMAILS = ("mosman00092@gmail.com", "mosman092@hotmail.com")
+DEVELOPER_EMAILS = ("musmaniqbalbaloch@gmail.com", "mosman092@hotmail.com")
 
 # Brand / accent colours — used directly by some widgets (dashboard stat cards,
 # report colours). They read well on both light and dark surfaces, so they stay

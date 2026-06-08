@@ -5,7 +5,7 @@ from PySide6.QtCore import QDate
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QTableWidget, QTableWidgetItem,
     QLineEdit, QDoubleSpinBox, QPushButton, QHeaderView, QLabel, QGridLayout,
-    QDateEdit, QInputDialog,
+    QDateEdit, QInputDialog, QSizePolicy,
 )
 
 from .widgets import stat_card, money, page_header, field_label, num_item, selected_id
@@ -68,10 +68,24 @@ class AccountsPage(QWidget):
         self.method_table.verticalHeader().setVisible(False)
         self.method_table.setAlternatingRowColors(True)
         self.method_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.method_table.setMaximumHeight(220)
+        # Rule 2 (no dead-space caps): instead of a fixed maximumHeight (which made a
+        # lab with many payment methods scroll inside a short box while the page sat
+        # empty), the table is sized to its exact content after each refresh
+        # (_fit_method_table). The trailing stretch keeps a sparse table top-aligned;
+        # an unusually long one grows and the page scroll view takes over.
+        self.method_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         lay.addWidget(self.method_table)
         lay.addStretch(1)
         return w
+
+    def _fit_method_table(self):
+        """Pin the breakdown table to exactly its content height (header + rows) so
+        it never internally scrolls and never shows empty filler rows."""
+        t = self.method_table
+        h = t.horizontalHeader().height() + 2 * t.frameWidth()
+        for r in range(t.rowCount()):
+            h += t.rowHeight(r)
+        t.setFixedHeight(h)
 
     def refresh_summary(self):
         c = self.con; cur = db.currency(c)
@@ -116,6 +130,7 @@ class AccountsPage(QWidget):
         tot_amt = num_item(f"{sum(m['total'] for m in methods):,.0f}")
         tot_amt.setFont(fnt)
         self.method_table.setItem(i, 2, tot_amt)
+        self._fit_method_table()    # size to content (Rule 2: use space, no dead box)
 
     # ---- expenses ----
     def _expenses_tab(self):

@@ -112,6 +112,10 @@ class WorklistPage(QWidget):
         rl.addWidget(self.report_hint)
         split.addWidget(right)
         split.setSizes([430, 650])
+        # Proportional stretch so the two panes scale with the window instead of the
+        # right pane dominating on wide/4K screens (absolute setSizes alone don't).
+        split.setStretchFactor(0, 2)
+        split.setStretchFactor(1, 3)
         root.addWidget(split, 1)
 
         # ESC clears the selection / right panel; clicking empty list area too

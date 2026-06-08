@@ -17,7 +17,8 @@ class LoginDialog(QDialog):
         self.user = None
         lab = db.get_setting(con, "lab_name", "") or PRODUCT_NAME
         self.setWindowTitle(f"Sign in — {lab}")
-        self.setMinimumWidth(420)
+        # A bit taller so the brand mark, fields and footer breathe (was cramped).
+        self.setMinimumSize(420, 560)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(36, 32, 36, 32)

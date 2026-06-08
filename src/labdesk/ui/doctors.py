@@ -77,7 +77,12 @@ class DoctorsPage(QWidget):
 
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(["Name", "Hospital", "Area", "Phone", "Mobile"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        # Name fills the row; the rest size to their content so short values
+        # (e.g. "042-555") don't balloon across a 4K-wide column.
+        _dh = self.table.horizontalHeader()
+        _dh.setSectionResizeMode(0, QHeaderView.Stretch)
+        for _c in range(1, 5):
+            _dh.setSectionResizeMode(_c, QHeaderView.ResizeToContents)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setAlternatingRowColors(True)

@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 
 from PySide6.QtPrintSupport import QPrinterInfo
 
-from .widgets import muted, card, page_header, field_label
+from .widgets import muted, card, page_header, field_label, max_width_center
 from . import tasks
 from .. import db
 from .. import report, whatsapp
@@ -133,7 +133,10 @@ class SettingsPage(QWidget):
         col.addWidget(self._about_card())
         col.addStretch(1)
 
-        scroll.setWidget(host)
+        # Cap the form at a readable width and centre it: without this the fields
+        # (AllNonFixedFieldsGrow) overflow the right edge at 1280 and stretch to
+        # ~3300 px on 4K. The centred max-width wrapper fixes BOTH at once.
+        scroll.setWidget(max_width_center(host, 880))
         root.addWidget(scroll, 1)
 
         save = QPushButton("Save settings"); save.setMinimumHeight(42); save.clicked.connect(self.save)

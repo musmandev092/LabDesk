@@ -15,11 +15,74 @@ from pathlib import Path
 from PySide6.QtCore import QBuffer, QByteArray, QMarginsF, QRectF, Qt
 from PySide6.QtGui import (
     QColor, QFont, QFontDatabase, QFontMetricsF, QImage, QPageLayout, QPageSize,
-    QPainter, QPainterPath, QPdfWriter, QPen,
+    QPainter, QPainterPath, QPdfWriter, QPen, qAlpha, qBlue, qGreen, qRed,
 )
 
 ASSETS = Path(__file__).with_name("assets")
 INTER_TTF = ASSETS / "fonts" / "Inter.ttf"
+
+
+def autocrop_image(img: QImage) -> QImage:
+    """Trim near-white / transparent padding baked into a logo so its content fills
+    the space it's drawn in, instead of floating tiny inside its own margins. Shared
+    by the sidebar brand mark AND the printed report/receipt letterhead.
+
+    Safe for white-label use (every lab uploads a different logo):
+      * background sampled from the 4 corners (majority) — a logo touching one corner
+        won't fool it;
+      * a colour TOLERANCE treats JPEG noise / off-white as background;
+      * ONLY near-white or transparent padding is trimmed — a solid-COLOUR badge tile
+        is part of the design and is kept (trimming it could leave a white mark
+        invisible on the white page);
+      * returns the original if there's no clear margin, so it's never worse.
+
+    QImage-only (no QPixmap) so it is safe to call from the off-thread PDF builder.
+    """
+    img = img.convertToFormat(QImage.Format_ARGB32)
+    w, h = img.width(), img.height()
+    if w < 8 or h < 8:
+        return img
+    corners = [img.pixel(0, 0), img.pixel(w - 1, 0), img.pixel(0, h - 1), img.pixel(w - 1, h - 1)]
+    bg = max(set(corners), key=corners.count)
+    br, bgc, bb, ba = qRed(bg), qGreen(bg), qBlue(bg), qAlpha(bg)
+    is_transparent = ba < 16
+    is_white = ba >= 16 and br >= 235 and bgc >= 235 and bb >= 235
+    if not (is_transparent or is_white):
+        return img
+    TOL = 24
+
+    def near_bg(px):
+        a = qAlpha(px)
+        if a < 16 and ba < 16:
+            return True
+        if abs(a - ba) > 40:
+            return False
+        return (abs(qRed(px) - br) <= TOL and abs(qGreen(px) - bgc) <= TOL
+                and abs(qBlue(px) - bb) <= TOL)
+
+    xs = range(0, w, max(1, w // 64))
+    ys = range(0, h, max(1, h // 64))
+    row_bg = lambda y: all(near_bg(img.pixel(x, y)) for x in xs)
+    col_bg = lambda x: all(near_bg(img.pixel(x, y)) for y in ys)
+    top = 0
+    while top < h - 1 and row_bg(top):
+        top += 1
+    bot = h - 1
+    while bot > top and row_bg(bot):
+        bot -= 1
+    left = 0
+    while left < w - 1 and col_bg(left):
+        left += 1
+    right = w - 1
+    while right > left and col_bg(right):
+        right -= 1
+    cw, ch = right - left + 1, bot - top + 1
+    if cw < w * 0.05 or ch < h * 0.05 or (cw >= w * 0.98 and ch >= h * 0.98):
+        return img
+    pad = max(2, int(min(cw, ch) * 0.05))
+    left = max(0, left - pad); top = max(0, top - pad)
+    right = min(w - 1, right + pad); bot = min(h - 1, bot + pad)
+    return img.copy(left, top, right - left + 1, bot - top + 1)
 
 DPI = 300
 A4_W_MM, A4_H_MM = 210.0, 297.0
@@ -224,14 +287,18 @@ class Doc:
             cx += adv
         return cx - x
 
-    def image(self, x, y, path, h_px):
+    def image(self, x, y, path, h_px, center_w=None):
         img = QImage(str(path))
         if img.isNull():
             return 0.0
+        img = autocrop_image(img)          # trim baked-in white/transparent margins
         target_h = mm(px(h_px))
         scaled = img.scaledToHeight(int(target_h), Qt.SmoothTransformation)
+        w_mm = scaled.width() / DPI * 25.4
+        if center_w is not None:           # horizontally centre within [x, x+center_w]
+            x = x + (center_w - w_mm) / 2
         self.p.drawImage(QRectF(mm(x), mm(y), scaled.width(), scaled.height()).topLeft(), scaled)
-        return scaled.width() / DPI * 25.4   # drawn width in mm
+        return w_mm                        # drawn width in mm
 
     def text_height(self, s, font, w, wrap=True) -> float:
         """Measured height in mm for text in a width-w (mm) box."""
@@ -346,22 +413,18 @@ def build_receipt(con, receipt_id: int, device=None, images=False):
     x0 = d.ml
     y = d.mt
 
-    # ---- header ----
-    logo_w = 0.0
-    logo_path = (g("logo_path") or "").strip()
-    if logo_path and Path(logo_path).exists():
-        logo_w = d.image(x0, y, logo_path, 62) + px(0)  # height 62px
-        logo_w += 4  # margin-right 4mm
-    tx = x0 + logo_w
+    # ---- header ---- clinic info LEFT, CASH RECEIPT RIGHT, logo CENTRED both ways
+    tx = x0
     h1 = _font(16, bold=True, spacing_px=-0.5)
-    d.text(tx, y, 120, d.text_height("Xg", h1, 120, wrap=False) + 1, g("lab_name"), h1, TEAL)
-    cy = y + d.text_height("Xg", h1, 120, wrap=False) + 1.2
+    title_h = d.text_height("Xg", h1, 120, wrap=False)
+    addr_lines = [s for s in [g("address"), R._contacts(g), R._regs(g)] if s]
+    d.text(tx, y, 120, title_h + 1, g("lab_name"), h1, TEAL)
+    cy = y + title_h + 1.2
     if g("lab_subtitle"):
         dept_f = _font(8.5, bold=True, spacing_px=0.6)
         d.text(tx, cy, 120, 4, g("lab_subtitle").upper(), dept_f, ACCENT)
         cy += 4.2
     addr_f = _font(8.5)
-    addr_lines = [s for s in [g("address"), R._contacts(g), R._regs(g)] if s]
     for line in addr_lines:
         d.text(tx, cy, 130, 4, line, addr_f, MUTED)
         cy += 3.9
@@ -371,11 +434,18 @@ def build_receipt(con, receipt_id: int, device=None, images=False):
     meta_f = _font(9)
     d.text(x0, y + 7.5, d.content_w, 5, f"Date: {(r['received_at'] or '')[:16]}", meta_f, MUTED,
            Qt.AlignRight | Qt.AlignTop)
+    ry = y + 12.5
     if reg_by:
         d.text(x0, y + 12, d.content_w, 5, f"Registered by: {reg_by}", meta_f, MUTED,
                Qt.AlignRight | Qt.AlignTop)
-    header_bottom = max(cy, y + (logo_w and px(62) or 0)) + 1.5
-    header_bottom = max(header_bottom, y + 22)
+        ry = y + 17
+    # centre: logo, horizontally AND vertically centred within the header band
+    logo_path = (g("logo_path") or "").strip()
+    if logo_path and Path(logo_path).exists():
+        header_h = max(cy, ry) - y
+        logo_y = y + max(0.0, (header_h - px(40)) / 2)
+        d.image(x0, logo_y, logo_path, 40, center_w=d.content_w)
+    header_bottom = max(cy, ry, y + 16) + 1.5
     d.hline(x0, header_bottom, d.content_w, TEAL, 2)
     y = header_bottom + 5
 
@@ -483,20 +553,17 @@ REPORT_FOOTER_MM = 27.0    # reserved running-footer band
 def _report_letterhead(d: Doc, g, x0, y):
     """Draw letterhead (logo + clinic + optional accred/regs) + the 2px rule.
     Returns y just below the rule."""
-    logo_w = 0.0
-    lp = (g("logo_path") or "").strip()
-    if lp and Path(lp).exists():
-        logo_w = d.image(x0, y, lp, 64) + 4
-    tx = x0 + logo_w
     h1 = _font(17, bold=True, spacing_px=-0.5)
     h1h = d.text_height("Xg", h1, 120, wrap=False)
+    addr_lines = [s for s in [g("address"), _rcontacts(g)] if s]
+    tx = x0
     d.text(tx, y, 130, h1h + 1, g("lab_name"), h1, TEAL)
     cy = y + h1h + 0.8
     if g("lab_subtitle"):
         d.text(tx, cy, 130, 3.6, g("lab_subtitle").upper(), _font(8, bold=True, spacing_px=0.4), ACCENT)
         cy += 3.8
     pf = _font(7.3)
-    for line in [s for s in [g("address"), _rcontacts(g)] if s]:
+    for line in addr_lines:
         d.text(tx, cy, 140, 3.4, line, pf, MUTED)
         cy += 3.2
     # top-right: accreditation logo + reg lines
@@ -508,7 +575,14 @@ def _report_letterhead(d: Doc, g, x0, y):
         ry += px(40) + 1
     if regs:
         d.text(x0, ry, d.content_w, 3.4, regs, _font(7.3), MUTED, Qt.AlignRight | Qt.AlignTop)
-    bottom = max(cy, y + px(64)) + 2.5
+        ry += 3.4
+    # centre: main logo, horizontally AND vertically centred within the header band
+    lp = (g("logo_path") or "").strip()
+    if lp and Path(lp).exists():
+        header_h = max(cy, ry) - y
+        logo_y = y + max(0.0, (header_h - px(40)) / 2)
+        d.image(x0, logo_y, lp, 40, center_w=d.content_w)
+    bottom = max(cy, ry, y + 16) + 2.5
     d.hline(x0, bottom, d.content_w, TEAL, 2)
     return bottom + 0.5
 
