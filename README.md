@@ -10,14 +10,17 @@ Linux desktops with no Python, Qt, or database install required.
 
 - **First-run setup wizard** — each lab enters its name, tagline, address,
   contact, currency, lab-no prefix, logo, and an admin password. Re-editable in Settings.
-- **Reception / Billing** — register patients, pick from the 706-test catalog,
-  apply discounts, take payment, print a cash receipt.
+- **Reception / Billing** — register patients (each gets a unique, typo-checked
+  **Patient ID**), pick from the 706-test catalog, apply discounts, take payment,
+  print a cash receipt.
 - **Worklist / Results** — enter results per parameter with gender-specific
   reference ranges, then print / PDF a branded lab report.
 - **Test Catalog** — 706 tests + 749 parameters; browse, search, add, edit.
 - **Microbiology** — culture & sensitivity (specimen, growth, organism,
   Gram/ZN stain, antibiotic S/I/R).
-- **Doctors**, **Accounts** (income/expense/dues), **Settings**, user password.
+- **Doctors**, **Accounts** (income/expense/dues), and **Settings** — branding,
+  registration numbers, editable report/receipt footer text, light/dark theme,
+  default printer, WhatsApp, users & roles, and database backup/restore.
 
 ## Running it
 
