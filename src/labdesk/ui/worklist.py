@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QSizePolicy
 from .widgets import h2, muted, card, page_header, selected_id, status_badge
 from . import wa, tasks
 from .. import db, report
+from ..roles import can
 
 
 def resolve_ref(param_row, sex: str) -> str:
@@ -239,7 +240,30 @@ class WorklistPage(QWidget):
             else:
                 self.entry_layout.addWidget(self._build_test_block(it, sex))
         self.entry_layout.addStretch(1)
-        self.save_btn.setEnabled(True)
+        # Lock editing by report status + role: a delivered report is frozen for
+        # everyone; a reported report may be corrected only by an admin.
+        lock = self._results_locked_reason(r["status"])
+        if lock:
+            self.entry_layout.insertWidget(0, muted(f"🔒  {lock}"))
+        editable = not lock
+        for ed in self._editors.values():
+            ed.setReadOnly(not editable)
+        for cb in self._show.values():
+            cb.setEnabled(editable)
+        for rem in self._remarks.values():
+            rem.setReadOnly(not editable)
+        self.save_btn.setEnabled(editable)
+
+    def _results_locked_reason(self, status) -> str:
+        """Why result editing is blocked for the current user (else '').
+        delivered -> locked for everyone (incl. admin); reported -> admin only;
+        pending / in-progress -> open."""
+        status = status or ""
+        if status == "delivered":
+            return "This report is delivered — it is locked and cannot be edited by anyone."
+        if status == "reported" and not can(self.user["role"], "manage_users"):
+            return "This report is finalised — only an administrator can edit it."
+        return ""
 
     def _culture_note(self, item):
         lbl = muted(
@@ -346,7 +370,12 @@ class WorklistPage(QWidget):
         if self.current_receipt is None:
             return
         c = self.con
-        r = c.execute("SELECT sex FROM receipts WHERE id=?", (self.current_receipt,)).fetchone()
+        r = c.execute("SELECT sex, status FROM receipts WHERE id=?", (self.current_receipt,)).fetchone()
+        # defence in depth: refuse to write to a locked report even if the button slipped through
+        lock = self._results_locked_reason(r["status"])
+        if lock:
+            QMessageBox.warning(self, "Locked", lock)
+            return
         sex = r["sex"]
         try:
             for (item_id, param_id), editor in self._editors.items():

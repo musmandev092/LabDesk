@@ -619,8 +619,8 @@ def _report_footer(d: Doc, con, g, page_no, total):
     sigs = [(n, t) for n, t in sigs if n]
     band = g("dept_band")
     fline = g("report_footer")
-    # build bottom-up from page bottom
-    yb = A4_H_MM - d.mb
+    # build bottom-up from page bottom (+4mm: sit the footer a little lower on the page)
+    yb = A4_H_MM - d.mb + 4
     # Page X of Y (bottom-right, below everything)
     d.text(x0, yb - 4, d.content_w, 4, f"Page {page_no} of {total}", _font(7), FAINT,
            Qt.AlignRight | Qt.AlignVCenter)
@@ -638,7 +638,8 @@ def _report_footer(d: Doc, con, g, page_no, total):
         sw = (d.content_w - 34) / len(sigs)
         for i, (n, t) in enumerate(sigs):
             sx = x0 + 17 + i * sw
-            d.text(sx, cy - 4.2, sw, 4, n, _font(8.5, bold=True), INK, Qt.AlignHCenter | Qt.AlignTop)
+            # signatory (doctor) name — larger + bold so it reads as the signature
+            d.text(sx, cy - 5.2, sw, 4.5, n, _font(10, bold=True), INK, Qt.AlignHCenter | Qt.AlignTop)
             d.text(sx, cy - 0.4, sw, 3.5, t, _font(7.3), MUTED, Qt.AlignHCenter | Qt.AlignTop)
 
 

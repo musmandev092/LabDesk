@@ -475,9 +475,10 @@ class ReceiptsPage(QWidget):
             self.pay_btn.setEnabled(bool(row["due"] and row["due"] > 0))
             delivered = (row["status"] or "") == "delivered"
             self.deliver_btn.setEnabled(ready and not delivered)
-            # a manager/admin can edit a bill before it's handed over; once it's
-            # been delivered only an admin may edit it (technicians are locked out).
-            self.edit_btn.setEnabled(self._can_edit_bill and (self._is_admin or not delivered))
+            # A bill is FROZEN the moment its report is ready (reported/delivered):
+            # no one — not even an admin — may change its charges after results exist.
+            # Only pending / in-progress bills can be edited.
+            self.edit_btn.setEnabled(self._can_edit_bill and not ready)
             self.void_btn.setEnabled(True)
         else:
             for b in (*self._report_btns, self.pay_btn, self.deliver_btn,
@@ -652,8 +653,8 @@ class ReceiptsPage(QWidget):
         rec = self.con.execute("SELECT * FROM receipts WHERE id=?", (rid,)).fetchone()
         if not rec or ("voided" in rec.keys() and rec["voided"]):
             return  # a voided bill is read-only
-        if rec["status"] == "delivered" and not self._is_admin:
-            return  # a delivered bill can only be edited by an admin
+        if (rec["status"] or "") in REPORT_READY:
+            return  # once reported/delivered the bill is frozen for everyone (incl. admin)
         cur = db.currency(self.con)
         dlg = _EditReceiptDialog(self.con, rec, cur, self)
         if dlg.exec() != QDialog.Accepted:
