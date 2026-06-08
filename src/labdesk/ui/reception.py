@@ -88,7 +88,7 @@ class ReceptionPage(QWidget):
         pgrid.addWidget(field_label("Name"), 0, 2); pgrid.addWidget(self.name, 0, 3)
         pgrid.addWidget(field_label("Age"), 1, 0); pgrid.addWidget(age_w, 1, 1)
         pgrid.addWidget(field_label("Sex"), 1, 2); pgrid.addWidget(self.sex, 1, 3)
-        pgrid.addWidget(field_label("MR No"), 2, 0); pgrid.addWidget(self.mr_no, 2, 1)
+        pgrid.addWidget(field_label("Patient ID"), 2, 0); pgrid.addWidget(self.mr_no, 2, 1)
         pgrid.addWidget(field_label("Phone"), 2, 2); pgrid.addWidget(self.tel, 2, 3)
         pgrid.addWidget(field_label("Address"), 3, 0); pgrid.addWidget(self.address, 3, 1, 1, 3)
         pgrid.addWidget(field_label("Doctor"), 4, 0); pgrid.addWidget(self.doctor, 4, 1, 1, 3)
@@ -96,7 +96,7 @@ class ReceptionPage(QWidget):
         pform = QWidget(); pform.setLayout(pgrid)
         # returning-patient lookup (phone is the practical key patients remember)
         self.find = QLineEdit()
-        self.find.setPlaceholderText("🔍  Returning patient? search phone / MR No / name")
+        self.find.setPlaceholderText("🔍  Returning patient? search phone / Patient ID / name")
         self.find.setClearButtonEnabled(True)
         self.find.textChanged.connect(tasks.debounce(self, self.search_patients))
         self.find_results = QListWidget()
@@ -555,6 +555,14 @@ class ReceptionPage(QWidget):
         c = self.con
         title = self.title.currentText().strip()
         mr_no = self.mr_no.text().strip()
+        # A manually-entered Patient ID in the new YY-…-NN<L> format is checked for
+        # typos via its trailing check letter; legacy 'MR…'/free-form ids pass through.
+        if mr_no and mr_no[:2].isdigit() and "-" in mr_no and not db.validate_patient_id(mr_no):
+            QMessageBox.warning(
+                self, "Patient ID",
+                "That Patient ID looks mistyped — its check letter doesn't match.\n"
+                "Leave it blank to auto-generate one, or re-enter it correctly.")
+            return
         specimen = self.specimen.currentText().strip()
         cc = db.get_setting(c, "whatsapp_country_code", "92") or "92"
         tel = normalize_phone(self.tel.text(), cc)
@@ -563,7 +571,7 @@ class ReceptionPage(QWidget):
         # Resolve the patient identity:
         #  1) an explicitly picked "returning patient", else
         #  2) auto-match on (canonical phone + same name), else
-        #  3) a brand-new patient with an auto-assigned MR No.
+        #  3) a brand-new patient with an auto-assigned Patient ID.
         pid = self._existing_patient_id
         if not pid and tel:
             m = c.execute(
@@ -592,7 +600,7 @@ class ReceptionPage(QWidget):
         try:
             if pid:  # returning patient → reuse row + permanent MR, refresh details
                 row = c.execute("SELECT mr_no FROM patients WHERE id=?", (pid,)).fetchone()
-                mr_no = mr_no or (row["mr_no"] if row else "") or f"MR{pid:05d}"
+                mr_no = mr_no or (row["mr_no"] if row else "") or db.format_patient_id(pid)
                 c.execute(
                     "UPDATE patients SET title=?,name=?,age=?,age_desc=?,sex=?,telephone=?,"
                     "address=?,mr_no=?,wa_optout=?,wa_consent_at=? WHERE id=?",
@@ -603,7 +611,7 @@ class ReceptionPage(QWidget):
                     "wa_optout,wa_consent_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
                     (title, mr_no, name, age, age_desc, sex, tel, addr, optout, consent_at)).lastrowid
                 if not mr_no:
-                    mr_no = f"MR{pid:05d}"
+                    mr_no = db.format_patient_id(pid)
                     c.execute("UPDATE patients SET mr_no=? WHERE id=?", (mr_no, pid))
             rid = c.execute(
                 """INSERT INTO receipts

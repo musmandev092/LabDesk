@@ -311,7 +311,7 @@ class ReceiptsPage(QWidget):
 
         # filters
         bar = QHBoxLayout()
-        self.search = QLineEdit(); self.search.setPlaceholderText("Search patient / lab no / MR no…")
+        self.search = QLineEdit(); self.search.setPlaceholderText("Search patient / lab no / Patient ID…")
         self.search.setMinimumHeight(40)
         self.search.textChanged.connect(tasks.debounce(self, self.refresh))
         self.status = QComboBox(); self.status.setMinimumHeight(40)
@@ -484,6 +484,14 @@ class ReceiptsPage(QWidget):
             for b in (*self._report_btns, self.pay_btn, self.deliver_btn,
                       self.edit_btn, self.void_btn):
                 b.setEnabled(False)
+            # A voided bill is read-only — but an admin may still PREVIEW the
+            # cancelled receipt (and report, if results exist) on screen for
+            # reference/audit. Nothing that emits or alters it stays enabled:
+            # no print, PDF, WhatsApp, edit, void, pay or deliver.
+            if voided and self._is_admin:
+                self.prev_rcpt_btn.setEnabled(True)
+                if (row["status"] or "") in REPORT_READY:
+                    self.prev_rpt_btn.setEnabled(True)
 
     def _show_row_menu(self, pos):
         """Right-click menu on a receipt row. Mirrors the toolbar exactly: same

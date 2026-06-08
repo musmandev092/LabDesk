@@ -251,7 +251,7 @@ def _patient_pairs(r, *, include_reporting: bool = True):
         ("Registration Date", received),
         ("Specimen", r["specimen"]),
         ("Age / Sex", age_sex),
-        ("MR No.", mr),
+        ("Patient ID", mr),
         ("Referred By", r["dr_name"]),
     ]
     # The reporting date is real only once results are finalised — it is stamped
@@ -279,8 +279,8 @@ def _patient_card(r, *, include_reporting: bool = True) -> str:
 # ---------------------------------------------------------------------------
 def _history_for_item(con, item, receipt):
     """Up to 4 previous visits' results for the SAME patient & SAME test, oldest
-    first. Patients matched on MR No (the cross-visit "same no"); falls back to
-    patient_id. Returns (date_labels, [ {parameter_id: value}, … ])."""
+    first. Patients matched on Patient ID (the cross-visit "same no"); falls back
+    to patient_id. Returns (date_labels, [ {parameter_id: value}, … ])."""
     rk = receipt.keys()
     mr = (receipt["mr_no"] if "mr_no" in rk else None) or ""
     pid = receipt["patient_id"] if "patient_id" in rk else None
@@ -293,21 +293,35 @@ def _history_for_item(con, item, receipt):
         conds.append("rc.patient_id = ?"); params.append(pid)
     if not conds:
         return [], []
+    # Only FINALISED, non-voided prior visits belong in the cumulative history:
+    #  * voided bills are cancelled — their numbers must never resurface;
+    #  * pending / in-progress bills have no confirmed results — they would show
+    #    an all-dashes column (or, worse, unverified work-in-progress values).
+    # Over-fetch (LIMIT 8) then keep the newest 4 that actually carry values, so a
+    # finalised visit that happened to leave this test blank can't crowd out a real
+    # one or add an empty column.
     q = (f"""SELECT ri.id AS item_id, rc.received_at AS dt
              FROM receipt_items ri JOIN receipts rc ON rc.id = ri.receipt_id
              WHERE ri.test_id = ? AND rc.id != ? AND ({' OR '.join(conds)})
                AND (rc.received_at < ? OR (rc.received_at = ? AND rc.id < ?))
-             ORDER BY rc.received_at DESC, rc.id DESC LIMIT 4""")
+               AND {db.NOT_VOIDED}
+               AND rc.status IN ('reported', 'delivered')
+             ORDER BY rc.received_at DESC, rc.id DESC LIMIT 8""")
     rows = con.execute(q, [item["test_id"], rid, *params, received, received, rid]).fetchall()
-    rows = list(reversed(rows))  # oldest → newest, left to right
     labels, maps = [], []
-    for row in rows:
+    for row in rows:                      # newest → oldest from SQL
         vals = con.execute(
             "SELECT parameter_id, value FROM results WHERE receipt_item_id=?",
             (row["item_id"],),
         ).fetchall()
-        maps.append({v["parameter_id"]: v["value"] for v in vals if v["value"]})
+        vmap = {v["parameter_id"]: v["value"] for v in vals if v["value"]}
+        if not vmap:
+            continue                      # no entered values → no empty column
         labels.append((row["dt"] or "")[:10])
+        maps.append(vmap)
+        if len(maps) == 4:
+            break
+    labels.reverse(); maps.reverse()      # oldest → newest, left to right
     return labels, maps
 
 
