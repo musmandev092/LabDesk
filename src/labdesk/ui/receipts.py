@@ -35,6 +35,8 @@ from PySide6.QtWidgets import (
 from .. import db, render, report
 from ..constants import PAYMENT_METHODS
 from ..roles import can
+from ..services import billing
+from ..services import receipts as receipts_svc
 from . import tasks, wa
 from .widgets import (
     FlowLayout,
@@ -287,15 +289,17 @@ class _EditReceiptDialog(QDialog):
 
     def _net(self) -> float:
         # round to whole paisa so a discount can't leave a sub-cent "phantom due"
-        sub = self._subtotal()
-        return round(max(0.0, sub - sub * self.discount.value() / 100.0), 2)
+        return billing.compute_bill_totals(
+            self.items, self.discount.value(), self.paid.value(), round_to_paisa=True
+        )["net"]
 
     def _recompute(self) -> None:
-        self.sub_lbl.setText(money(self._subtotal(), self.cur))
-        net = self._net()
-        due = round(max(0.0, net - self.paid.value()), 2)
-        self.net_lbl.setText(money(net, self.cur))
-        self.due_lbl.setText(money(due, self.cur))
+        totals = billing.compute_bill_totals(
+            self.items, self.discount.value(), self.paid.value(), round_to_paisa=True
+        )
+        self.sub_lbl.setText(money(totals["subtotal"], self.cur))
+        self.net_lbl.setText(money(totals["net"], self.cur))
+        self.due_lbl.setText(money(totals["due"], self.cur))
 
     def _try_accept(self) -> None:
         if not self.items:
@@ -793,13 +797,7 @@ class ReceiptsPage(QWidget):
         r = self.con.execute("SELECT lab_no, status FROM receipts WHERE id=?", (rid,)).fetchone()
         if not r or r["status"] not in REPORT_READY:
             return
-        self.con.execute(
-            "UPDATE receipts SET status='delivered', delivered_at=datetime('now','localtime'), "
-            "delivered_by=? WHERE id=?",
-            (self.user["username"], rid),
-        )
-        self.con.commit()
-        db.log_audit(self.con, self.user["username"], "report_delivered", r["lab_no"] or f"#{rid}")
+        receipts_svc.mark_receipt_delivered(self.con, rid, self.user["username"])
         self.refresh()
 
     def edit_receipt(self) -> None:
@@ -917,24 +915,7 @@ class ReceiptsPage(QWidget):
             != QMessageBox.Yes
         ):
             return
-        self.con.execute(
-            "UPDATE receipts SET voided=1, void_reason=?, voided_at=datetime('now','localtime'), "
-            "voided_by=?, due=0 WHERE id=?",
-            (reason.strip(), self.user["username"], rid),
-        )
-        if r["paid"]:  # reversing ledger entry keeps ledger-based accounting balanced
-            self.con.execute(
-                "INSERT INTO ledger(kind,ref_id,detail,debit,date) "
-                "VALUES ('void',?,?,?,date('now','localtime'))",
-                (rid, f"Void {r['lab_no']} — {reason.strip()[:60]}", r["paid"]),
-            )
-        self.con.commit()
-        db.log_audit(
-            self.con,
-            self.user["username"],
-            "receipt_voided",
-            f"{r['lab_no']} — {reason.strip()[:80]}",
-        )
+        receipts_svc.void_receipt(self.con, rid, reason.strip(), self.user["username"])
         self.refresh()
 
     def export_csv(self) -> None:

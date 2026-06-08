@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import db, report, roles, whatsapp
+from ..services import billing
 from ..constants import (
     AGE_UNITS,
     PAYMENT_METHODS,
@@ -353,20 +354,7 @@ class ReceptionPage(QWidget):
 
     def _promo_pct(self) -> float:
         """Active special-day discount %, honouring the optional end date."""
-        try:
-            pct = float(db.get_setting(self.con, "promo_discount_pct", "0") or 0)
-        except ValueError:
-            pct = 0.0
-        until = db.get_setting(self.con, "promo_until", "").strip()
-        if until:
-            import datetime
-
-            try:
-                if datetime.date.today() > datetime.date.fromisoformat(until):
-                    return 0.0
-            except ValueError:
-                pass
-        return max(0.0, min(100.0, pct))
+        return billing.get_active_promo_discount(self.con)
 
     def _apply_promo(self) -> None:
         pct = self._promo_pct()
@@ -629,12 +617,13 @@ class ReceptionPage(QWidget):
 
     def recompute(self) -> None:
         cur = db.currency(self.con)
-        sub = sum(c["charge"] for c in self.cart)
-        disc = sub * self.discount.value() / 100.0
-        net = max(0.0, sub - disc)
-        paid = self.paid.value()
-        due = max(0.0, net - paid)
-        change = max(0.0, paid - net)
+        totals = billing.compute_bill_totals(
+            self.cart, self.discount.value(), self.paid.value(), round_to_paisa=False
+        )
+        sub = totals["subtotal"]
+        net = totals["net"]
+        due = totals["due"]
+        change = totals["change"]
         self.subtotal.setText(money(sub, cur))
         self.net.setText(money(net, cur))
         self.due.setText(money(due, cur))
