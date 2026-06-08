@@ -65,7 +65,7 @@ def autocrop_image(img: QImage) -> QImage:
         return img
     TOL = 24
 
-    def near_bg(px):
+    def near_bg(px: int) -> bool:
         a = qAlpha(px)
         if a < 16 and ba < 16:
             return True
@@ -135,7 +135,7 @@ SUBHEAD_BG = "#e6eff1"
 _FAMILY = None
 
 
-def _ensure_app():
+def _ensure_app() -> None:
     """Qt painting/font APIs need a QGuiApplication. The GUI always has one; this
     only kicks in for headless use (a script/test that exports a PDF directly)."""
     from PySide6.QtWidgets import QApplication
@@ -156,13 +156,13 @@ def _family() -> str:
     return _FAMILY
 
 
-def preload():
+def preload() -> None:
     """Load the bundled font once on the main thread (call at app startup) so the
     PDF-building worker thread never touches QFontDatabase off-thread."""
     _family()
 
 
-def _font(size_pt, *, bold=False, spacing_px=0.0):
+def _font(size_pt: float, *, bold: bool = False, spacing_px: float = 0.0) -> QFont:
     f = QFont(_family())
     f.setPointSizeF(size_pt)
     f.setBold(bold)
@@ -176,11 +176,19 @@ def _font(size_pt, *, bold=False, spacing_px=0.0):
 class Doc:
     """A QPdfWriter + QPainter wrapper that draws in millimetres at 300 dpi."""
 
-    def __init__(self, margin_mm=(8, 8, 8, 8), device=None, images=False):
+    def __init__(
+        self,
+        margin_mm: tuple[float, float, float, float] = (8, 8, 8, 8),
+        device=None,
+        images: bool = False,
+    ) -> None:
         _ensure_app()
         self._images_mode = images
-        self._images = []
+        self._images: list[QImage] = []
         self._owns = device is None and not images
+        self.w: QPdfWriter = None  # type: ignore[assignment]  # may be QPrinter/None
+        self._dev: QBuffer = None  # type: ignore[assignment]
+        self._buf: QByteArray = None  # type: ignore[assignment]
         if images:
             # paint each page onto an A4 QImage at 300 dpi (for on-screen preview,
             # so we need no QtPdf viewer). new_page() finalises one and starts next.
@@ -209,12 +217,12 @@ class Doc:
             self.p = QPainter(self.w)
             self._hints()
 
-    def _hints(self):
+    def _hints(self) -> None:
         self.p.setRenderHint(QPainter.Antialiasing, True)
         self.p.setRenderHint(QPainter.TextAntialiasing, True)
         self.p.setRenderHint(QPainter.SmoothPixmapTransform, True)
 
-    def _start_image(self):
+    def _start_image(self) -> None:
         img = QImage(int(mm(A4_W_MM)), int(mm(A4_H_MM)), QImage.Format_RGB888)
         img.fill(QColor("#ffffff"))
         img.setDotsPerMeterX(int(DPI / 25.4 * 1000))
@@ -224,7 +232,7 @@ class Doc:
         self._hints()
 
     # -- finish: PDF bytes (owned QPdfWriter), list[QImage] (images), or None --
-    def finish(self):
+    def finish(self) -> list[QImage] | bytes | None:
         self.p.end()
         if self._images_mode:
             self._images.append(self._cur_img)
@@ -234,10 +242,10 @@ class Doc:
             return bytes(self._buf)
         return None
 
-    def tobytes(self) -> bytes:
+    def tobytes(self) -> bytes | list[QImage] | None:
         return self.finish()
 
-    def new_page(self):
+    def new_page(self) -> None:
         if self._images_mode:
             self.p.end()
             self._images.append(self._cur_img)
@@ -246,18 +254,30 @@ class Doc:
             self.w.newPage()
 
     # -- primitives (all args in mm) --
-    def fm(self, font) -> QFontMetricsF:
+    def fm(self, font: QFont) -> QFontMetricsF:
         return QFontMetricsF(font, self.p.device())
 
-    def fill_rect(self, x, y, w, h, color):
+    def fill_rect(self, x: float, y: float, w: float, h: float, color: str) -> None:
         self.p.fillRect(QRectF(mm(x), mm(y), mm(w), mm(h)), QColor(color))
 
-    def rect(self, x, y, w, h, color, width_px=1.0):
+    def rect(
+        self, x: float, y: float, w: float, h: float, color: str, width_px: float = 1.0
+    ) -> None:
         self.p.setBrush(Qt.NoBrush)
         self.p.setPen(QPen(QColor(color), mm(px(width_px))))
         self.p.drawRect(QRectF(mm(x), mm(y), mm(w), mm(h)))
 
-    def rounded(self, x, y, w, h, radius_px, fill=None, border=None, border_px=1.0):
+    def rounded(
+        self,
+        x: float,
+        y: float,
+        w: float,
+        h: float,
+        radius_px: float,
+        fill: str | None = None,
+        border: str | None = None,
+        border_px: float = 1.0,
+    ) -> None:
         r = mm(px(radius_px))
         path = QPainterPath()
         path.addRoundedRect(QRectF(mm(x), mm(y), mm(w), mm(h)), r, r)
@@ -268,7 +288,9 @@ class Doc:
             self.p.setBrush(Qt.NoBrush)
             self.p.drawPath(path)
 
-    def top_rounded(self, x, y, w, h, radius_px, fill):
+    def top_rounded(
+        self, x: float, y: float, w: float, h: float, radius_px: float, fill: str
+    ) -> None:
         """Rectangle with only the top two corners rounded (title bar)."""
         r = mm(px(radius_px))
         path = QPainterPath()
@@ -281,13 +303,24 @@ class Doc:
         path.closeSubpath()
         self.p.fillPath(path, QColor(fill))
 
-    def hline(self, x, y, w, color, width_px=1.0):
+    def hline(self, x: float, y: float, w: float, color: str, width_px: float = 1.0) -> None:
         self.p.setPen(QPen(QColor(color), mm(px(width_px))))
         self.p.drawLine(
             QRectF(mm(x), mm(y), mm(w), 0).topLeft(), QRectF(mm(x), mm(y), mm(w), 0).topRight()
         )
 
-    def text(self, x, y, w, h, s, font, color, align=Qt.AlignLeft | Qt.AlignVCenter, wrap=False):
+    def text(
+        self,
+        x: float,
+        y: float,
+        w: float,
+        h: float,
+        s: str | None,
+        font: QFont,
+        color: str,
+        align=Qt.AlignLeft | Qt.AlignVCenter,
+        wrap: bool = False,
+    ) -> None:
         self.p.setFont(font)
         self.p.setPen(QColor(color))
         flags = int(align)
@@ -295,7 +328,14 @@ class Doc:
             flags |= int(Qt.TextWordWrap)
         self.p.drawText(QRectF(mm(x), mm(y), mm(w), mm(h)), flags, s or "")
 
-    def text_runs(self, x, y, h, runs, align_left=True):
+    def text_runs(
+        self,
+        x: float,
+        y: float,
+        h: float,
+        runs: list[tuple[str, QFont, str]],
+        align_left: bool = True,
+    ) -> float:
         """Draw a sequence of (text, font, color) runs on one baseline-centred row,
         left to right. Returns total width in mm. Used for value + colored arrow."""
         cx = x
@@ -310,7 +350,9 @@ class Doc:
             cx += adv
         return cx - x
 
-    def image(self, x, y, path, h_px, center_w=None):
+    def image(
+        self, x: float, y: float, path: str | Path, h_px: float, center_w: float | None = None
+    ) -> float:
         img = QImage(str(path))
         if img.isNull():
             return 0.0
@@ -323,7 +365,7 @@ class Doc:
         self.p.drawImage(QRectF(mm(x), mm(y), scaled.width(), scaled.height()).topLeft(), scaled)
         return w_mm  # drawn width in mm
 
-    def text_height(self, s, font, w, wrap=True) -> float:
+    def text_height(self, s: str | None, font: QFont, w: float, wrap: bool = True) -> float:
         """Measured height in mm for text in a width-w (mm) box."""
         fmpx = self.fm(font)
         flags = int(Qt.AlignLeft | Qt.AlignTop)
@@ -336,7 +378,7 @@ class Doc:
 # ---------------------------------------------------------------------------
 # Shared: letterhead + patient card
 # ---------------------------------------------------------------------------
-def _wrap_value(fm: QFontMetricsF, text: str, max_px: float, max_lines: int = 2):
+def _wrap_value(fm: QFontMetricsF, text: str, max_px: float, max_lines: int = 2) -> list[str]:
     """Greedy word-wrap `text` to fit `max_px` device units across up to `max_lines`
     lines. If content still overflows, the last line is elided with '…' so long
     values (e.g. a full specimen) are shown completely instead of cut to one line."""
@@ -367,18 +409,18 @@ def _wrap_value(fm: QFontMetricsF, text: str, max_px: float, max_lines: int = 2)
 
 def _patient_card(
     d: Doc,
-    x,
-    y,
-    pairs,
+    x: float,
+    y: float,
+    pairs: list[tuple[str, object]],
     *,
-    card_pad=(5, 6),
-    gap=(4, 6),
-    l_pt=7.5,
-    v_pt=9.5,
-    radius=6,
-    border=BORDER2,
-    max_value_lines=2,
-):
+    card_pad: tuple[float, float] = (5, 6),
+    gap: tuple[float, float] = (4, 6),
+    l_pt: float = 7.5,
+    v_pt: float = 9.5,
+    radius: float = 6,
+    border: str = BORDER2,
+    max_value_lines: int = 2,
+) -> float:
     """4-column patient card with word-wrapped values. Returns total height in mm."""
     cols = 4
     rows = (len(pairs) + cols - 1) // cols
@@ -430,7 +472,9 @@ def _patient_card(
 # ---------------------------------------------------------------------------
 # Cash receipt
 # ---------------------------------------------------------------------------
-def build_receipt(con, receipt_id: int, device=None, images=False):
+def build_receipt(
+    con, receipt_id: int, device=None, images: bool = False
+) -> bytes | list[QImage] | None:
     from . import report as R
 
     g = R._g(con)
@@ -606,8 +650,15 @@ def build_receipt(con, receipt_id: int, device=None, images=False):
     ty = y
 
     def totrow(
-        label, value, *, lbl_color=MUTED, val_color=INK, val_font=tfb, net_row=False, lbl_font=tf
-    ):
+        label: str,
+        value: str,
+        *,
+        lbl_color: str = MUTED,
+        val_color: str = INK,
+        val_font: QFont = tfb,
+        net_row: bool = False,
+        lbl_font: QFont = tf,
+    ) -> None:
         nonlocal ty
         rh = 8.5 if net_row else 6.5
         if net_row:
@@ -672,7 +723,7 @@ REPORT_HEADER_MM = 57.0  # reserved running-header band (matches CSS @page margi
 REPORT_FOOTER_MM = 27.0  # reserved running-footer band
 
 
-def _report_letterhead(d: Doc, g, x0, y):
+def _report_letterhead(d: Doc, g, x0: float, y: float) -> float:
     """Draw letterhead (logo + clinic + optional accred/regs) + the 2px rule.
     Returns y just below the rule."""
     h1 = _font(17, bold=True, spacing_px=-0.5)
@@ -711,7 +762,7 @@ def _report_letterhead(d: Doc, g, x0, y):
     return bottom + 0.5
 
 
-def _rcontacts(g):
+def _rcontacts(g) -> str:
     parts = [
         f"Ph: {g('phone')}" if g("phone") else "",
         f"Mob: {g('mobile')}" if g("mobile") else "",
@@ -720,7 +771,7 @@ def _rcontacts(g):
     return " | ".join(p for p in parts if p)
 
 
-def _rregs(g):
+def _rregs(g) -> str:
     parts = [
         f"PHC Reg #: {g('phc_reg_no')}" if g("phc_reg_no") else "",
         f"Lab Reg #: {g('lab_reg_no')}" if g("lab_reg_no") else "",
@@ -728,7 +779,7 @@ def _rregs(g):
     return " | ".join(p for p in parts if p)
 
 
-def _report_header(d: Doc, con, g, r):
+def _report_header(d: Doc, con, g, r) -> float:
     """Full running header: letterhead + small patient card. Returns body-top y."""
     from . import report as R
 
@@ -750,7 +801,7 @@ def _report_header(d: Doc, con, g, r):
     return y + ch + 3
 
 
-def _report_footer(d: Doc, con, g, page_no, total):
+def _report_footer(d: Doc, con, g, page_no: int, total: int) -> None:
     """Running footer: signatures + footer line + dept band + Page X of Y."""
     x0 = d.ml
     sigs = [(g(f"signatory_{i}_name"), g(f"signatory_{i}_title")) for i in (1, 2)]
@@ -807,7 +858,7 @@ def _report_footer(d: Doc, con, g, page_no, total):
             d.text(sx, cy - 0.4, sw, 3.5, t, _font(7.3), MUTED, Qt.AlignHCenter | Qt.AlignTop)
 
 
-def _ref_lines(res, sex):
+def _ref_lines(res, sex: str | None) -> tuple[list[str], str]:
     """Reference-range cell as (list-of-lines, flag_range), plain text for QPainter."""
     keys = res.keys()
     m = ((res["p_male"] if "p_male" in keys else None) or "").strip().replace("\n", " ")
@@ -826,7 +877,7 @@ def _ref_lines(res, sex):
     return [ln for ln in ref_text.split("\n")] or [""], ref_text
 
 
-def _measure_test(d: Doc, con, item, sex, receipt):
+def _measure_test(d: Doc, con, item, sex: str | None, receipt) -> dict[str, object]:
     """Return a layout dict for one (non-culture) test: title + columns + rows,
     with per-row heights, so we can paginate."""
     from . import report as R
@@ -892,7 +943,7 @@ def _measure_test(d: Doc, con, item, sex, receipt):
     }
 
 
-def _draw_test_table(d: Doc, lay, x0, y):
+def _draw_test_table(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, list]:
     """Draw the title bar + as many rows as fit; returns (y_after, remaining_rows).
     remaining_rows is a list to continue on the next page (header repeats)."""
     cw = lay["cw"]
@@ -1027,7 +1078,9 @@ def _draw_test_table(d: Doc, lay, x0, y):
     return y, rows[i:]
 
 
-def _draw_value(d: Doc, x, y, w, h, value, flag, font):
+def _draw_value(
+    d: Doc, x: float, y: float, w: float, h: float, value: object, flag: str, font: QFont
+) -> None:
     from . import report as R
 
     if not value:
@@ -1048,7 +1101,7 @@ def _draw_value(d: Doc, x, y, w, h, value, flag, font):
     d.text(start + wv, y, wa + 1, h, " " + arrow[0], font, col, Qt.AlignLeft | Qt.AlignVCenter)
 
 
-def _fmt_two(iso):
+def _fmt_two(iso: str | None) -> str:
     from datetime import datetime
 
     s = (iso or "")[:10]
@@ -1058,7 +1111,7 @@ def _fmt_two(iso):
         return s
 
 
-def _fmt_one(iso):
+def _fmt_one(iso: str | None) -> str:
     from datetime import datetime
 
     s = (iso or "")[:10]
@@ -1068,7 +1121,7 @@ def _fmt_one(iso):
         return s
 
 
-def _draw_blocks_after_table(d: Doc, lay, x0, y):
+def _draw_blocks_after_table(d: Doc, lay: dict, x0: float, y: float) -> float:
     """Remarks box + method note below a finished test table."""
     item = lay["item"]
     rem = ((item["remarks"] if "remarks" in item.keys() else "") or "").strip()
@@ -1113,7 +1166,9 @@ def _draw_blocks_after_table(d: Doc, lay, x0, y):
     return y
 
 
-def build_report(con, receipt_id: int, device=None, images=False):
+def build_report(
+    con, receipt_id: int, device=None, images: bool = False
+) -> bytes | list[QImage] | None:
     from . import report as R
 
     g = R._g(con)
@@ -1162,7 +1217,7 @@ def build_report(con, receipt_id: int, device=None, images=False):
     return d.tobytes()
 
 
-def _draw_culture(d: Doc, con, item, x0, y):
+def _draw_culture(d: Doc, con, item, x0: float, y: float) -> float:
     head = con.execute(
         "SELECT report_head, method_note FROM tests WHERE id=?", (item["test_id"],)
     ).fetchone()
@@ -1220,8 +1275,7 @@ def _draw_culture(d: Doc, con, item, x0, y):
         )
         y += rh
     sens = con.execute(
-        "SELECT antibiotic, result FROM culture_sensitivity WHERE culture_id=? "
-        "ORDER BY antibiotic",
+        "SELECT antibiotic, result FROM culture_sensitivity WHERE culture_id=? ORDER BY antibiotic",
         (cur["id"],),
     ).fetchall()
     if sens:
@@ -1279,7 +1333,7 @@ def _draw_culture(d: Doc, con, item, x0, y):
     return y
 
 
-def build_test_page(printer_name: str = "", device=None):
+def build_test_page(printer_name: str = "", device=None) -> bytes | list[QImage] | None:
     """A small printer-test page (native)."""
     from datetime import datetime
 
@@ -1307,7 +1361,7 @@ def build_test_page(printer_name: str = "", device=None):
     return d.tobytes()
 
 
-def render_pages(con, receipt_id: int, kind: str):
+def render_pages(con, receipt_id: int, kind: str) -> bytes | list[QImage] | None:
     """Render a document to a list of QImage pages (on-screen preview; no QtPdf)."""
     if kind == "receipt":
         return build_receipt(con, receipt_id, images=True)

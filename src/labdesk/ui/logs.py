@@ -83,7 +83,7 @@ ACTION_LABELS = {
 
 
 class LogsPage(QWidget):
-    def __init__(self, con, user):
+    def __init__(self, con, user: dict) -> None:
         super().__init__()
         self.con = con
         self.user = user
@@ -136,10 +136,10 @@ class LogsPage(QWidget):
         self.summary = muted("")
         root.addWidget(self.summary)
 
-    def on_show(self):
+    def on_show(self) -> None:
         self.refresh()
 
-    def refresh(self):
+    def refresh(self) -> None:
         q = f"%{self.search.text().strip()}%"
         sql = (
             "SELECT at, username, action, detail FROM audit_log "
@@ -172,9 +172,9 @@ class LogsPage(QWidget):
         n = len(rows)
         self.summary.setText(f"{n} entr{'y' if n == 1 else 'ies'} shown (newest first, max 1000)")
 
-    def verify_integrity(self):
+    def verify_integrity(self) -> None:
         # Hashing the whole chain grows with the log — run it off the UI thread.
-        def done(work_ok, result):
+        def done(work_ok: bool, result) -> None:
             if not work_ok:
                 QMessageBox.warning(self, "Logs", f"Could not verify the log:\n{result}")
                 return
@@ -200,7 +200,7 @@ class LogsPage(QWidget):
             busy_text="Verifying…",
         )
 
-    def clear_old(self):
+    def clear_old(self) -> None:
         if (
             QMessageBox.question(self, "Clear logs", "Delete audit-log entries older than 90 days?")
             != QMessageBox.Yes
@@ -208,7 +208,7 @@ class LogsPage(QWidget):
             return
         user = self.user["username"]
 
-        def work(con):
+        def work(con) -> bool:
             con.execute("DELETE FROM audit_log WHERE at < datetime('now','localtime','-90 days')")
             con.commit()
             db.log_audit(con, user, "logs_cleared", "removed entries older than 90 days")
@@ -216,7 +216,7 @@ class LogsPage(QWidget):
             db.rechain_audit(con)
             return True
 
-        def done(work_ok, result):
+        def done(work_ok: bool, result) -> None:
             if not work_ok:
                 QMessageBox.warning(self, "Clear logs", f"Could not clear logs:\n{result}")
             self.refresh()

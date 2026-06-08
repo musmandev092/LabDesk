@@ -26,49 +26,56 @@ class FlowLayout(QLayout):
     wrap instead of forcing the whole window wider than the screen.
     """
 
-    def __init__(self, parent=None, *, margin=0, hspacing=8, vspacing=6):
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        margin: int = 0,
+        hspacing: int = 8,
+        vspacing: int = 6,
+    ) -> None:
         super().__init__(parent)
-        self._items = []
+        self._items: list = []
         self._hspace = hspacing
         self._vspace = vspacing
         self.setContentsMargins(margin, margin, margin, margin)
 
-    def addItem(self, item):  # noqa: N802 (Qt override)
+    def addItem(self, item) -> None:  # noqa: N802 (Qt override)
         self._items.append(item)
 
-    def count(self):
+    def count(self) -> int:
         return len(self._items)
 
-    def itemAt(self, index):  # noqa: N802
+    def itemAt(self, index: int):  # noqa: N802
         return self._items[index] if 0 <= index < len(self._items) else None
 
-    def takeAt(self, index):  # noqa: N802
+    def takeAt(self, index: int):  # noqa: N802
         return self._items.pop(index) if 0 <= index < len(self._items) else None
 
     def expandingDirections(self):  # noqa: N802
         return Qt.Orientation(0)
 
-    def hasHeightForWidth(self):  # noqa: N802
+    def hasHeightForWidth(self) -> bool:  # noqa: N802
         return True
 
-    def heightForWidth(self, width):  # noqa: N802
+    def heightForWidth(self, width: int) -> int:  # noqa: N802
         return self._do_layout(QRect(0, 0, width, 0), test_only=True)
 
-    def setGeometry(self, rect):  # noqa: N802
+    def setGeometry(self, rect: QRect) -> None:  # noqa: N802
         super().setGeometry(rect)
         self._do_layout(rect, test_only=False)
 
-    def sizeHint(self):  # noqa: N802
+    def sizeHint(self) -> QSize:  # noqa: N802
         return self.minimumSize()
 
-    def minimumSize(self):  # noqa: N802
+    def minimumSize(self) -> QSize:  # noqa: N802
         size = QSize()
         for item in self._items:
             size = size.expandedTo(item.minimumSize())
         m = self.contentsMargins()
         return size + QSize(m.left() + m.right(), m.top() + m.bottom())
 
-    def _do_layout(self, rect, *, test_only):
+    def _do_layout(self, rect: QRect, *, test_only: bool) -> int:
         m = self.contentsMargins()
         area = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
         x, y, line_h = area.x(), area.y(), 0
@@ -87,7 +94,7 @@ class FlowLayout(QLayout):
         return y + line_h - rect.y() + m.bottom()
 
 
-def fit_to_screen(widget, w: int, h: int, *, margin: float = 0.94) -> None:
+def fit_to_screen(widget: QWidget, w: int, h: int, *, margin: float = 0.94) -> None:
     """Clamp a top-level *dialog's* opening size so it never exceeds the screen.
 
     Sizes are device-independent (logical) pixels — Qt 6 applies DPI scaling on top.
@@ -106,7 +113,7 @@ def fit_to_screen(widget, w: int, h: int, *, margin: float = 0.94) -> None:
     widget.resize(min(w, int(avail.width() * margin)), min(h, int(avail.height() * margin)))
 
 
-def max_width_center(inner, max_w: int):
+def max_width_center(inner: QWidget, max_w: int) -> QWidget:
     """Wrap `inner` so it never exceeds `max_w` logical px and stays horizontally
     centred (stretch | inner | stretch). Used for forms: on a 4K/ultrawide screen a
     single-line field would otherwise stretch across the whole width (sparse, ugly),
@@ -123,7 +130,7 @@ def max_width_center(inner, max_w: int):
 
 
 # status → (display colour) for receipt/worklist tables (single source of truth)
-STATUS_COLORS = {
+STATUS_COLORS: dict[str, str] = {
     "pending": "#b9770e",
     "in_progress": "#0e7c86",
     "reported": "#1f9d55",
@@ -250,7 +257,7 @@ def num_item(text: str, color: str | None = None) -> QTableWidgetItem:
     return it
 
 
-def selected_id(table, ids):
+def selected_id(table, ids: list):
     """The id (from a parallel ``ids`` list) of the table's selected row, or None.
 
     Derived from the actual selection (NOT currentRow): a cleared selection

@@ -7,6 +7,8 @@ feedback instead of a frozen wait) and the result message box.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtWidgets import QMessageBox
 
 from .. import whatsapp
@@ -14,7 +16,14 @@ from . import tasks
 
 
 def send_async(
-    parent, con, kind: str, receipt_id: int, *, clicked=None, lock_buttons=(), on_done=None
+    parent,
+    con,
+    kind: str,
+    receipt_id: int | None,
+    *,
+    clicked=None,
+    lock_buttons: tuple = (),
+    on_done: Callable[[bool, str], None] | None = None,
 ) -> bool:
     """Send a 'receipt' or 'report' PDF to the patient on a background thread.
 
@@ -36,7 +45,7 @@ def send_async(
 
     fn = whatsapp.send_receipt if kind == "receipt" else whatsapp.send_report
 
-    def _done(work_ok, result):
+    def _done(work_ok: bool, result: object) -> None:
         # send_report/send_receipt return (success, message); work_ok is False
         # only if the worker raised unexpectedly (then result is the error str).
         if work_ok and isinstance(result, tuple):

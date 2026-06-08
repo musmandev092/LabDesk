@@ -54,11 +54,11 @@ def _clean_specimen(s: str) -> str:
 
 
 class ReceptionPage(QWidget):
-    def __init__(self, con, user):
+    def __init__(self, con: sqlite3.Connection, user) -> None:
         super().__init__()
         self.con = con
         self.user = user
-        self.cart = []  # list of dicts: {test_id, name, charge}
+        self.cart: list[dict] = []  # list of dicts: {test_id, name, charge}
         self._existing_patient_id = None  # set when a returning patient is picked
 
         root = QVBoxLayout(self)
@@ -313,7 +313,7 @@ class ReceptionPage(QWidget):
         self.test_search.returnPressed.connect(self._add_top_test)
 
     # ---------------------------------------------------------------
-    def on_show(self):
+    def on_show(self) -> None:
         self.load_doctors()
         if self.results.count() == 0:
             self.search_tests("")
@@ -322,7 +322,7 @@ class ReceptionPage(QWidget):
             self.recompute()
 
     # ---- discount approval + special-day promo --------------------
-    def _request_discount_approval(self):
+    def _request_discount_approval(self) -> None:
         """A cashier asks a manager/admin to approve a discount on this bill."""
         u, ok = QInputDialog.getText(self, "Manager approval", "Manager / Admin username:")
         if not ok or not u.strip():
@@ -368,13 +368,13 @@ class ReceptionPage(QWidget):
                 pass
         return max(0.0, min(100.0, pct))
 
-    def _apply_promo(self):
+    def _apply_promo(self) -> None:
         pct = self._promo_pct()
         self.discount.blockSignals(True)
         self.discount.setValue(pct)  # auto-apply the special-day discount
         self.discount.blockSignals(False)
 
-    def load_doctors(self):
+    def load_doctors(self) -> None:
         cur = self.doctor.currentText()
         self.doctor.clear()
         self.doctor.addItem("", None)
@@ -385,14 +385,14 @@ class ReceptionPage(QWidget):
             self.doctor.addItem(d["name"], d["id"])
         self.doctor.setCurrentText(cur)
 
-    def _hint_item(self, text):
+    def _hint_item(self, text: str) -> QListWidgetItem:
         it = QListWidgetItem(text)
         it.setFlags(Qt.NoItemFlags)
         it.setForeground(Qt.gray)
         return it
 
     # ---- returning-patient lookup ---------------------------------
-    def _unlink(self, *_):
+    def _unlink(self, *_) -> None:
         """Hand-editing identity fields detaches any picked patient."""
         if self._existing_patient_id is not None:
             self._existing_patient_id = None
@@ -400,7 +400,7 @@ class ReceptionPage(QWidget):
             self.prev_lbl.hide()
             self.prev_visits.hide()
 
-    def search_patients(self, text=None):
+    def search_patients(self, text: str | None = None) -> None:
         text = (self.find.text() if text is None else text).strip()
         self.find_results.clear()
         if len(text) < 2:
@@ -429,7 +429,7 @@ class ReceptionPage(QWidget):
         self.find_results.setMaximumHeight(min(self.find_results.count(), 5) * 36 + 8)
         self.find_results.show()
 
-    def pick_patient(self, item):
+    def pick_patient(self, item: QListWidgetItem | None) -> None:
         if item is None:  # itemActivated can fire with no item (Enter on empty list)
             return
         pid = item.data(Qt.UserRole)
@@ -457,7 +457,7 @@ class ReceptionPage(QWidget):
         self.find.clear()
         self.find_results.hide()
 
-    def _show_previous_visits(self, pid):
+    def _show_previous_visits(self, pid: int) -> None:
         """List this patient's recent receipts so reception sees their history."""
         cur = db.currency(self.con)
         rows = self.con.execute(
@@ -485,7 +485,7 @@ class ReceptionPage(QWidget):
         self.prev_visits.show()
 
     # ---- specimen options driven by the chosen tests --------------
-    def update_specimen_options(self):
+    def update_specimen_options(self) -> None:
         """Offer each cart test's `sample_required` as a specimen option (plus the
         standard presets); auto-select when there is a single specimen."""
         cur = self.specimen.currentText().strip()
@@ -515,7 +515,7 @@ class ReceptionPage(QWidget):
         elif len(cart_specs) == 1:
             self.specimen.setCurrentText(cart_specs[0])
 
-    def search_tests(self, text=None):
+    def search_tests(self, text: str | None = None) -> None:
         text = (self.test_search.text() if text is None else text).strip()
         self.results.clear()
         cur = db.currency(self.con)
@@ -542,7 +542,7 @@ class ReceptionPage(QWidget):
             it.setData(Qt.UserRole, (r["id"], r["name"], r["charges"]))
             self.results.addItem(it)
 
-    def _show_panel_menu(self):
+    def _show_panel_menu(self) -> None:
         """Drop down the saved panels; picking one adds all its tests to the cart."""
         panels = db.list_panels(self.con)
         menu = QMenu(self)
@@ -556,7 +556,7 @@ class ReceptionPage(QWidget):
                 )
         menu.exec(self.panel_btn.mapToGlobal(self.panel_btn.rect().bottomLeft()))
 
-    def _add_panel(self, panel_id, name):
+    def _add_panel(self, panel_id: int, name: str) -> None:
         rows = db.panel_tests(self.con, panel_id)
         added = 0
         for r in rows:
@@ -571,12 +571,12 @@ class ReceptionPage(QWidget):
             msg += f" {skipped} already in the cart."
         self.statusBar_message(msg)
 
-    def statusBar_message(self, msg):
+    def statusBar_message(self, msg: str) -> None:
         """Show a brief, self-clearing notice inline on the page (no status bar)."""
         self.toast.setText(msg)
         self._toast_timer.start(4000)
 
-    def _add_top_test(self):
+    def _add_top_test(self) -> None:
         """Enter in the test search box adds the first matching test."""
         for i in range(self.results.count()):
             it = self.results.item(i)
@@ -585,7 +585,7 @@ class ReceptionPage(QWidget):
                 self.test_search.clear()
                 return
 
-    def add_from_list(self, item):
+    def add_from_list(self, item: QListWidgetItem | None) -> None:
         # itemActivated can fire with no item (Enter on a focused empty list, esp. Wayland)
         if item is None:
             return
@@ -600,11 +600,11 @@ class ReceptionPage(QWidget):
         self.search_tests("")
         self.refresh_cart()
 
-    def remove_cart(self, idx):
+    def remove_cart(self, idx: int) -> None:
         del self.cart[idx]
         self.refresh_cart()
 
-    def refresh_cart(self):
+    def refresh_cart(self) -> None:
         self.cart_table.setRowCount(0)
         for i, c in enumerate(self.cart):
             r = self.cart_table.rowCount()
@@ -627,7 +627,7 @@ class ReceptionPage(QWidget):
         self.update_specimen_options()
         self.recompute()
 
-    def recompute(self):
+    def recompute(self) -> None:
         cur = db.currency(self.con)
         sub = sum(c["charge"] for c in self.cart)
         disc = sub * self.discount.value() / 100.0
@@ -852,7 +852,7 @@ class ReceptionPage(QWidget):
             wa.send_async(self, self.con, "receipt", rid)
         self.clear_form()
 
-    def clear_form(self):
+    def clear_form(self) -> None:
         self.cart = []
         self._existing_patient_id = None
         self.linked_lbl.hide()

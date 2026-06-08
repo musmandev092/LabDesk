@@ -42,7 +42,7 @@ _LABEL_W = 200  # shared label-column width so all settings cards align
 
 
 class UserDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("New user")
         self.setMinimumWidth(440)
@@ -70,7 +70,7 @@ class UserDialog(QDialog):
         btns.addWidget(ok)
         form.addRow(btns)
 
-    def values(self):
+    def values(self) -> dict[str, str]:
         return {
             "username": self.username.text().strip(),
             "full_name": self.full_name.text().strip(),
@@ -80,7 +80,7 @@ class UserDialog(QDialog):
 
 
 # (key, label) — plain text settings grouped per section
-LAB_FIELDS = [
+LAB_FIELDS: list[tuple[str, ...]] = [
     ("lab_name", "Lab name"),
     ("lab_subtitle", "Subtitle / tagline"),
     ("address", "Address"),
@@ -90,15 +90,15 @@ LAB_FIELDS = [
     ("currency", "Currency symbol"),
     ("lab_no_prefix", "Lab no. prefix"),
 ]
-REG_FIELDS = [
+REG_FIELDS: list[tuple[str, ...]] = [
     ("phc_reg_no", "PHC registration no."),
     ("lab_reg_no", "Lab registration no."),
 ]
-PROMO_FIELDS = [
+PROMO_FIELDS: list[tuple[str, ...]] = [
     ("promo_discount_pct", "Special-day discount %", "0 = off"),
     ("promo_until", "Promo active until", "YYYY-MM-DD (blank = no end)"),
 ]
-REPORT_FIELDS = [
+REPORT_FIELDS: list[tuple[str, ...]] = [
     ("report_footer", "Report footer line"),
     ("dept_band", "Department band"),
     ("signatory_1_name", "Signatory 1 — name"),
@@ -106,7 +106,7 @@ REPORT_FIELDS = [
     ("signatory_2_name", "Signatory 2 — name"),
     ("signatory_2_title", "Signatory 2 — title"),
 ]
-RECEIPT_FIELDS = [
+RECEIPT_FIELDS: list[tuple[str, ...]] = [
     ("receipt_remarks", "Remarks line", "Shown under the bill's Remarks heading"),
     ("receipt_footer_note", "Footer note", "Small italic line at the bottom of the bill"),
 ]
@@ -114,7 +114,7 @@ LOGO_FIELDS = [
     ("logo_path", "Main logo"),
     ("accred_logo_1", "Secondary logo"),
 ]
-WHATSAPP_FIELDS = [
+WHATSAPP_FIELDS: list[tuple[str, ...]] = [
     ("whatsapp_url", "Gateway URL", "http://localhost:8080"),
     ("whatsapp_api_key", "Access token", "wuzapi user token"),
     ("whatsapp_country_code", "Country code", "92"),
@@ -125,11 +125,11 @@ WHATSAPP_FIELDS = [
 
 
 class SettingsPage(QWidget):
-    def __init__(self, con, user):
+    def __init__(self, con, user) -> None:
         super().__init__()
         self.con = con
         self.user = user
-        self._user_ids = []  # parallel to users_table rows; filled by refresh_users
+        self._user_ids: list[int] = []  # parallel to users_table rows; filled by refresh_users
         self.inputs: dict[str, QLineEdit] = {}
 
         root = QVBoxLayout(self)
@@ -175,14 +175,14 @@ class SettingsPage(QWidget):
         root.addWidget(save)
 
     # ---- builders ----
-    def _flbl(self, text):
+    def _flbl(self, text: str) -> QLabel:
         lbl = field_label(text)
         lbl.setFixedWidth(_LABEL_W)
         lbl.setWordWrap(True)  # never clip a long label
         lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         return lbl
 
-    def _form(self):
+    def _form(self) -> QFormLayout:
         form = QFormLayout()
         form.setSpacing(8)
         form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -190,7 +190,7 @@ class SettingsPage(QWidget):
         form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         return form
 
-    def _add_field(self, form, field):
+    def _add_field(self, form: QFormLayout, field: tuple[str, ...]) -> QLineEdit:
         """field = (key, label[, placeholder]) -> a QLineEdit row."""
         key, label = field[0], field[1]
         le = QLineEdit()
@@ -200,7 +200,7 @@ class SettingsPage(QWidget):
         form.addRow(self._flbl(label), le)
         return le
 
-    def _text_card(self, title, fields):
+    def _text_card(self, title: str, fields: list[tuple[str, ...]]) -> QWidget:
         form = self._form()
         for f in fields:
             self._add_field(form, f)
@@ -208,7 +208,7 @@ class SettingsPage(QWidget):
         w.setLayout(form)
         return card(w, title=title)
 
-    def _about_card(self):
+    def _about_card(self) -> QWidget:
         """Product + developer credit (the lab's own branding is set above; this
         is the fixed credit for whoever built the software)."""
         col = QVBoxLayout()
@@ -230,7 +230,7 @@ class SettingsPage(QWidget):
         w.setLayout(col)
         return card(w, title="About")
 
-    def _logo_card(self):
+    def _logo_card(self) -> QWidget:
         form = self._form()
         for key, label in LOGO_FIELDS:
             le = QLineEdit()
@@ -250,7 +250,7 @@ class SettingsPage(QWidget):
         w.setLayout(form)
         return card(w, title="Logos")
 
-    def _printer_card(self):
+    def _printer_card(self) -> QWidget:
         form = self._form()
         self.printer_combo = QComboBox()
         self.printer_combo.addItem("Ask each time (show print dialog)", "")
@@ -272,7 +272,7 @@ class SettingsPage(QWidget):
             title="Printer",
         )
 
-    def _test_printer(self):
+    def _test_printer(self) -> None:
         name = self.printer_combo.currentData() or ""
         try:
             report.print_test_page(self, name)
@@ -280,7 +280,7 @@ class SettingsPage(QWidget):
         except Exception as e:  # noqa: BLE001
             QMessageBox.warning(self, "Printer", f"Could not print:\n{e}")
 
-    def _appearance_card(self):
+    def _appearance_card(self) -> QWidget:
         form = self._form()
         self.theme_combo = QComboBox()
         self.theme_combo.addItem("Light", "light")
@@ -299,13 +299,13 @@ class SettingsPage(QWidget):
             title="Appearance",
         )
 
-    def _apply_theme(self):
+    def _apply_theme(self) -> None:
         theme = self.theme_combo.currentData() or "light"
         app = QApplication.instance()
         if app is not None:
             apply_theme(app, theme)
 
-    def _whatsapp_card(self):
+    def _whatsapp_card(self) -> QWidget:
         form = self._form()
         for f in WHATSAPP_FIELDS:
             self._add_field(form, f)
@@ -362,7 +362,7 @@ class SettingsPage(QWidget):
             title="WhatsApp gateway",
         )
 
-    def _users_card(self):
+    def _users_card(self) -> QWidget:
         bar = QHBoxLayout()
         add = QPushButton("+ Add user")
         add.clicked.connect(self._add_user)
@@ -397,7 +397,7 @@ class SettingsPage(QWidget):
             title="Users & roles",
         )
 
-    def refresh_users(self):
+    def refresh_users(self) -> None:
         if not hasattr(self, "users_table"):
             return
         rows = self.con.execute(
@@ -414,7 +414,7 @@ class SettingsPage(QWidget):
             self.users_table.setItem(i, 2, QTableWidgetItem(role_label(r["role"])))
             self.users_table.setItem(i, 3, QTableWidgetItem("Yes" if r["active"] else "No"))
 
-    def _add_user(self):
+    def _add_user(self) -> None:
         if not can(self.user["role"], "manage_users"):
             return  # defence in depth — managing users is admin-only
         d = UserDialog(self)
@@ -444,7 +444,7 @@ class SettingsPage(QWidget):
             )
             self.refresh_users()
 
-    def _toggle_user(self):
+    def _toggle_user(self) -> None:
         if not can(self.user["role"], "manage_users"):
             return  # defence in depth — managing users is admin-only
         r = self.users_table.currentRow()
@@ -466,7 +466,7 @@ class SettingsPage(QWidget):
         )
         self.refresh_users()
 
-    def _backup_card(self):
+    def _backup_card(self) -> QWidget:
         now = QPushButton("Back up now")
         now.setObjectName("ghost")
         now.clicked.connect(self._backup_now)
@@ -491,18 +491,18 @@ class SettingsPage(QWidget):
             title="Backup & restore",
         )
 
-    def _backup_now(self):
+    def _backup_now(self) -> None:
         if not can(self.user["role"], "manage_backups"):
             return  # defence in depth — backup/restore is admin-only
         user = self.user["username"]
 
-        def work(con):
+        def work(con) -> object | None:
             p = db.backup_db("manual")  # makes its own connections; con unused
             if p:
                 db.log_audit(con, user, "backup_created", str(p))
             return p
 
-        def done(work_ok, result):
+        def done(work_ok: bool, result) -> None:
             if work_ok and result:
                 QMessageBox.information(self, "Backup", f"Backup saved:\n{result}")
             else:
@@ -517,7 +517,7 @@ class SettingsPage(QWidget):
             busy_text="Backing up…",
         )
 
-    def _restore_db(self):
+    def _restore_db(self) -> None:
         if not can(self.user["role"], "manage_backups"):
             QMessageBox.warning(
                 self, "Restore", "You don't have permission to restore the database."
@@ -540,7 +540,7 @@ class SettingsPage(QWidget):
         ):
             return
 
-        def done(work_ok, result):
+        def done(work_ok: bool, result) -> None:
             if work_ok and result:
                 db.log_audit(self.con, self.user["username"], "db_restored", path)
                 QMessageBox.information(
@@ -558,7 +558,7 @@ class SettingsPage(QWidget):
             busy_text="Restoring…",
         )
 
-    def _reset_user_pw(self):
+    def _reset_user_pw(self) -> None:
         if not can(self.user["role"], "manage_users"):
             return  # defence in depth — managing users is admin-only
         import secrets as _secrets
@@ -585,7 +585,7 @@ class SettingsPage(QWidget):
             "They must set a new password at next login.",
         )
 
-    def _security_card(self):
+    def _security_card(self) -> QWidget:
         form = self._form()
         self._add_field(form, ("idle_lock_minutes", "Auto-lock after (minutes)", "0 = off"))
         self.new_pw = QLineEdit()
@@ -601,7 +601,7 @@ class SettingsPage(QWidget):
         return card(w, title="Security")
 
     # ---- behaviour ----
-    def on_show(self):
+    def on_show(self) -> None:
         for key, le in self.inputs.items():
             if key == "whatsapp_api_key":
                 # token is kept in the private secret file, not the DB
@@ -622,7 +622,7 @@ class SettingsPage(QWidget):
         self.printer_combo.setCurrentIndex(i if i >= 0 else 0)
         self.refresh_users()
 
-    def _pick(self, key):
+    def _pick(self, key: str) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "Choose image", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
         )
@@ -635,7 +635,7 @@ class SettingsPage(QWidget):
         except OSError as e:
             QMessageBox.warning(self, "Image", f"Could not use that image:\n{e}")
 
-    def save(self):
+    def save(self) -> None:
         # validate the gateway URL (SSRF / mis-send guard) before persisting
         wa_url = self.inputs["whatsapp_url"].text().strip()
         if wa_url:
@@ -694,7 +694,7 @@ class SettingsPage(QWidget):
         db.log_audit(self.con, self.user["username"], "settings_saved", f"theme={theme}")
         QMessageBox.information(self, "Settings", "Saved.")
 
-    def _test_whatsapp(self):
+    def _test_whatsapp(self) -> None:
         ok, msg = whatsapp.check_status(self.con)
         self.wa_status.setText(("✓ " if ok else "✗ ") + msg)
         db.log_audit(
@@ -705,7 +705,7 @@ class SettingsPage(QWidget):
         )
         (QMessageBox.information if ok else QMessageBox.warning)(self, "WhatsApp", msg)
 
-    def _open_wa_login(self):
+    def _open_wa_login(self) -> None:
         url = (
             self.inputs["whatsapp_url"].text().strip()
             or db.get_setting(self.con, "whatsapp_url", "")
@@ -719,7 +719,7 @@ class SettingsPage(QWidget):
             return
         QDesktopServices.openUrl(QUrl(url + "/login"))
 
-    def _send_test_whatsapp(self):
+    def _send_test_whatsapp(self) -> None:
         num = self.wa_test_num.text().strip()
         if not num:
             QMessageBox.warning(self, "WhatsApp", "Enter a number to send the test to.")
@@ -727,7 +727,7 @@ class SettingsPage(QWidget):
         lab = db.get_setting(self.con, "lab_name", "") or "LabDesk"
         text = f"✅ {lab}: WhatsApp test from LabDesk — your gateway is working."
 
-        def done(work_ok, result):
+        def done(work_ok: bool, result) -> None:
             if work_ok and isinstance(result, tuple):
                 success, msg = result
             else:
@@ -749,7 +749,7 @@ class SettingsPage(QWidget):
             busy_text="Sending…",
         )
 
-    def change_pw(self):
+    def change_pw(self) -> None:
         pw = self.new_pw.text()
         if len(pw) < 6:
             QMessageBox.warning(self, "Password", "Password must be at least 6 characters.")

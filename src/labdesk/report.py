@@ -16,6 +16,7 @@ import html
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 from . import db, render
 
@@ -763,27 +764,28 @@ def _pdf_target(path: str) -> Path:
 
 
 def export_report_pdf(con, receipt_id: int, path: str) -> None:
-    _pdf_target(path).write_bytes(render.build_report(con, receipt_id))
+    # build_* is polymorphic on device/images; the default path always returns bytes.
+    _pdf_target(path).write_bytes(cast(bytes, render.build_report(con, receipt_id)))
 
 
 def export_receipt_pdf(con, receipt_id: int, path: str) -> None:
-    _pdf_target(path).write_bytes(render.build_receipt(con, receipt_id))
+    _pdf_target(path).write_bytes(cast(bytes, render.build_receipt(con, receipt_id)))
 
 
 # Build the PDF bytes natively (QPainter → QPdfWriter). Safe to run on a
 # background thread (see ui/tasks.py); the bytes are printed/previewed on the UI
 # thread. QPainter/QPdfWriter do not require the GUI thread.
 def build_report_bytes(con, receipt_id: int) -> bytes:
-    return render.build_report(con, receipt_id)
+    return cast(bytes, render.build_report(con, receipt_id))
 
 
 def build_receipt_bytes(con, receipt_id: int) -> bytes:
-    return render.build_receipt(con, receipt_id)
+    return cast(bytes, render.build_receipt(con, receipt_id))
 
 
 def build_test_page_bytes(printer_name: str = "") -> bytes:
     """A small printer-test page, as PDF bytes."""
-    return render.build_test_page(printer_name)
+    return cast(bytes, render.build_test_page(printer_name))
 
 
 def _make_printer(parent, title, printer_name):

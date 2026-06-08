@@ -26,11 +26,11 @@ from .widgets import field_label, money, num_item, page_header, selected_id, sta
 
 
 class AccountsPage(QWidget):
-    def __init__(self, con, user):
+    def __init__(self, con, user) -> None:
         super().__init__()
         self.con = con
         self.user = user
-        self._due_ids = []  # parallel to due_table rows; filled by refresh_dues
+        self._due_ids: list = []  # parallel to due_table rows; filled by refresh_dues
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(12)
@@ -45,7 +45,7 @@ class AccountsPage(QWidget):
         self.tabs = tabs
 
     # ---- summary ----
-    def _summary_tab(self):
+    def _summary_tab(self) -> QWidget:
         w = QWidget()
         lay = QVBoxLayout(w)
         rng = QHBoxLayout()
@@ -101,7 +101,7 @@ class AccountsPage(QWidget):
         lay.addStretch(1)
         return w
 
-    def _fit_method_table(self):
+    def _fit_method_table(self) -> None:
         """Pin the breakdown table to exactly its content height (header + rows) so
         it never internally scrolls and never shows empty filler rows."""
         t = self.method_table
@@ -110,7 +110,7 @@ class AccountsPage(QWidget):
             h += t.rowHeight(r)
         t.setFixedHeight(h)
 
-    def refresh_summary(self):
+    def refresh_summary(self) -> None:
         c = self.con
         cur = db.currency(c)
         f = self.from_date.date().toString("yyyy-MM-dd")
@@ -165,7 +165,7 @@ class AccountsPage(QWidget):
         self._fit_method_table()  # size to content (Rule 2: use space, no dead box)
 
     # ---- expenses ----
-    def _expenses_tab(self):
+    def _expenses_tab(self) -> QWidget:
         w = QWidget()
         lay = QVBoxLayout(w)
         self.exp_date = QDateEdit(QDate.currentDate())
@@ -203,7 +203,7 @@ class AccountsPage(QWidget):
         lay.addWidget(self.exp_table)
         return w
 
-    def add_expense(self):
+    def add_expense(self) -> None:
         if self.exp_amount.value() <= 0:
             return
         self.con.execute(
@@ -236,7 +236,7 @@ class AccountsPage(QWidget):
         self.exp_amount.setValue(0)
         self.refresh_expenses()
 
-    def refresh_expenses(self):
+    def refresh_expenses(self) -> None:
         rows = self.con.execute(
             "SELECT * FROM expenses ORDER BY date DESC, id DESC LIMIT 500"
         ).fetchall()
@@ -250,7 +250,7 @@ class AccountsPage(QWidget):
             self.exp_table.setItem(i, 3, num_item(f"{r['amount']:,.0f}"))
 
     # ---- dues ----
-    def _dues_tab(self):
+    def _dues_tab(self) -> QWidget:
         w = QWidget()
         lay = QVBoxLayout(w)
         bar = QHBoxLayout()
@@ -279,7 +279,7 @@ class AccountsPage(QWidget):
         lay.addWidget(self.due_table)
         return w
 
-    def refresh_dues(self):
+    def refresh_dues(self) -> None:
         rows = self.con.execute(
             f"SELECT * FROM receipts WHERE due>0.005 AND {db.NOT_VOIDED} ORDER BY id DESC"
         ).fetchall()
@@ -296,7 +296,7 @@ class AccountsPage(QWidget):
             self.due_table.setItem(i, 4, num_item(f"{r['due']:,.0f}"))
         self.recover_btn.setEnabled(False)
 
-    def recover_due(self):
+    def recover_due(self) -> None:
         # use the actual selection, not currentRow (which survives a rebuild and
         # would settle a different receipt than the one highlighted)
         rid = selected_id(self.due_table, self._due_ids)
@@ -320,7 +320,7 @@ class AccountsPage(QWidget):
         self.refresh_dues()
         self.refresh_summary()
 
-    def on_show(self):
+    def on_show(self) -> None:
         self.refresh_summary()
         self.refresh_expenses()
         self.refresh_dues()

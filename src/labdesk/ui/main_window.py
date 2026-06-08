@@ -64,7 +64,7 @@ NAV = [
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, con, user):
+    def __init__(self, con, user) -> None:
         super().__init__()
         self.con = con
         self.user = user
@@ -137,7 +137,7 @@ class MainWindow(QMainWindow):
             btn.clicked.connect(lambda _=False, idx=i: self.go(idx))
             sb.addWidget(btn)
             self.btn_group.addButton(btn, i)
-            page = PageCls(con, user)
+            page: QWidget = PageCls(con, user)
             page.setObjectName("page")
             page.navigate = self.navigate_to  # let pages jump to other pages
             self._page_index[label] = i
@@ -205,7 +205,7 @@ class MainWindow(QMainWindow):
         self._setup_idle_lock()
 
     # ---- idle auto-lock ----------------------------------------------------
-    def _setup_idle_lock(self):
+    def _setup_idle_lock(self) -> None:
         try:
             mins = int(db.get_setting(self.con, "idle_lock_minutes", "0") or 0)
         except ValueError:
@@ -219,7 +219,7 @@ class MainWindow(QMainWindow):
         QApplication.instance().installEventFilter(self)
         self._idle_timer.start(self._idle_ms)
 
-    def eventFilter(self, obj, event):
+    def eventFilter(self, obj, event) -> bool:
         if (
             self._idle_ms
             and not self._locked
@@ -229,7 +229,7 @@ class MainWindow(QMainWindow):
             self._idle_timer.start(self._idle_ms)  # reset the countdown on activity
         return super().eventFilter(obj, event)
 
-    def _lock_screen(self):
+    def _lock_screen(self) -> None:
         if self._locked:
             return
         self._locked = True
@@ -259,7 +259,7 @@ class MainWindow(QMainWindow):
         else:
             self.close()  # couldn't re-auth → end the session
 
-    def closeEvent(self, event):
+    def closeEvent(self, event) -> None:
         # records sign-out (the "Sign out" button calls close()) and window close
         if not getattr(self, "_logged_out", False):
             self._logged_out = True
@@ -272,20 +272,20 @@ class MainWindow(QMainWindow):
     # scaling pushing the logical width down); navigation stays available via Alt+1..9.
     _SIDEBAR_MIN_WIDTH = 1180
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         sidebar = getattr(self, "_sidebar", None)
         if sidebar is not None:
             sidebar.setVisible(self.width() >= self._SIDEBAR_MIN_WIDTH)
 
-    def go(self, idx: int):
+    def go(self, idx: int) -> None:
         self.stack.setCurrentIndex(idx)
         page = self.pages[idx]
         if hasattr(page, "on_show"):
             page.on_show()
         self.btn_group.button(idx).setChecked(True)
 
-    def navigate_to(self, label: str, **kwargs):
+    def navigate_to(self, label: str, **kwargs) -> None:
         """Jump to a page by its NAV label (used by dashboard cards). Extra kwargs
         are passed to the target page's apply_nav() if it defines one."""
         idx = self._page_index.get(label)

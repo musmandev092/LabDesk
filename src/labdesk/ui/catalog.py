@@ -35,7 +35,7 @@ from .widgets import fit_to_screen, like_term, muted, page_header
 
 
 class TestDialog(QDialog):
-    def __init__(self, parent=None, data=None):
+    def __init__(self, parent: QWidget | None = None, data=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Test")
         self.setMinimumWidth(440)
@@ -78,7 +78,7 @@ class TestDialog(QDialog):
         btns.addWidget(ok)
         form.addRow(btns)
 
-    def values(self):
+    def values(self) -> dict:
         return {
             "name": self.name.text().strip(),
             "charges": self.charges.value(),
@@ -95,7 +95,14 @@ PART_TYPES = [("Normal line", "N"), ("Section heading", "H"), ("Note / ref-only"
 class ParametersDialog(QDialog):
     """In-app editor for a test's report lines (parameters / headings / notes)."""
 
-    def __init__(self, con, user, test_id, test_name, parent=None):
+    def __init__(
+        self,
+        con,
+        user: dict,
+        test_id: int,
+        test_name: str,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.con = con
         self.user = user
@@ -157,7 +164,7 @@ class ParametersDialog(QDialog):
         ]
         self._render()
 
-    def _type_combo(self, value):
+    def _type_combo(self, value: str | None) -> QComboBox:
         cb = QComboBox()
         for lbl, code in PART_TYPES:
             cb.addItem(lbl, code)
@@ -165,7 +172,7 @@ class ParametersDialog(QDialog):
         cb.setCurrentIndex(idx if idx >= 0 else 0)
         return cb
 
-    def _render(self):
+    def _render(self) -> None:
         self.table.setRowCount(0)
         for r in self.rows:
             i = self.table.rowCount()
@@ -177,7 +184,7 @@ class ParametersDialog(QDialog):
             self.table.setItem(i, 4, QTableWidgetItem(r.get("ref_female") or ""))
             self.table.setItem(i, 5, QTableWidgetItem(r.get("default_result") or ""))
 
-    def _sync(self):
+    def _sync(self) -> None:
         """Pull the table's current contents back into self.rows (preserving ids)."""
         for i, r in enumerate(self.rows):
             cb = self.table.cellWidget(i, 0)
@@ -189,11 +196,11 @@ class ParametersDialog(QDialog):
             r["ref_female"] = self._cell(i, 4)
             r["default_result"] = self._cell(i, 5)
 
-    def _cell(self, i, c):
+    def _cell(self, i: int, c: int) -> str:
         it = self.table.item(i, c)
         return it.text().strip() if it else ""
 
-    def _add_row(self):
+    def _add_row(self) -> None:
         self._sync()
         self.rows.append(
             {
@@ -209,7 +216,7 @@ class ParametersDialog(QDialog):
         self._render()
         self.table.selectRow(len(self.rows) - 1)
 
-    def _remove_row(self):
+    def _remove_row(self) -> None:
         i = self.table.currentRow()
         if not (0 <= i < len(self.rows)):
             return
@@ -217,7 +224,7 @@ class ParametersDialog(QDialog):
         del self.rows[i]
         self._render()
 
-    def _move(self, delta):
+    def _move(self, delta: int) -> None:
         i = self.table.currentRow()
         j = i + delta
         if not (0 <= i < len(self.rows) and 0 <= j < len(self.rows)):
@@ -227,7 +234,7 @@ class ParametersDialog(QDialog):
         self._render()
         self.table.selectRow(j)
 
-    def _save(self):
+    def _save(self) -> None:
         self._sync()
         # drop fully-empty rows so accidental blank lines don't print
         rows = [
@@ -255,13 +262,13 @@ class ParametersDialog(QDialog):
 class PanelsDialog(QDialog):
     """Manage test panels / profiles — named bundles of tests added together."""
 
-    def __init__(self, con, user, parent=None):
+    def __init__(self, con, user: dict, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.con = con
         self.user = user
         self.setWindowTitle("Test panels / profiles")
         fit_to_screen(self, 720, 520)
-        self._panel_id = None
+        self._panel_id: int | None = None
 
         root = QHBoxLayout(self)
         # left: list of panels
@@ -311,12 +318,12 @@ class PanelsDialog(QDialog):
         self._refresh_panels()
         self._new_panel()
 
-    def _load_all_tests(self):
+    def _load_all_tests(self) -> None:
         self._all_tests = self.con.execute(
             "SELECT id, name FROM tests WHERE active=1 ORDER BY name COLLATE NOCASE"
         ).fetchall()
 
-    def _populate_tests(self, checked_ids):
+    def _populate_tests(self, checked_ids: list[int] | None) -> None:
         checked = set(checked_ids or [])
         self.tests.clear()
         for t in self._all_tests:
@@ -327,13 +334,13 @@ class PanelsDialog(QDialog):
             self.tests.addItem(it)
         self._filter_tests(self.test_search.text())
 
-    def _filter_tests(self, text):
+    def _filter_tests(self, text: str) -> None:
         text = (text or "").strip().lower()
         for i in range(self.tests.count()):
             it = self.tests.item(i)
             it.setHidden(bool(text) and text not in it.text().lower())
 
-    def _checked_ids(self):
+    def _checked_ids(self) -> list:
         out = []
         for i in range(self.tests.count()):
             it = self.tests.item(i)
@@ -341,7 +348,7 @@ class PanelsDialog(QDialog):
                 out.append(it.data(Qt.UserRole))
         return out
 
-    def _refresh_panels(self):
+    def _refresh_panels(self) -> None:
         self.panel_list.blockSignals(True)
         self.panel_list.clear()
         for p in db.list_panels(self.con):
@@ -351,7 +358,7 @@ class PanelsDialog(QDialog):
             self.panel_list.addItem(it)
         self.panel_list.blockSignals(False)
 
-    def _new_panel(self):
+    def _new_panel(self) -> None:
         self._panel_id = None
         self.panel_list.clearSelection()
         self.name.clear()
@@ -359,7 +366,7 @@ class PanelsDialog(QDialog):
         self.del_btn.setEnabled(False)
         self.name.setFocus()
 
-    def _load_panel(self, item, _prev=None):
+    def _load_panel(self, item, _prev=None) -> None:
         if item is None:
             return
         pid = item.data(Qt.UserRole)
@@ -373,7 +380,7 @@ class PanelsDialog(QDialog):
         self._populate_tests([t["id"] for t in db.panel_tests(self.con, pid)])
         self.del_btn.setEnabled(True)
 
-    def _save(self):
+    def _save(self) -> None:
         name = self.name.text().strip()
         if not name:
             QMessageBox.warning(self, "Panel", "Give the panel a name.")
@@ -398,7 +405,7 @@ class PanelsDialog(QDialog):
                 break
         QMessageBox.information(self, "Panel", f"Saved “{name}”.")
 
-    def _delete_panel(self):
+    def _delete_panel(self) -> None:
         if self._panel_id is None:
             return
         name = self.name.text().strip()
@@ -411,11 +418,11 @@ class PanelsDialog(QDialog):
 
 
 class CatalogPage(QWidget):
-    def __init__(self, con, user):
+    def __init__(self, con, user: dict) -> None:
         super().__init__()
         self.con = con
         self.user = user
-        self._ids = []  # parallel to tests table rows; filled by refresh
+        self._ids: list = []  # parallel to tests table rows; filled by refresh
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(12)
@@ -491,10 +498,10 @@ class CatalogPage(QWidget):
         split.setSizes([560, 540])
         lay.addWidget(split, 1)
 
-    def on_show(self):
+    def on_show(self) -> None:
         self.refresh()
 
-    def refresh(self):
+    def refresh(self) -> None:
         q = like_term(self.search.text())
         active_clause = "" if self.show_retired.isChecked() else "active=1 AND "
         rows = self.con.execute(
@@ -523,11 +530,11 @@ class CatalogPage(QWidget):
         if self.tests.rowCount() and self.tests.currentRow() < 0:
             self.tests.selectRow(0)  # show params for the first test by default
 
-    def _selected_id(self):
+    def _selected_id(self) -> int | None:
         r = self.tests.currentRow()
         return self._ids[r] if 0 <= r < len(self._ids) else None
 
-    def show_params(self):
+    def show_params(self) -> None:
         tid = self._selected_id()
         self.params.setRowCount(0)
         if tid is None:
@@ -544,7 +551,7 @@ class CatalogPage(QWidget):
             self.params.setItem(i, 3, QTableWidgetItem(r["ref_male"] or ""))
             self.params.setItem(i, 4, QTableWidgetItem(r["ref_female"] or ""))
 
-    def add(self):
+    def add(self) -> None:
         if not can(self.user["role"], "edit_catalog"):
             return
         d = TestDialog(self)
@@ -568,7 +575,7 @@ class CatalogPage(QWidget):
             db.log_audit(self.con, self.user["username"], "test_created", v["name"])
             self.refresh()
 
-    def edit(self):
+    def edit(self) -> None:
         if not can(self.user["role"], "edit_catalog"):
             return
         tid = self._selected_id()
@@ -597,12 +604,12 @@ class CatalogPage(QWidget):
             db.log_audit(self.con, self.user["username"], "test_updated", v["name"])
             self.refresh()
 
-    def manage_panels(self):
+    def manage_panels(self) -> None:
         if not can(self.user["role"], "edit_catalog"):
             return
         PanelsDialog(self.con, self.user, self).exec()
 
-    def edit_parameters(self):
+    def edit_parameters(self) -> None:
         if not can(self.user["role"], "edit_catalog"):
             return
         tid = self._selected_id()
@@ -614,7 +621,7 @@ class CatalogPage(QWidget):
         if dlg.exec() == QDialog.Accepted:
             self.show_params()  # refresh the read-only preview pane
 
-    def toggle_retire(self):
+    def toggle_retire(self) -> None:
         if not can(self.user["role"], "edit_catalog"):
             return
         tid = self._selected_id()

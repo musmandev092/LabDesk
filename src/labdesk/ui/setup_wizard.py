@@ -28,7 +28,7 @@ from .widgets import field_label, fit_to_screen
 
 
 class SetupWizard(QDialog):
-    def __init__(self, con, parent=None):
+    def __init__(self, con, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.con = con
         self.setWindowTitle(f"Welcome to {PRODUCT_NAME}")
@@ -75,7 +75,7 @@ class SetupWizard(QDialog):
         self.fields: dict[str, QLineEdit] = {}
         r = 0
 
-        def add(key, label, placeholder="", required=False):
+        def add(key: str, label: str, placeholder: str = "", required: bool = False) -> QLineEdit:
             nonlocal r
             grid.addWidget(field_label(label + (" *" if required else "")), r, 0)
             le = QLineEdit()
@@ -156,14 +156,14 @@ class SetupWizard(QDialog):
         btns.addWidget(finish)
         root.addLayout(btns)
 
-    def _pick_logo(self):
+    def _pick_logo(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "Choose logo", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
         )
         if path:
             self.logo.setText(path)
 
-    def _finish(self):
+    def _finish(self) -> None:
         name = self.fields["lab_name"].text().strip()
         if not name:
             QMessageBox.warning(self, "Setup", "Please enter your laboratory name.")

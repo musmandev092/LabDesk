@@ -41,15 +41,18 @@ def resolve_ref(param_row, sex: str) -> str:
 
 
 class WorklistPage(QWidget):
-    def __init__(self, con, user):
+    def __init__(self, con, user) -> None:
         super().__init__()
         self.con = con
         self.user = user
-        self._ids = []  # parallel to worklist table rows; filled by refresh
-        self.current_receipt = None
-        self._editors = {}  # (item_id, parameter_id) -> QLineEdit
-        self._show = {}  # (item_id, parameter_id) -> QCheckBox (ticked = print this row)
-        self._remarks = {}  # item_id -> QPlainTextEdit (per-test remarks)
+        self._ids: list[int] = []  # parallel to worklist table rows; filled by refresh
+        self.current_receipt: int | None = None
+        # (item_id, parameter_id) -> QLineEdit
+        self._editors: dict[tuple[int, int | None], QLineEdit] = {}
+        # (item_id, parameter_id) -> QCheckBox (ticked = print this row)
+        self._show: dict[tuple[int, int | None], QCheckBox] = {}
+        # item_id -> QPlainTextEdit (per-test remarks)
+        self._remarks: dict[int, QPlainTextEdit] = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -152,13 +155,13 @@ class WorklistPage(QWidget):
         sc.activated.connect(self.clear_selection)
         self.table.viewport().installEventFilter(self)
 
-    def eventFilter(self, obj, event):
+    def eventFilter(self, obj, event) -> bool:
         if obj is self.table.viewport() and event.type() == QEvent.MouseButtonPress:
             if not self.table.indexAt(event.position().toPoint()).isValid():
                 self.clear_selection()
         return super().eventFilter(obj, event)
 
-    def clear_selection(self):
+    def clear_selection(self) -> None:
         """Deselect the current receipt and reset the right-hand panel."""
         # block signals while clearing — otherwise clearSelection() fires
         # itemSelectionChanged -> load_receipt while currentRow() is still the old
@@ -183,7 +186,7 @@ class WorklistPage(QWidget):
         self.save_btn.setEnabled(False)
 
     # ---------------------------------------------------------------
-    def _date_edit(self):
+    def _date_edit(self) -> QDateEdit:
         """A calendar-popup date editor, defaulting to today, disabled until the
         'By date' filter is switched on."""
         d = QDateEdit()
@@ -194,12 +197,12 @@ class WorklistPage(QWidget):
         d.setMinimumHeight(40)
         return d
 
-    def _dates_toggled(self, on):
+    def _dates_toggled(self, on: bool) -> None:
         self.date_from.setEnabled(on)
         self.date_to.setEnabled(on)
         self.refresh_list()
 
-    def _date_clause(self):
+    def _date_clause(self) -> tuple[str | None, list[str]]:
         """SQL fragment + args for the active date-range filter, else (None, [])."""
         if not self.use_dates.isChecked():
             return None, []
@@ -212,10 +215,10 @@ class WorklistPage(QWidget):
             [d1.toString("yyyy-MM-dd"), d2.addDays(1).toString("yyyy-MM-dd")],
         )
 
-    def on_show(self):
+    def on_show(self) -> None:
         self.refresh_list()
 
-    def refresh_list(self):
+    def refresh_list(self) -> None:
         q = f"%{self.search.text().strip()}%"
         st = self.status_filter.currentData() or "All"
         sql = (
@@ -243,11 +246,11 @@ class WorklistPage(QWidget):
             self.table.setItem(i, 2, QTableWidgetItem((r["received_at"] or "")[:16]))
             self.table.setItem(i, 3, status_badge(r["status"] or ""))
 
-    def _selected_id(self):
+    def _selected_id(self) -> int | None:
         return selected_id(self.table, self._ids)
 
     # ---------------------------------------------------------------
-    def load_receipt(self):
+    def load_receipt(self) -> None:
         rid = self._selected_id()
         if rid is None:
             return
@@ -296,7 +299,7 @@ class WorklistPage(QWidget):
             rem.setReadOnly(not editable)
         self.save_btn.setEnabled(editable)
 
-    def _results_locked_reason(self, status) -> str:
+    def _results_locked_reason(self, status: str | None) -> str:
         """Why result editing is blocked for the current user (else '').
         delivered -> locked for everyone (incl. admin); reported -> admin only;
         pending / in-progress -> open."""
@@ -307,7 +310,7 @@ class WorklistPage(QWidget):
             return "This report is finalised — only an administrator can edit it."
         return ""
 
-    def _culture_note(self, item):
+    def _culture_note(self, item) -> QWidget:
         lbl = muted(
             f"“{item['test_name']}” is a culture & sensitivity test — "
             "enter its findings on the Microbiology screen."
@@ -315,14 +318,14 @@ class WorklistPage(QWidget):
         lbl.setWordWrap(True)
         return card(lbl, title=item["test_name"])
 
-    def _make_check(self):
+    def _make_check(self) -> QCheckBox:
         """A ticked 'show on report' checkbox for a parameter row."""
         cb = QCheckBox()
         cb.setChecked(True)
         cb.setToolTip("Tick to print this line on the report; untick to hide it.")
         return cb
 
-    def _build_test_block(self, item, sex):
+    def _build_test_block(self, item, sex: str) -> QWidget:
         params = self.con.execute(
             "SELECT * FROM test_parameters WHERE test_id=? ORDER BY seq", (item["test_id"],)
         ).fetchall()
@@ -380,7 +383,7 @@ class WorklistPage(QWidget):
                 le.setMaximumWidth(160)
                 # live out-of-range cue: red (high) / amber (low) as you type
 
-                def _flagit(text, le=le, ref=ref):
+                def _flagit(text: str, le: QLineEdit = le, ref: str = ref) -> None:
                     fl = report._flag(text, ref)
                     if fl and fl[0] == "High":
                         le.setStyleSheet("color:#dc2626; font-weight:700;")
@@ -420,7 +423,7 @@ class WorklistPage(QWidget):
         return card(h2(item["test_name"]), host)
 
     # ---------------------------------------------------------------
-    def save_results(self):
+    def save_results(self) -> None:
         if self.current_receipt is None:
             return
         c = self.con
@@ -518,7 +521,7 @@ class WorklistPage(QWidget):
             )
         self.refresh_list()
 
-    def _snapshot_static_lines(self, sex):
+    def _snapshot_static_lines(self, sex: str) -> None:
         """Persist H/L/continuation lines (no editor) so reports render fully."""
         c = self.con
         items = c.execute(

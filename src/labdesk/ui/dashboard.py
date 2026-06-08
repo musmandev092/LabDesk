@@ -10,7 +10,7 @@ from .widgets import card, money, muted, page_header, stat_card
 
 
 class DashboardPage(QWidget):
-    def __init__(self, con, user):
+    def __init__(self, con, user) -> None:
         super().__init__()
         self.con = con
         lay = QVBoxLayout(self)
@@ -45,7 +45,7 @@ class DashboardPage(QWidget):
             "3.  Microbiology — enter culture & sensitivity findings.",
             "4.  Settings — update your lab branding, logo and registration numbers.",
         ]
-        step_labels = []
+        step_labels: list[QWidget] = []
         for s in steps:
             lbl = muted(s)
             lbl.setWordWrap(True)
@@ -53,12 +53,12 @@ class DashboardPage(QWidget):
         lay.addWidget(card(*step_labels, title="Getting started"))
         lay.addStretch(1)
 
-    def _go(self, label, **kw):
+    def _go(self, label: str, **kw: object) -> None:
         nav = getattr(self, "navigate", None)
         if nav:
             nav(label, **kw)
 
-    def on_show(self):
+    def on_show(self) -> None:
         c = self.con
         currency = db.currency(c)
         lab = db.get_setting(c, "lab_name", "") or "your laboratory"

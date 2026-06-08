@@ -15,6 +15,9 @@ Notes that make this safe:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal
 
 from .. import db
@@ -22,15 +25,15 @@ from .. import db
 try:  # detect a widget destroyed while work was in flight
     from shiboken6 import Shiboken
 
-    def _alive(obj) -> bool:
+    def _alive(obj: Any) -> bool:
         return obj is not None and Shiboken.isValid(obj)
 except Exception:  # pragma: no cover - fallback if shiboken layout differs
 
-    def _alive(obj) -> bool:
+    def _alive(obj: Any) -> bool:
         return obj is not None
 
 
-_active: set = set()  # keep running tasks referenced until they complete
+_active: set[Any] = set()  # keep running tasks referenced until they complete
 
 
 class _Signals(QObject):
@@ -38,12 +41,12 @@ class _Signals(QObject):
 
 
 class _Runnable(QRunnable):
-    def __init__(self, work):
+    def __init__(self, work: Callable[[Any], Any]) -> None:
         super().__init__()
         self._work = work
         self.signals = _Signals()
 
-    def run(self):
+    def run(self) -> None:
         ok, result = False, "Something went wrong."
         con = None
         try:
@@ -61,7 +64,15 @@ class _Runnable(QRunnable):
             self.signals.done.emit(ok, result)
 
 
-def run_in_background(parent, work, on_done, *, clicked=None, lock=(), busy_text="Working…"):
+def run_in_background(
+    parent: Any,
+    work: Callable[[Any], Any],
+    on_done: Callable[[bool, Any], None],
+    *,
+    clicked: Any = None,
+    lock: tuple[Any, ...] = (),
+    busy_text: str = "Working…",
+) -> None:
     """Run ``work(con)`` on a pool thread, then call ``on_done(ok, result)`` on
     the UI thread.
 
@@ -84,7 +95,7 @@ def run_in_background(parent, work, on_done, *, clicked=None, lock=(), busy_text
     task.setAutoDelete(False)  # we manage its lifetime via _active
     _active.add(task)
 
-    def _finished(ok, result):
+    def _finished(ok: bool, result: Any) -> None:
         _active.discard(task)
         if clicked is not None and _alive(clicked) and prev_text is not None:
             clicked.setText(prev_text)
@@ -109,14 +120,21 @@ def run_in_background(parent, work, on_done, *, clicked=None, lock=(), busy_text
 
 
 def build_pdf(
-    parent, build, on_ready, *, clicked=None, lock=(), busy_text="Working…", error_title="Document"
-):
+    parent: Any,
+    build: Callable[[Any], Any],
+    on_ready: Callable[[Any], None],
+    *,
+    clicked: Any = None,
+    lock: tuple[Any, ...] = (),
+    busy_text: str = "Working…",
+    error_title: str = "Document",
+) -> None:
     """Build something (usually PDF bytes) via ``build(con)`` off the UI thread,
     then call ``on_ready(result)`` on success. On failure, show one uniform
     warning dialog — saves every caller repeating the ok/error branch."""
     from PySide6.QtWidgets import QMessageBox
 
-    def _done(ok, result):
+    def _done(ok: bool, result: Any) -> None:
         if not ok:
             QMessageBox.warning(parent, error_title, f"Could not prepare the document:\n{result}")
             return
@@ -125,7 +143,7 @@ def build_pdf(
     run_in_background(parent, build, _done, clicked=clicked, lock=lock, busy_text=busy_text)
 
 
-def debounce(owner, slot, ms: int = 250):
+def debounce(owner: Any, slot: Callable[[], Any], ms: int = 250) -> Callable[..., None]:
     """Return a callable that fires ``slot`` only after ``ms`` of quiet, so a
     search box hits the DB once after typing stops, not on every keystroke. The
     QTimer is parented to ``owner`` so it lives exactly as long as the widget."""
@@ -134,7 +152,7 @@ def debounce(owner, slot, ms: int = 250):
     timer.setInterval(ms)
     timer.timeout.connect(slot)
 
-    def trigger(*_args):
+    def trigger(*_args: Any) -> None:
         timer.start()
 
     return trigger

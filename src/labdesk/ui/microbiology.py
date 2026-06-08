@@ -28,7 +28,7 @@ from .widgets import card, h2, page_header
 
 
 class MicrobiologyPage(QWidget):
-    def __init__(self, con, user):
+    def __init__(self, con, user: dict) -> None:
         super().__init__()
         self.con = con
         self.user = user
@@ -116,13 +116,13 @@ class MicrobiologyPage(QWidget):
         sc.activated.connect(self.clear_selection)
         self.table.viewport().installEventFilter(self)
 
-    def eventFilter(self, obj, event):
+    def eventFilter(self, obj, event) -> bool:
         if obj is self.table.viewport() and event.type() == QEvent.MouseButtonPress:
             if not self.table.indexAt(event.position().toPoint()).isValid():
                 self.clear_selection()
         return super().eventFilter(obj, event)
 
-    def clear_selection(self):
+    def clear_selection(self) -> None:
         # block signals so clearSelection() doesn't re-fire load_item (which would
         # re-set current_item to the old row while currentRow() is still set).
         self.table.blockSignals(True)
@@ -138,7 +138,7 @@ class MicrobiologyPage(QWidget):
         self.remarks.clear()
         self.sens.setRowCount(0)
 
-    def _combo(self, kind):
+    def _combo(self, kind: str) -> QComboBox:
         cb = QComboBox()
         cb.setEditable(True)
         cb.addItem("")
@@ -150,10 +150,10 @@ class MicrobiologyPage(QWidget):
         return cb
 
     # ---------------------------------------------------------------
-    def on_show(self):
+    def on_show(self) -> None:
         self.refresh_list()
 
-    def refresh_list(self):
+    def refresh_list(self) -> None:
         q = f"%{self.search.text().strip()}%"
         rows = self.con.execute(
             """SELECT ri.id AS item_id, r.lab_no, r.patient_name, ri.test_name
@@ -174,7 +174,7 @@ class MicrobiologyPage(QWidget):
             self.table.setItem(i, 1, QTableWidgetItem(r["patient_name"] or ""))
             self.table.setItem(i, 2, QTableWidgetItem(r["test_name"] or ""))
 
-    def load_item(self):
+    def load_item(self) -> None:
         sel = self.table.selectionModel().selectedRows()
         if not sel:
             return
@@ -210,7 +210,7 @@ class MicrobiologyPage(QWidget):
             ):
                 self._add_sens(s["antibiotic"], s["result"])
 
-    def _add_sens(self, antibiotic="", result="S"):
+    def _add_sens(self, antibiotic: str = "", result: str = "S") -> None:
         i = self.sens.rowCount()
         self.sens.insertRow(i)
         ab = QComboBox()
@@ -226,10 +226,10 @@ class MicrobiologyPage(QWidget):
         self.sens.setCellWidget(i, 0, ab)
         self.sens.setCellWidget(i, 1, res)
 
-    def add_sens_row(self):
+    def add_sens_row(self) -> None:
         self._add_sens()
 
-    def save(self):
+    def save(self) -> None:
         if self.current_item is None:
             QMessageBox.warning(self, "Microbiology", "Select a culture order first.")
             return

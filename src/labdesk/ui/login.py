@@ -18,7 +18,7 @@ from .style import DEVELOPER, DEVELOPER_GITHUB, PRODUCT_NAME, PRODUCT_TAGLINE
 
 
 class LoginDialog(QDialog):
-    def __init__(self, con, parent=None):
+    def __init__(self, con, parent=None) -> None:
         super().__init__(parent)
         self.con = con
         self.user = None
@@ -88,7 +88,7 @@ class LoginDialog(QDialog):
         self.username.returnPressed.connect(lambda: self.password.setFocus())
         self.username.setFocus()
 
-    def try_login(self):
+    def try_login(self) -> None:
         u = self.username.text().strip()
         p = self.password.text()
         rem = db.lock_remaining(self.con, u)

@@ -23,7 +23,7 @@ from .widgets import page_header
 
 
 class DoctorDialog(QDialog):
-    def __init__(self, parent=None, data=None):
+    def __init__(self, parent: QWidget | None = None, data=None) -> None:
         super().__init__(parent)
         title = "Edit doctor" if data else "Add doctor"
         self.setWindowTitle(title)
@@ -59,7 +59,7 @@ class DoctorDialog(QDialog):
         btns.addWidget(ok)
         form.addRow(btns)
 
-    def values(self):
+    def values(self) -> dict[str, str]:
         return {
             "name": self.name.text().strip(),
             "hospital": self.hospital.text().strip(),
@@ -70,11 +70,11 @@ class DoctorDialog(QDialog):
 
 
 class DoctorsPage(QWidget):
-    def __init__(self, con, user):
+    def __init__(self, con, user) -> None:
         super().__init__()
         self.con = con
         self.user = user
-        self._ids = []  # parallel to doctors table rows; filled by refresh
+        self._ids: list[int] = []  # parallel to doctors table rows; filled by refresh
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(12)
@@ -115,17 +115,17 @@ class DoctorsPage(QWidget):
         lay.addWidget(self.table, 1)
         self._ids = []
 
-    def _update_buttons(self):
+    def _update_buttons(self) -> None:
         has = self.table.currentRow() >= 0 and self.table.currentRow() < len(self._ids)
         self.edit_btn.setEnabled(has)
         # deleting a doctor is an admin ("delete") action — keep the button
         # disabled for lower roles instead of warning only after a click.
         self.del_btn.setEnabled(has and can(self.user["role"], "delete"))
 
-    def on_show(self):
+    def on_show(self) -> None:
         self.refresh()
 
-    def refresh(self):
+    def refresh(self) -> None:
         q = f"%{self.search.text().strip()}%"
         rows = self.con.execute(
             "SELECT * FROM doctors WHERE active=1 AND (name LIKE ? OR hospital LIKE ?)"
@@ -141,11 +141,11 @@ class DoctorsPage(QWidget):
             for col, key in enumerate(["name", "hospital", "area", "tel", "mobile"]):
                 self.table.setItem(i, col, QTableWidgetItem(r[key] or ""))
 
-    def _selected_id(self):
+    def _selected_id(self) -> int | None:
         r = self.table.currentRow()
         return self._ids[r] if 0 <= r < len(self._ids) else None
 
-    def add(self):
+    def add(self) -> None:
         d = DoctorDialog(self)
         if d.exec() == QDialog.Accepted:
             v = d.values()
@@ -159,7 +159,7 @@ class DoctorsPage(QWidget):
             db.log_audit(self.con, self.user["username"], "doctor_created", v["name"])
             self.refresh()
 
-    def edit(self):
+    def edit(self) -> None:
         did = self._selected_id()
         if did is None:
             return
@@ -178,7 +178,7 @@ class DoctorsPage(QWidget):
             db.log_audit(self.con, self.user["username"], "doctor_updated", v["name"])
             self.refresh()
 
-    def delete(self):
+    def delete(self) -> None:
         did = self._selected_id()
         if did is None:
             return

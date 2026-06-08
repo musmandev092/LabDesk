@@ -54,7 +54,7 @@ class _PreviewDialog(QDialog):
     """In-app preview of a report/receipt — the document rendered to image pages
     (native Qt, no QtPdf viewer) shown in a scroll area."""
 
-    def __init__(self, pages, parent=None, title="Preview"):
+    def __init__(self, pages, parent=None, title: str = "Preview") -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
         fit_to_screen(self, 840, 1040)  # scroll area below; clamp so it fits short screens
@@ -82,7 +82,7 @@ class _EditReceiptDialog(QDialog):
     payment method. A test that already has results entered cannot be removed
     (so a finalised result can never be orphaned)."""
 
-    def __init__(self, con, rec, currency="Rs.", parent=None):
+    def __init__(self, con, rec, currency: str = "Rs.", parent=None) -> None:
         super().__init__(parent)
         self.con = con
         self.rec = rec
@@ -91,7 +91,7 @@ class _EditReceiptDialog(QDialog):
         self.setMinimumWidth(480)
 
         # working copy of the line items; item_id is None for a freshly-added test
-        self.items = []
+        self.items: list[dict] = []
         for it in con.execute(
             "SELECT id, test_id, test_name, charge FROM receipt_items WHERE receipt_id=? ORDER BY id",
             (rec["id"],),
@@ -105,7 +105,7 @@ class _EditReceiptDialog(QDialog):
                     "has_results": self._has_results(it["id"]),
                 }
             )
-        self._removed = []  # item_ids of existing rows the user removed
+        self._removed: list = []  # item_ids of existing rows the user removed
 
         root = QVBoxLayout(self)
         root.addWidget(QLabel(f"Patient: <b>{rec['patient_name'] or ''}</b>"))
@@ -182,7 +182,7 @@ class _EditReceiptDialog(QDialog):
         self._recompute()
 
     # ---- tests -----------------------------------------------------
-    def _has_results(self, item_id):
+    def _has_results(self, item_id) -> bool:
         """True if any result/culture row exists for this line item."""
         for tbl in ("results", "cultures"):
             if self.con.execute(
@@ -191,7 +191,7 @@ class _EditReceiptDialog(QDialog):
                 return True
         return False
 
-    def _refresh_table(self):
+    def _refresh_table(self) -> None:
         self.tbl.setRowCount(0)
         for i, c in enumerate(self.items):
             r = self.tbl.rowCount()
@@ -225,7 +225,7 @@ class _EditReceiptDialog(QDialog):
             wl.addWidget(btn, 0, Qt.AlignCenter)
             self.tbl.setCellWidget(r, 2, wrap)
 
-    def _remove(self, idx):
+    def _remove(self, idx: int) -> None:
         it = self.items[idx]
         if it["has_results"]:
             return
@@ -235,7 +235,7 @@ class _EditReceiptDialog(QDialog):
         self._refresh_table()
         self._recompute()
 
-    def _search_tests(self, text):
+    def _search_tests(self, text: str) -> None:
         text = (text or "").strip()
         self.results.clear()
         if len(text) < 1:
@@ -255,7 +255,7 @@ class _EditReceiptDialog(QDialog):
             self.results.addItem(item)
         self.results.setVisible(bool(rows))
 
-    def _add_from_list(self, item):
+    def _add_from_list(self, item: QListWidgetItem | None) -> None:
         if item is None:
             return
         data = item.data(Qt.UserRole)
@@ -280,28 +280,28 @@ class _EditReceiptDialog(QDialog):
         self._recompute()
 
     # ---- money -----------------------------------------------------
-    def _subtotal(self):
+    def _subtotal(self) -> float:
         return round(sum(c["charge"] for c in self.items), 2)
 
-    def _net(self):
+    def _net(self) -> float:
         # round to whole paisa so a discount can't leave a sub-cent "phantom due"
         sub = self._subtotal()
         return round(max(0.0, sub - sub * self.discount.value() / 100.0), 2)
 
-    def _recompute(self):
+    def _recompute(self) -> None:
         self.sub_lbl.setText(money(self._subtotal(), self.cur))
         net = self._net()
         due = round(max(0.0, net - self.paid.value()), 2)
         self.net_lbl.setText(money(net, self.cur))
         self.due_lbl.setText(money(due, self.cur))
 
-    def _try_accept(self):
+    def _try_accept(self) -> None:
         if not self.items:
             QMessageBox.warning(self, "Edit bill", "A bill must have at least one test.")
             return
         self.accept()
 
-    def values(self):
+    def values(self) -> dict:
         net = self._net()
         paid = round(self.paid.value(), 2)
         return {
@@ -317,11 +317,11 @@ class _EditReceiptDialog(QDialog):
 
 
 class ReceiptsPage(QWidget):
-    def __init__(self, con, user):
+    def __init__(self, con, user) -> None:
         super().__init__()
         self.con = con
         self.user = user
-        self._ids = []
+        self._ids: list = []
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -329,7 +329,7 @@ class ReceiptsPage(QWidget):
         header, self.sub = page_header("Receipts / Reports", "All saved receipts")
         root.addWidget(header)
 
-        def _btn(text, slot):
+        def _btn(text: str, slot) -> QPushButton:
             b = QPushButton(text)
             b.setObjectName("ghost")
             b.setEnabled(False)
@@ -478,7 +478,7 @@ class ReceiptsPage(QWidget):
         root.addWidget(self.summary)
 
     # ---------------------------------------------------------------
-    def _date_edit(self):
+    def _date_edit(self) -> QDateEdit:
         """A calendar-popup date editor, defaulting to today, disabled until the
         'By date' filter is switched on."""
         d = QDateEdit()
@@ -489,7 +489,7 @@ class ReceiptsPage(QWidget):
         d.setMinimumHeight(40)
         return d
 
-    def _dates_toggled(self, on):
+    def _dates_toggled(self, on: bool) -> None:
         self.date_from.setEnabled(on)
         self.date_to.setEnabled(on)
         if on and self.today_only.isChecked():  # the two date filters are exclusive
@@ -498,12 +498,12 @@ class ReceiptsPage(QWidget):
             self.today_only.blockSignals(False)
         self.refresh()
 
-    def _today_toggled(self, on):
+    def _today_toggled(self, on: bool) -> None:
         if on and self.use_dates.isChecked():
             self.use_dates.setChecked(False)  # toggles off → disables the editors
         self.refresh()
 
-    def _date_clause(self):
+    def _date_clause(self) -> tuple[str | None, list]:
         """SQL fragment + args for the active date-range filter, else (None, [])."""
         if not self.use_dates.isChecked():
             return None, []
@@ -517,16 +517,16 @@ class ReceiptsPage(QWidget):
             [d1.toString("yyyy-MM-dd"), d2.addDays(1).toString("yyyy-MM-dd")],
         )
 
-    def on_show(self):
+    def on_show(self) -> None:
         self.refresh()
 
-    def apply_nav(self, today=False, dues=False, **_):
+    def apply_nav(self, today: bool = False, dues: bool = False, **_) -> None:
         """Called when navigated to from the dashboard."""
         self.today_only.setChecked(bool(today))
         self.dues_only.setChecked(bool(dues))
         self.refresh()
 
-    def refresh(self):
+    def refresh(self) -> None:
         q = like_term(self.search.text())
         sql = (
             "SELECT * FROM receipts WHERE (COALESCE(patient_name,'') LIKE ? ESCAPE '\\' "
@@ -576,10 +576,10 @@ class ReceiptsPage(QWidget):
         )
         self._update_buttons()
 
-    def _selected_id(self):
+    def _selected_id(self) -> int | None:
         return selected_id(self.table, self._ids)
 
-    def _update_buttons(self):
+    def _update_buttons(self) -> None:
         rid = self._selected_id()
         on = rid is not None
         voided = False
@@ -622,7 +622,7 @@ class ReceiptsPage(QWidget):
                 if (row["status"] or "") in REPORT_READY:
                     self.prev_rpt_btn.setEnabled(True)
 
-    def _show_row_menu(self, pos):
+    def _show_row_menu(self, pos) -> None:
         """Right-click menu on a receipt row. Mirrors the toolbar exactly: same
         labels, same enabled/disabled (greyed = not available yet) and the same
         role-based visibility — the buttons stay the single source of truth."""
@@ -653,11 +653,11 @@ class ReceiptsPage(QWidget):
             menu.exec(self.table.viewport().mapToGlobal(pos))
 
     # ---------------------------------------------------------------
-    def _lab_no(self, rid):
+    def _lab_no(self, rid: int) -> str:
         r = self.con.execute("SELECT lab_no FROM receipts WHERE id=?", (rid,)).fetchone()
         return r["lab_no"] if r and r["lab_no"] else f"#{rid}"
 
-    def _preview(self, kind):
+    def _preview(self, kind: str) -> None:
         """kind: 'report' or 'receipt'. Render to image pages natively and show
         them in the preview dialog — no PDF temp file, no QtPdf viewer."""
         rid = self._selected_id()
@@ -673,13 +673,13 @@ class ReceiptsPage(QWidget):
         db.log_audit(self.con, self.user["username"], "previewed_" + kind, labno)
         _PreviewDialog(pages, self, title).exec()
 
-    def preview(self):
+    def preview(self) -> None:
         self._preview("report")
 
-    def preview_receipt(self):
+    def preview_receipt(self) -> None:
         self._preview("receipt")
 
-    def _send_whatsapp(self, kind):
+    def _send_whatsapp(self, kind: str) -> None:
         rid = self._selected_id()
         if rid is None:
             return
@@ -700,13 +700,13 @@ class ReceiptsPage(QWidget):
             ),
         )
 
-    def whatsapp_receipt(self):
+    def whatsapp_receipt(self) -> None:
         self._send_whatsapp("receipt")
 
-    def whatsapp_report(self):
+    def whatsapp_report(self) -> None:
         self._send_whatsapp("report")
 
-    def _print(self, kind):
+    def _print(self, kind: str) -> None:
         """Render straight onto the printer (native, vector — no PDF round-trip)."""
         rid = self._selected_id()
         if rid is None:
@@ -720,13 +720,13 @@ class ReceiptsPage(QWidget):
         except Exception as e:  # noqa: BLE001
             QMessageBox.warning(self, "Print", f"Could not print:\n{e}")
 
-    def reprint(self):
+    def reprint(self) -> None:
         self._print("receipt")
 
-    def print_report(self):
+    def print_report(self) -> None:
         self._print("report")
 
-    def _save_pdf(self, kind):
+    def _save_pdf(self, kind: str) -> None:
         """Export the receipt or report to a PDF chosen by the user (background)."""
         rid = self._selected_id()
         if rid is None:
@@ -740,7 +740,7 @@ class ReceiptsPage(QWidget):
         export = report.export_receipt_pdf if kind == "receipt" else report.export_report_pdf
         clicked = self.pdf_rcpt_btn if kind == "receipt" else self.pdf_rpt_btn
 
-        def done(ok, result):
+        def done(ok: bool, result) -> None:
             if ok:
                 db.log_audit(
                     self.con, self.user["username"], "exported_pdf", f"{labno} {kind} → {path}"
@@ -753,13 +753,13 @@ class ReceiptsPage(QWidget):
             self, lambda con: export(con, rid, path), done, clicked=clicked, busy_text="Saving…"
         )
 
-    def save_receipt_pdf(self):
+    def save_receipt_pdf(self) -> None:
         self._save_pdf("receipt")
 
-    def save_report_pdf(self):
+    def save_report_pdf(self) -> None:
         self._save_pdf("report")
 
-    def receive_due(self):
+    def receive_due(self) -> None:
         rid = self._selected_id()
         if rid is None:
             return
@@ -782,7 +782,7 @@ class ReceiptsPage(QWidget):
         db.receive_due(self.con, rid, amount, self.user["username"])
         self.refresh()
 
-    def mark_delivered(self):
+    def mark_delivered(self) -> None:
         rid = self._selected_id()
         if rid is None:
             return
@@ -798,7 +798,7 @@ class ReceiptsPage(QWidget):
         db.log_audit(self.con, self.user["username"], "report_delivered", r["lab_no"] or f"#{rid}")
         self.refresh()
 
-    def edit_receipt(self):
+    def edit_receipt(self) -> None:
         if not self._can_edit_bill:
             return
         rid = self._selected_id()
@@ -884,7 +884,7 @@ class ReceiptsPage(QWidget):
         )
         self.refresh()
 
-    def void_receipt(self):
+    def void_receipt(self) -> None:
         if not can(self.user["role"], "delete"):
             return  # defence in depth — voiding is an admin action
         rid = self._selected_id()
@@ -933,7 +933,7 @@ class ReceiptsPage(QWidget):
         )
         self.refresh()
 
-    def export_csv(self):
+    def export_csv(self) -> None:
         import csv
 
         path, _ = QFileDialog.getSaveFileName(
@@ -942,7 +942,7 @@ class ReceiptsPage(QWidget):
         if not path:
             return
 
-        def _safe(item):
+        def _safe(item: QTableWidgetItem | None) -> str:
             # neutralise spreadsheet formula injection: a cell a spreadsheet would
             # treat as a formula (leading = + - @ tab CR) is prefixed with a quote
             s = item.text() if item else ""
