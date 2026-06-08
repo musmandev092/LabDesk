@@ -593,7 +593,7 @@ class ReceptionPage(QWidget):
         pay_method = self.payment_method.currentText()
         optout = 0 if self.wa_consent.isChecked() else 1
         prefix = db.get_setting(c, "lab_no_prefix", "LAB")
-        datestr = c.execute("SELECT strftime('%Y-%m-%d','now','localtime')").fetchone()[0]
+        datestr = c.execute("SELECT strftime('%Y%m%d','now','localtime')").fetchone()[0]
         consent_at = c.execute("SELECT datetime('now','localtime')").fetchone()[0]
         # The whole write is one transaction: if anything fails we roll back so a
         # half-saved bill can never exist (nothing charged), and we surface it.
@@ -626,7 +626,7 @@ class ReceptionPage(QWidget):
             # today for this prefix — NOT COUNT(*), which regresses (and triggers
             # a retry storm) if a receipt is ever removed — then bump on the
             # UNIQUE guard (ux_receipts_labno) so two terminals can't collide.
-            serial_prefix = f"{prefix}_{datestr}_"
+            serial_prefix = f"{prefix}-{datestr}-"
             like = (serial_prefix.replace("\\", "\\\\")
                     .replace("%", "\\%").replace("_", "\\_") + "%")
             top = c.execute(
@@ -637,7 +637,7 @@ class ReceptionPage(QWidget):
             base = (top or 0) + 1
             lab_no = None
             for bump in range(500):
-                cand = f"{prefix}_{datestr}_{base + bump:03d}"
+                cand = f"{prefix}-{datestr}-{base + bump:03d}"
                 try:
                     c.execute("UPDATE receipts SET lab_no=?, case_no=? WHERE id=?", (cand, cand, rid))
                     lab_no = cand

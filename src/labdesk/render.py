@@ -429,7 +429,7 @@ def build_receipt(con, receipt_id: int, device=None, images=False):
         d.text(tx, cy, 130, 4, line, addr_f, MUTED)
         cy += 3.9
     # right: CASH RECEIPT title + meta
-    h2 = _font(13, bold=True, spacing_px=1.0)
+    h2 = _font(11, bold=True, spacing_px=1.0)
     d.text(x0, y, d.content_w, 7, "CASH RECEIPT", h2, TEAL, Qt.AlignRight | Qt.AlignTop)
     meta_f = _font(9)
     d.text(x0, y + 7.5, d.content_w, 5, f"Date: {(r['received_at'] or '')[:16]}", meta_f, MUTED,
@@ -443,8 +443,8 @@ def build_receipt(con, receipt_id: int, device=None, images=False):
     logo_path = (g("logo_path") or "").strip()
     if logo_path and Path(logo_path).exists():
         header_h = max(cy, ry) - y
-        logo_y = y + max(0.0, (header_h - px(40)) / 2)
-        d.image(x0, logo_y, logo_path, 40, center_w=d.content_w)
+        logo_y = y + max(0.0, (header_h - px(48)) / 2)
+        d.image(x0, logo_y, logo_path, 48, center_w=d.content_w)
     header_bottom = max(cy, ry, y + 16) + 1.5
     d.hline(x0, header_bottom, d.content_w, TEAL, 2)
     y = header_bottom + 5
@@ -500,8 +500,7 @@ def build_receipt(con, receipt_id: int, device=None, images=False):
     ry = ny + wh + 6
     rem_lbl = _font(8.5, bold=True)
     rem_f = _font(8.5)
-    rem_txt = ("Please present this receipt to collect your report. Reports are issued "
-               "strictly following final verification and signature by the consultant pathologist.")
+    rem_txt = g("receipt_remarks")          # lab-editable in Settings → Receipt footer
     d.text(x0, ry, notes_w, 4, "Remarks:", rem_lbl, MUTED)
     d.text(x0, ry + 4, notes_w, 30, rem_txt, rem_f, MUTED, Qt.AlignLeft | Qt.AlignTop, wrap=True)
 
@@ -538,7 +537,7 @@ def build_receipt(con, receipt_id: int, device=None, images=False):
     ffi = _font(8)
     d.text(x0, fy + 1.5, d.content_w, 5, f"{g('lab_name')} © {year}", ff, MUTED,
            Qt.AlignLeft | Qt.AlignVCenter)
-    d.text(x0, fy + 1.5, d.content_w, 5, "Computer-generated document. No signature required.",
+    d.text(x0, fy + 1.5, d.content_w, 5, g("receipt_footer_note"),  # lab-editable in Settings
            ffi, MUTED, Qt.AlignRight | Qt.AlignVCenter)
     return d.tobytes()
 
@@ -580,8 +579,8 @@ def _report_letterhead(d: Doc, g, x0, y):
     lp = (g("logo_path") or "").strip()
     if lp and Path(lp).exists():
         header_h = max(cy, ry) - y
-        logo_y = y + max(0.0, (header_h - px(40)) / 2)
-        d.image(x0, logo_y, lp, 40, center_w=d.content_w)
+        logo_y = y + max(0.0, (header_h - px(48)) / 2)
+        d.image(x0, logo_y, lp, 48, center_w=d.content_w)
     bottom = max(cy, ry, y + 16) + 2.5
     d.hline(x0, bottom, d.content_w, TEAL, 2)
     return bottom + 0.5
