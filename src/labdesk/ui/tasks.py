@@ -12,6 +12,7 @@ Notes that make this safe:
     page / window was closed while the work was still running;
   * the worker never raises out of run() (a crash there would take the app down).
 """
+
 from __future__ import annotations
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal
@@ -46,7 +47,7 @@ class _Runnable(QRunnable):
         ok, result = False, "Something went wrong."
         con = None
         try:
-            con = db.connect()                 # fresh connection owned by THIS thread
+            con = db.connect()  # fresh connection owned by THIS thread
             result = self._work(con)
             ok = True
         except Exception as e:
@@ -80,7 +81,7 @@ def run_in_background(parent, work, on_done, *, clicked=None, lock=(), busy_text
         clicked.setText(busy_text)
 
     task = _Runnable(work)
-    task.setAutoDelete(False)   # we manage its lifetime via _active
+    task.setAutoDelete(False)  # we manage its lifetime via _active
     _active.add(task)
 
     def _finished(ok, result):
@@ -103,12 +104,13 @@ def run_in_background(parent, work, on_done, *, clicked=None, lock=(), busy_text
             except Exception:
                 pass
 
-    task.signals.done.connect(_finished)   # cross-thread → queued onto the UI thread
+    task.signals.done.connect(_finished)  # cross-thread → queued onto the UI thread
     QThreadPool.globalInstance().start(task)
 
 
-def build_pdf(parent, build, on_ready, *, clicked=None, lock=(),
-              busy_text="Working…", error_title="Document"):
+def build_pdf(
+    parent, build, on_ready, *, clicked=None, lock=(), busy_text="Working…", error_title="Document"
+):
     """Build something (usually PDF bytes) via ``build(con)`` off the UI thread,
     then call ``on_ready(result)`` on success. On failure, show one uniform
     warning dialog — saves every caller repeating the ok/error branch."""
@@ -116,8 +118,7 @@ def build_pdf(parent, build, on_ready, *, clicked=None, lock=(),
 
     def _done(ok, result):
         if not ok:
-            QMessageBox.warning(parent, error_title,
-                                f"Could not prepare the document:\n{result}")
+            QMessageBox.warning(parent, error_title, f"Could not prepare the document:\n{result}")
             return
         on_ready(result)
 

@@ -9,6 +9,7 @@ embedded in the PDF. The HTML builders below are retained for content tests and
 are not used for rendering. Printing paints straight onto the QPrinter (vector,
 no QtPdf round-trip); preview renders to image pages (no QtPdf viewer).
 """
+
 from __future__ import annotations
 
 import html
@@ -21,18 +22,18 @@ from . import db, render
 # ---------------------------------------------------------------------------
 # palette — matches the supplied design mockups
 # ---------------------------------------------------------------------------
-TEAL = "#005f73"          # report --brand-primary
-TEAL_DARK = "#004d5c"     # highlighted CURRENT column
-ACCENT = "#0a9396"        # report departments line
-SLATE = "#005f73"         # receipt --brand-primary
-BLUE = "#0a9396"          # receipt --brand-accent
+TEAL = "#005f73"  # report --brand-primary
+TEAL_DARK = "#004d5c"  # highlighted CURRENT column
+ACCENT = "#0a9396"  # report departments line
+SLATE = "#005f73"  # receipt --brand-primary
+BLUE = "#0a9396"  # receipt --brand-accent
 GREEN = "#059669"
-AMBER = "#d97706"         # below range ↓
-RED = "#dc2626"           # above range ↑
+AMBER = "#d97706"  # below range ↓
+RED = "#dc2626"  # above range ↑
 BODY = "#1e293b"
 
-ARROW_UP = "↑"            # above reference range (High)
-ARROW_DOWN = "↓"          # below reference range (Low)
+ARROW_UP = "↑"  # above reference range (High)
+ARROW_DOWN = "↓"  # below reference range (Low)
 
 ASSETS = Path(__file__).with_name("assets")
 INTER_TTF = ASSETS / "fonts" / "Inter.ttf"
@@ -49,8 +50,8 @@ def _method_block(head) -> str:
     if not head or not head["method_note"]:
         return ""
     note = head["method_note"].replace("\r", "")
-    note = re.sub(r"[ \t]*\n[ \t]*\n+", "\n", note)   # collapse blank lines
-    note = re.sub(r"[ \t]{2,}", " ", note).strip()    # collapse runs of spaces
+    note = re.sub(r"[ \t]*\n[ \t]*\n+", "\n", note)  # collapse blank lines
+    note = re.sub(r"[ \t]{2,}", " ", note).strip()  # collapse runs of spaces
     return f"<div class='method'><b>Method / Comments:</b> {_esc(note)}</div>"
 
 
@@ -59,8 +60,9 @@ def _remarks_block(text) -> str:
     text = (text or "").strip()
     if not text:
         return ""
-    return (f"<div class='remarks-box'><b>Remarks:</b> "
-            f"{_esc(text).replace(chr(10), '<br>')}</div>")
+    return (
+        f"<div class='remarks-box'><b>Remarks:</b> " f"{_esc(text).replace(chr(10), '<br>')}</div>"
+    )
 
 
 def _file_url(p: str | Path) -> str:
@@ -84,9 +86,7 @@ def _user_display(con, username: str) -> str:
     username = (username or "").strip()
     if not username:
         return ""
-    row = con.execute(
-        "SELECT full_name FROM users WHERE username=?", (username,)
-    ).fetchone()
+    row = con.execute("SELECT full_name FROM users WHERE username=?", (username,)).fetchone()
     full = (row["full_name"] if row and row["full_name"] else "").strip()
     return full or username
 
@@ -111,9 +111,11 @@ def _resolve_ref(res, sex: str = "") -> tuple[str, str]:
     if sx.startswith("f") and f:
         return _esc(f), f
     if m and f and m != f:
-        disp = (f"<span style='color:{TEAL_DARK};'>M:</span> {_esc(m)}<br>"
-                f"<span style='color:{TEAL_DARK};'>F:</span> {_esc(f)}")
-        return disp, ""          # ambiguous — show both, flag against neither
+        disp = (
+            f"<span style='color:{TEAL_DARK};'>M:</span> {_esc(m)}<br>"
+            f"<span style='color:{TEAL_DARK};'>F:</span> {_esc(f)}"
+        )
+        return disp, ""  # ambiguous — show both, flag against neither
     one = m or f
     if one:
         return _esc(one), one
@@ -180,9 +182,28 @@ def _fmt_date(iso: str) -> str:
 # ---------------------------------------------------------------------------
 # amount in words (Pakistani numbering)
 # ---------------------------------------------------------------------------
-_ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
-         "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen",
-         "Eighteen", "Nineteen"]
+_ONES = [
+    "",
+    "One",
+    "Two",
+    "Three",
+    "Four",
+    "Five",
+    "Six",
+    "Seven",
+    "Eight",
+    "Nine",
+    "Ten",
+    "Eleven",
+    "Twelve",
+    "Thirteen",
+    "Fourteen",
+    "Fifteen",
+    "Sixteen",
+    "Seventeen",
+    "Eighteen",
+    "Nineteen",
+]
 _TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"]
 
 
@@ -225,18 +246,26 @@ def _amount_in_words(amount) -> str:
 # Shared header data
 # ---------------------------------------------------------------------------
 def _contacts(g) -> str:
-    return " | ".join(x for x in [
-        f"Ph: {_esc(g('phone'))}" if g("phone") else "",
-        f"Mob: {_esc(g('mobile'))}" if g("mobile") else "",
-        _esc(g("email")) if g("email") else "",
-    ] if x)
+    return " | ".join(
+        x
+        for x in [
+            f"Ph: {_esc(g('phone'))}" if g("phone") else "",
+            f"Mob: {_esc(g('mobile'))}" if g("mobile") else "",
+            _esc(g("email")) if g("email") else "",
+        ]
+        if x
+    )
 
 
 def _regs(g) -> str:
-    return " | ".join(x for x in [
-        f"PHC Reg #: {_esc(g('phc_reg_no'))}" if g("phc_reg_no") else "",
-        f"Lab Reg #: {_esc(g('lab_reg_no'))}" if g("lab_reg_no") else "",
-    ] if x)
+    return " | ".join(
+        x
+        for x in [
+            f"PHC Reg #: {_esc(g('phc_reg_no'))}" if g("phc_reg_no") else "",
+            f"Lab Reg #: {_esc(g('lab_reg_no'))}" if g("lab_reg_no") else "",
+        ]
+        if x
+    )
 
 
 def _patient_pairs(r, *, include_reporting: bool = True):
@@ -260,7 +289,7 @@ def _patient_pairs(r, *, include_reporting: bool = True):
     # reporting time (blank → renders as "—"). The cash receipt (a billing doc)
     # omits the field entirely via include_reporting=False.
     if include_reporting:
-        rep_raw = (r["reported_at"] if "reported_at" in r.keys() and r["reported_at"] else "")
+        rep_raw = r["reported_at"] if "reported_at" in r.keys() and r["reported_at"] else ""
         pairs.append(("Reporting Date", rep_raw[:16]))
     return pairs
 
@@ -288,9 +317,11 @@ def _history_for_item(con, item, receipt):
     rid = receipt["id"]
     conds, params = [], []
     if mr.strip():
-        conds.append("rc.mr_no = ?"); params.append(mr)
+        conds.append("rc.mr_no = ?")
+        params.append(mr)
     if pid is not None:
-        conds.append("rc.patient_id = ?"); params.append(pid)
+        conds.append("rc.patient_id = ?")
+        params.append(pid)
     if not conds:
         return [], []
     # Only FINALISED, non-voided prior visits belong in the cumulative history:
@@ -300,28 +331,29 @@ def _history_for_item(con, item, receipt):
     # Over-fetch (LIMIT 8) then keep the newest 4 that actually carry values, so a
     # finalised visit that happened to leave this test blank can't crowd out a real
     # one or add an empty column.
-    q = (f"""SELECT ri.id AS item_id, rc.received_at AS dt
+    q = f"""SELECT ri.id AS item_id, rc.received_at AS dt
              FROM receipt_items ri JOIN receipts rc ON rc.id = ri.receipt_id
              WHERE ri.test_id = ? AND rc.id != ? AND ({' OR '.join(conds)})
                AND (rc.received_at < ? OR (rc.received_at = ? AND rc.id < ?))
                AND {db.NOT_VOIDED}
                AND rc.status IN ('reported', 'delivered')
-             ORDER BY rc.received_at DESC, rc.id DESC LIMIT 8""")
+             ORDER BY rc.received_at DESC, rc.id DESC LIMIT 8"""
     rows = con.execute(q, [item["test_id"], rid, *params, received, received, rid]).fetchall()
     labels, maps = [], []
-    for row in rows:                      # newest → oldest from SQL
+    for row in rows:  # newest → oldest from SQL
         vals = con.execute(
             "SELECT parameter_id, value FROM results WHERE receipt_item_id=?",
             (row["item_id"],),
         ).fetchall()
         vmap = {v["parameter_id"]: v["value"] for v in vals if v["value"]}
         if not vmap:
-            continue                      # no entered values → no empty column
+            continue  # no entered values → no empty column
         labels.append((row["dt"] or "")[:10])
         maps.append(vmap)
         if len(maps) == 4:
             break
-    labels.reverse(); maps.reverse()      # oldest → newest, left to right
+    labels.reverse()
+    maps.reverse()  # oldest → newest, left to right
     return labels, maps
 
 
@@ -331,7 +363,7 @@ def _value_cell(value, ref, *, current=False):
         return '<td style="color:#94a3b8;">—</td>'
     arrow = _flag_arrow(value, ref)
     cls = f' class="{arrow[1]}"' if arrow else ""
-    arr = f' {arrow[0]}' if arrow else ""
+    arr = f" {arrow[0]}" if arrow else ""
     style = ' style="font-size:1.1em;"' if current else ""
     return f"<td{cls}{style}>{_esc(value)}{arr}</td>"
 
@@ -353,9 +385,11 @@ def _report_section(con, item, sex, receipt) -> str:
 
     prev_ths = "".join(f"<th>{_fmt_date(l)}</th>" for l in hist_labels)
     cur_date = _fmt_date((receipt["received_at"] or "")[:10])
-    thead = (f"<tr><th class='test'>Test</th><th>Reference Range</th><th>Unit</th>"
-             f"{prev_ths}<th class='cur'>Current<br>"
-             f"<span style='font-weight:400;font-size:.85em;'>{cur_date}</span></th></tr>")
+    thead = (
+        f"<tr><th class='test'>Test</th><th>Reference Range</th><th>Unit</th>"
+        f"{prev_ths}<th class='cur'>Current<br>"
+        f"<span style='font-weight:400;font-size:.85em;'>{cur_date}</span></th></tr>"
+    )
 
     rows = []
     for res in results:
@@ -365,7 +399,7 @@ def _report_section(con, item, sex, receipt) -> str:
             rows.append(f"<tr class='subhead'><td colspan='{ncols}'>{_esc(res['name'])}</td></tr>")
             continue
         name = (res["name"] or "").strip()
-        val = (str(res["value"]).strip() if res["value"] is not None else "")
+        val = str(res["value"]).strip() if res["value"] is not None else ""
         if not name and not val:
             continue  # skip blank filler rows (legacy padding parameters)
         ref_disp, ref_flag = _resolve_ref(res, sex)
@@ -378,14 +412,18 @@ def _report_section(con, item, sex, receipt) -> str:
             f"<td class='unit'>{_esc(res['units'])}</td>{prev}{cur}</tr>"
         )
     if not rows:
-        rows.append(f"<tr><td colspan='{ncols}' style='color:#999;'><i>No result entered.</i></td></tr>")
+        rows.append(
+            f"<tr><td colspan='{ncols}' style='color:#999;'><i>No result entered.</i></td></tr>"
+        )
 
     method = _method_block(head)
     remarks = _remarks_block(item["remarks"] if "remarks" in item.keys() else "")
 
-    return (f"<div class='title-bar'>{_esc(title)}</div>"
-            f"<table class='report'><thead>{thead}</thead><tbody>{''.join(rows)}</tbody></table>"
-            f"{remarks}{method}")
+    return (
+        f"<div class='title-bar'>{_esc(title)}</div>"
+        f"<table class='report'><thead>{thead}</thead><tbody>{''.join(rows)}</tbody></table>"
+        f"{remarks}{method}"
+    )
 
 
 def _culture_section(con, item) -> str:
@@ -398,19 +436,28 @@ def _culture_section(con, item) -> str:
         "SELECT * FROM cultures WHERE receipt_item_id=? ORDER BY id DESC LIMIT 1", (item["id"],)
     ).fetchone()
     if not cur:
-        return (f"<div class='title-bar'>{_esc(title)}</div>"
-                "<table class='report'><tbody><tr><td style='color:#999;'>"
-                "<i>No culture result entered.</i></td></tr></tbody></table>")
+        return (
+            f"<div class='title-bar'>{_esc(title)}</div>"
+            "<table class='report'><tbody><tr><td style='color:#999;'>"
+            "<i>No culture result entered.</i></td></tr></tbody></table>"
+        )
     findings = []
-    for label, val in (("Specimen", cur["specimen"]), ("Growth", cur["growth"]),
-                       ("Organism", cur["organism"]), ("Colony count", cur["colony_count"]),
-                       ("Gram stain", cur["gram_stain"]), ("ZN stain", cur["zn_stain"])):
+    for label, val in (
+        ("Specimen", cur["specimen"]),
+        ("Growth", cur["growth"]),
+        ("Organism", cur["organism"]),
+        ("Colony count", cur["colony_count"]),
+        ("Gram stain", cur["gram_stain"]),
+        ("ZN stain", cur["zn_stain"]),
+    ):
         if val:
             findings.append(
                 f"<tr><td class='test' style='width:30%;'>{_esc(label)}</td>"
-                f"<td style='text-align:left;'>{_esc(val)}</td></tr>")
-    findings_tbl = (f"<table class='report'><tbody>{''.join(findings)}</tbody></table>"
-                    if findings else "")
+                f"<td style='text-align:left;'>{_esc(val)}</td></tr>"
+            )
+    findings_tbl = (
+        f"<table class='report'><tbody>{''.join(findings)}</tbody></table>" if findings else ""
+    )
 
     sens = con.execute(
         "SELECT antibiotic, result FROM culture_sensitivity WHERE culture_id=? ORDER BY antibiotic",
@@ -429,15 +476,18 @@ def _culture_section(con, item) -> str:
         sens_tbl = (
             "<table class='report' style='margin-top:3mm;'><thead><tr>"
             "<th class='test'>Antibiotic</th><th>Sensitivity</th></tr></thead>"
-            f"<tbody>{rows}</tbody></table>")
+            f"<tbody>{rows}</tbody></table>"
+        )
 
     rk = item.keys()
-    rem_txt = ((item["remarks"] if "remarks" in rk else "") or "").strip() or \
-              ((cur["remarks"] or "").strip() if "remarks" in cur.keys() else "")
+    rem_txt = ((item["remarks"] if "remarks" in rk else "") or "").strip() or (
+        (cur["remarks"] or "").strip() if "remarks" in cur.keys() else ""
+    )
     remarks = _remarks_block(rem_txt)
     method = _method_block(head)
-    return (f"<div class='title-bar'>{_esc(title)}</div>"
-            f"{findings_tbl}{sens_tbl}{remarks}{method}")
+    return (
+        f"<div class='title-bar'>{_esc(title)}</div>" f"{findings_tbl}{sens_tbl}{remarks}{method}"
+    )
 
 
 def _signatures(con) -> str:
@@ -458,8 +508,10 @@ def _signatures(con) -> str:
 # ---------------------------------------------------------------------------
 def _font_face() -> str:
     if INTER_TTF.exists():
-        return (f"@font-face{{font-family:'Inter';src:url('{_file_url(INTER_TTF)}');"
-                "font-weight:100 900;font-style:normal;}")
+        return (
+            f"@font-face{{font-family:'Inter';src:url('{_file_url(INTER_TTF)}');"
+            "font-weight:100 900;font-style:normal;}"
+        )
     return ""
 
 
@@ -573,8 +625,10 @@ table.tot .net td{border-top:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1;
 
 
 def _doc(css_body: str, body: str) -> str:
-    return (f"<!DOCTYPE html><html><head><meta charset='utf-8'><style>"
-            f"{_font_face()}{css_body}</style></head><body>{body}</body></html>")
+    return (
+        f"<!DOCTYPE html><html><head><meta charset='utf-8'><style>"
+        f"{_font_face()}{css_body}</style></head><body>{body}</body></html>"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -678,9 +732,12 @@ def build_receipt_html(con, receipt_id: int) -> str:
         f"<tr><td class='lbl'>Paid:</td><td class='val'>{paid:,.2f}</td></tr>"
         f"<tr><td class='lbl' style='color:{due_col};'>Balance:</td>"
         f"<td class='val' style='color:{due_col};'>{_esc(cur)} {due:,.2f}</td></tr>"
-        + (f"<tr><td class='lbl' style='color:{GREEN};'>Change returned:</td>"
-           f"<td class='val' style='color:{GREEN};'>{_esc(cur)} {change:,.2f}</td></tr>"
-           if change > 0 else "")
+        + (
+            f"<tr><td class='lbl' style='color:{GREEN};'>Change returned:</td>"
+            f"<td class='val' style='color:{GREEN};'>{_esc(cur)} {change:,.2f}</td></tr>"
+            if change > 0
+            else ""
+        )
         + "</table></div></div>"
     )
     note = g("receipt_footer_note")
@@ -733,7 +790,8 @@ def _make_printer(parent, title, printer_name):
     """Build a QPrinter: send to the configured default if it still exists, else
     show the print dialog. Returns None if the user cancels."""
     from PySide6.QtGui import QPageSize
-    from PySide6.QtPrintSupport import QPrinter, QPrintDialog, QPrinterInfo
+    from PySide6.QtPrintSupport import QPrintDialog, QPrinter, QPrinterInfo
+
     printer = QPrinter(QPrinter.HighResolution)
     printer.setPageSize(QPageSize(QPageSize.A4))
     printer.setFullPage(True)
@@ -763,13 +821,25 @@ def print_doc(con, receipt_id, kind, parent, title, printer_name="") -> None:
 
 
 def print_report(con, receipt_id: int, parent=None) -> None:
-    print_doc(con, receipt_id, "report", parent, "Print Report",
-              db.get_setting(con, "default_printer", ""))
+    print_doc(
+        con,
+        receipt_id,
+        "report",
+        parent,
+        "Print Report",
+        db.get_setting(con, "default_printer", ""),
+    )
 
 
 def print_receipt(con, receipt_id: int, parent=None) -> None:
-    print_doc(con, receipt_id, "receipt", parent, "Print Receipt",
-              db.get_setting(con, "default_printer", ""))
+    print_doc(
+        con,
+        receipt_id,
+        "receipt",
+        parent,
+        "Print Receipt",
+        db.get_setting(con, "default_printer", ""),
+    )
 
 
 def print_test_page(parent=None, printer_name: str = "") -> None:
@@ -779,6 +849,7 @@ def print_test_page(parent=None, printer_name: str = "") -> None:
 
 def save_report_pdf(con, receipt_id: int, parent=None) -> str | None:
     from PySide6.QtWidgets import QFileDialog
+
     r = con.execute("SELECT lab_no FROM receipts WHERE id=?", (receipt_id,)).fetchone()
     default = f"{(r['lab_no'] if r else 'report')}.pdf"
     path, _ = QFileDialog.getSaveFileName(parent, "Save report PDF", default, "PDF (*.pdf)")

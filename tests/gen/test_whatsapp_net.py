@@ -5,24 +5,22 @@ recipient_ready, check_status, send_pdf, send_text, send_report, send_receipt.
 No real network (urllib is patched by run_gen); no live DB (isolated). Every
 gateway behaviour is simulated via t.SCN modes. Targets ~2500+ cases.
 """
+
 from __future__ import annotations
-
-from pathlib import Path
-
 
 # Transport-level error modes that abort *before* any body is read. Each maps to
 # the user-facing keyword the friendly error must surface, and the verdict.
 # For send_* these are always (False, keyword). check_status maps a couple
 # differently (HTTP 401/403 -> token), handled separately below.
 TRANSPORT = {
-    "down":            "could not reach",
-    "refused_raw":     "could not reach",
-    "no_internet":     "host not found",
+    "down": "could not reach",
+    "refused_raw": "could not reach",
+    "no_internet": "host not found",
     "timeout_wrapped": "timed out",
-    "timeout_raw":     "timed out",
-    "unauthorized":    "token",          # HTTP 401
-    "forbidden":       "token",          # HTTP 403
-    "notfound":        "http 404",       # HTTP 404
+    "timeout_raw": "timed out",
+    "unauthorized": "token",  # HTTP 401
+    "forbidden": "token",  # HTTP 403
+    "notfound": "http 404",  # HTTP 404
     "server_error_session": "isn't linked",  # HTTP 500 w/ "user is not logged in"
 }
 
@@ -32,7 +30,7 @@ def _setup(t):
     con = t.con
     db.set_setting(con, "whatsapp_url", "http://localhost:8080")
     db.set_setting(con, "whatsapp_country_code", "92")
-    db.set_setting(con, "whatsapp_api_key", "")          # force secret path
+    db.set_setting(con, "whatsapp_api_key", "")  # force secret path
     db.set_secret("whatsapp_api_key", "tok")
 
 
@@ -44,8 +42,14 @@ def register(t):
 
     # ---------------------------------------------------------------- config
     t.section("config_ready across url/token presence")
-    URLS = ["", "http://localhost:8080", "https://gw.example.com:8443",
-            "http://10.0.0.5:8080", "garbage", "ftp://x"]
+    URLS = [
+        "",
+        "http://localhost:8080",
+        "https://gw.example.com:8443",
+        "http://10.0.0.5:8080",
+        "garbage",
+        "ftp://x",
+    ]
     TOKS = ["", "tok", "abc123", "  "]
     for url in URLS:
         for tok in TOKS:
@@ -71,15 +75,13 @@ def register(t):
     db.set_setting(con, "whatsapp_url", "http://localhost:8080")
     db.set_secret("whatsapp_api_key", "tok")
     # valid recipients across phone forms
-    GOOD = ["03001234567", "0300 123 4567", "+923001234567", "923001234567",
-            "0333-9876543"]
+    GOOD = ["03001234567", "0300 123 4567", "+923001234567", "923001234567", "0333-9876543"]
     for ph in GOOD:
         rid = t.make_receipt(phone=ph)
         ok, msg = wa.recipient_ready(con, rid)
         t.check(ok, f"recipient_ready good phone {ph!r}")
         t.eq(msg, "", f"recipient_ready good -> blank {ph!r}")
-    BAD = ["", "12", "0421234567", "abcdefg", "00000000000", "0300123",
-           "030012345678", None]
+    BAD = ["", "12", "0421234567", "abcdefg", "00000000000", "0300123", "030012345678", None]
     for ph in BAD:
         rid = t.make_receipt(phone=(ph if ph is not None else ""))
         ok, msg = wa.recipient_ready(con, rid)
@@ -98,7 +100,8 @@ def register(t):
     # repeat each scenario block to build volume + prove idempotence
     REPS = 12
     for _ in range(REPS):
-        t.SCN.clear(); t.SCN["mode"] = "ok"
+        t.SCN.clear()
+        t.SCN["mode"] = "ok"
         t.SCN["status"] = {"connected": True, "loggedIn": True}
         ok, m = wa.check_status(con)
         t.check(ok, "check_status linked -> ok")
@@ -123,7 +126,8 @@ def register(t):
     # transport failure modes for check_status
     for _ in range(REPS):
         for mode, kw in TRANSPORT.items():
-            t.SCN.clear(); t.SCN["mode"] = mode
+            t.SCN.clear()
+            t.SCN["mode"] = mode
             ok, m = wa.check_status(con)
             t.check(not ok, f"check_status {mode} -> not ok")
             if mode == "notfound":
@@ -134,7 +138,8 @@ def register(t):
                 t.has(m, "http 500", f"check_status {mode} msg")
             else:
                 t.has(m, kw, f"check_status {mode} msg kw")
-    t.SCN.clear(); t.SCN["mode"] = "ok"
+    t.SCN.clear()
+    t.SCN["mode"] = "ok"
 
     # missing config short-circuits before any network
     db.set_setting(con, "whatsapp_url", "")
@@ -164,11 +169,13 @@ def register(t):
     # transport modes -> always (False, keyword). Repeated for volume.
     for _ in range(40):
         for mode, kw in TRANSPORT.items():
-            t.SCN.clear(); t.SCN["mode"] = mode
+            t.SCN.clear()
+            t.SCN["mode"] = mode
             ok, m = wa.send_pdf(con, NUM, DUMMY, "cap")
             t.eq(ok, False, f"send_pdf {mode} ok=False")
             t.has(m, kw, f"send_pdf {mode} msg kw")
-    t.SCN.clear(); t.SCN["mode"] = "ok"
+    t.SCN.clear()
+    t.SCN["mode"] = "ok"
 
     # body-driven success/failure determination on a 2xx transport.
     # Model the source logic precisely.
@@ -187,17 +194,23 @@ def register(t):
         (200, '{"code":200}', True, "sent to"),
         (200, '{"code":201}', True, "sent to"),
         (200, '{"code":500}', False, "could not send"),
-        (200, '{"code":"bad"}', False, "did not confirm"),   # success None, 2xx, json -> True? see note
-        (200, 'plain text ok', False, "did not confirm"),     # 2xx opaque text -> unconfirmed
-        (200, 'not connected', False, "isn't linked"),        # not_linked phrase in plain text
-        (404, 'not found', False, "http 404"),
-        (502, 'bad gateway', False, "http 502"),
+        (
+            200,
+            '{"code":"bad"}',
+            False,
+            "did not confirm",
+        ),  # success None, 2xx, json -> True? see note
+        (200, "plain text ok", False, "did not confirm"),  # 2xx opaque text -> unconfirmed
+        (200, "not connected", False, "isn't linked"),  # not_linked phrase in plain text
+        (404, "not found", False, "http 404"),
+        (502, "bad gateway", False, "http 502"),
     ]
     # Recompute expectations from the source algorithm to avoid hand-error.
     for _ in range(20):
         for status, body, exp_ok, kw in BODY_CASES:
             exp_ok2, kw2 = _expect_send(status, body)
-            t.SCN.clear(); t.SCN["mode"] = "ok"
+            t.SCN.clear()
+            t.SCN["mode"] = "ok"
             t.SCN["send_status"] = status
             t.SCN["send_body"] = body
             ok, m = wa.send_pdf(con, NUM, DUMMY, "cap")
@@ -206,8 +219,10 @@ def register(t):
             # success path always names the recipient number
             if exp_ok2:
                 t.has(m, NUM, f"send_pdf success names number body={body!r}")
-    t.SCN.clear(); t.SCN["mode"] = "ok"
-    t.SCN.pop("send_status", None); t.SCN.pop("send_body", None)
+    t.SCN.clear()
+    t.SCN["mode"] = "ok"
+    t.SCN.pop("send_status", None)
+    t.SCN.pop("send_body", None)
 
     # send_pdf input guards (no network reached)
     t.section("send_pdf input guards")
@@ -242,7 +257,8 @@ def register(t):
     db.set_secret("whatsapp_api_key", "tok")
     for _ in range(40):
         for mode, kw in TRANSPORT.items():
-            t.SCN.clear(); t.SCN["mode"] = mode
+            t.SCN.clear()
+            t.SCN["mode"] = mode
             ok, m = wa.send_text(con, NUM, "hi")
             t.eq(ok, False, f"send_text {mode} ok=False")
             # send_text maps notfound/server_error_session differently than send_pdf:
@@ -253,12 +269,14 @@ def register(t):
                 t.has(m, "http 500", f"send_text {mode} msg")
             else:
                 t.has(m, kw, f"send_text {mode} msg kw")
-    t.SCN.clear(); t.SCN["mode"] = "ok"
+    t.SCN.clear()
+    t.SCN["mode"] = "ok"
 
     for _ in range(20):
         for status, body, _eo, _kw in BODY_CASES:
             exp_ok, kw = _expect_send(status, body, text=True)
-            t.SCN.clear(); t.SCN["mode"] = "ok"
+            t.SCN.clear()
+            t.SCN["mode"] = "ok"
             t.SCN["send_status"] = status
             t.SCN["send_body"] = body
             ok, m = wa.send_text(con, NUM, "hi")
@@ -266,8 +284,10 @@ def register(t):
             t.has(m, kw, f"send_text body={body!r} status={status} kw")
             if exp_ok:
                 t.has(m, "test message sent", f"send_text success phrasing body={body!r}")
-    t.SCN.clear(); t.SCN["mode"] = "ok"
-    t.SCN.pop("send_status", None); t.SCN.pop("send_body", None)
+    t.SCN.clear()
+    t.SCN["mode"] = "ok"
+    t.SCN.pop("send_status", None)
+    t.SCN.pop("send_body", None)
 
     # send_text guards
     for badph in ("12", "", "abc", "0421234567"):
@@ -288,7 +308,8 @@ def register(t):
     rid_ok = t.make_receipt(phone=NUM)
     # happy path
     for _ in range(8):
-        t.SCN.clear(); t.SCN["mode"] = "ok"
+        t.SCN.clear()
+        t.SCN["mode"] = "ok"
         ok, m = wa.send_report(con, rid_ok)
         t.check(ok, "send_report ok")
         t.has(m, "sent to", "send_report ok msg")
@@ -298,12 +319,14 @@ def register(t):
     # transport failures propagate through the real send
     for _ in range(6):
         for mode, kw in TRANSPORT.items():
-            t.SCN.clear(); t.SCN["mode"] = mode
+            t.SCN.clear()
+            t.SCN["mode"] = mode
             ok, m = wa.send_report(con, rid_ok)
             t.eq(ok, False, f"send_report {mode}")
             ok, m = wa.send_receipt(con, rid_ok)
             t.eq(ok, False, f"send_receipt {mode}")
-    t.SCN.clear(); t.SCN["mode"] = "ok"
+    t.SCN.clear()
+    t.SCN["mode"] = "ok"
     # missing receipt
     for missing in (999999, 0, -1):
         ok, m = wa.send_report(con, missing)
@@ -320,13 +343,15 @@ def register(t):
     ok, m = wa.send_receipt(con, rid_nophone)
     t.check(not ok, "send_receipt no phone")
 
-    t.SCN.clear(); t.SCN["mode"] = "ok"
+    t.SCN.clear()
+    t.SCN["mode"] = "ok"
 
 
 def _expect_send(status, body, text=False):
     """Replicate the (ok,msg-keyword) decision in send_pdf/send_text for a 2xx
     transport that returns the given status+body. Returns (expect_ok, keyword)."""
     import json as _json
+
     j = None
     try:
         parsed = _json.loads(body)
@@ -335,8 +360,7 @@ def _expect_send(status, body, text=False):
     except _json.JSONDecodeError:
         pass
     low = body.lower()
-    not_linked = any(s in low for s in
-                     ("logged in", "loggedin", "no session", "not connected"))
+    not_linked = any(s in low for s in ("logged in", "loggedin", "no session", "not connected"))
     success = None
     if j is not None:
         if "success" in j:

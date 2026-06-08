@@ -1,20 +1,37 @@
 """Test Catalog: browse/search tests, view parameters, edit charges/details."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTableWidget, QTableWidgetItem,
-    QLineEdit, QPushButton, QHeaderView, QDialog, QFormLayout, QDoubleSpinBox,
-    QComboBox, QPlainTextEdit, QLabel, QMessageBox, QSizePolicy, QCheckBox,
-    QListWidget, QListWidgetItem,
-)
 from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDoubleSpinBox,
+    QFormLayout,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QSizePolicy,
+    QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
-from .widgets import muted, page_header, like_term, fit_to_screen
-from . import tasks
 from .. import db
 from ..constants import SPECIMEN_PRESETS
 from ..roles import can
+from . import tasks
+from .widgets import fit_to_screen, like_term, muted, page_header
 
 
 class TestDialog(QDialog):
@@ -24,14 +41,19 @@ class TestDialog(QDialog):
         self.setMinimumWidth(440)
         form = QFormLayout(self)
         self.name = QLineEdit()
-        self.charges = QDoubleSpinBox(); self.charges.setMaximum(1_000_000); self.charges.setPrefix("Rs. ")
-        self.category = QComboBox(); self.category.setEditable(True)
+        self.charges = QDoubleSpinBox()
+        self.charges.setMaximum(1_000_000)
+        self.charges.setPrefix("Rs. ")
+        self.category = QComboBox()
+        self.category.setEditable(True)
         self.category.addItems(["Routine", "Special", "X-Ray", "Ultrasound", "Histopath", ""])
-        self.sample = QComboBox(); self.sample.setEditable(True)
+        self.sample = QComboBox()
+        self.sample.setEditable(True)
         self.sample.addItem("")
         self.sample.addItems(SPECIMEN_PRESETS)
         self.head = QLineEdit()
-        self.method = QPlainTextEdit(); self.method.setMaximumHeight(90)
+        self.method = QPlainTextEdit()
+        self.method.setMaximumHeight(90)
         form.addRow("Test name *", self.name)
         form.addRow("Charges", self.charges)
         form.addRow("Category", self.category)
@@ -46,9 +68,14 @@ class TestDialog(QDialog):
             self.head.setText(data["report_head"] or "")
             self.method.setPlainText(data["method_note"] or "")
         btns = QHBoxLayout()
-        ok = QPushButton("Save"); ok.clicked.connect(self.accept)
-        cancel = QPushButton("Cancel"); cancel.setObjectName("ghost"); cancel.clicked.connect(self.reject)
-        btns.addStretch(1); btns.addWidget(cancel); btns.addWidget(ok)
+        ok = QPushButton("Save")
+        ok.clicked.connect(self.accept)
+        cancel = QPushButton("Cancel")
+        cancel.setObjectName("ghost")
+        cancel.clicked.connect(self.reject)
+        btns.addStretch(1)
+        btns.addWidget(cancel)
+        btns.addWidget(ok)
         form.addRow(btns)
 
     def values(self):
@@ -67,6 +94,7 @@ PART_TYPES = [("Normal line", "N"), ("Section heading", "H"), ("Note / ref-only"
 
 class ParametersDialog(QDialog):
     """In-app editor for a test's report lines (parameters / headings / notes)."""
+
     def __init__(self, con, user, test_id, test_name, parent=None):
         super().__init__(parent)
         self.con = con
@@ -75,14 +103,18 @@ class ParametersDialog(QDialog):
         self.setWindowTitle(f"Parameters — {test_name}")
         fit_to_screen(self, 860, 560)
         lay = QVBoxLayout(self)
-        lay.addWidget(muted(
-            "Define the lines that appear on this test's report. "
-            "“Section heading” is a bold sub-title; “Note / ref-only” is an "
-            "italic line with no result box."))
+        lay.addWidget(
+            muted(
+                "Define the lines that appear on this test's report. "
+                "“Section heading” is a bold sub-title; “Note / ref-only” is an "
+                "italic line with no result box."
+            )
+        )
 
         self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(
-            ["Type", "Parameter", "Units", "Ref (Male)", "Ref (Female)", "Default"])
+            ["Type", "Parameter", "Units", "Ref (Male)", "Ref (Female)", "Default"]
+        )
         h = self.table.horizontalHeader()
         h.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         h.setSectionResizeMode(1, QHeaderView.Stretch)
@@ -92,18 +124,37 @@ class ParametersDialog(QDialog):
         lay.addWidget(self.table, 1)
 
         bar = QHBoxLayout()
-        add = QPushButton("+ Add line"); add.clicked.connect(self._add_row)
-        rm = QPushButton("Remove"); rm.setObjectName("ghost"); rm.clicked.connect(self._remove_row)
-        up = QPushButton("↑ Up"); up.setObjectName("ghost"); up.clicked.connect(lambda: self._move(-1))
-        dn = QPushButton("↓ Down"); dn.setObjectName("ghost"); dn.clicked.connect(lambda: self._move(1))
-        bar.addWidget(add); bar.addWidget(rm); bar.addWidget(up); bar.addWidget(dn); bar.addStretch(1)
-        save = QPushButton("Save"); save.clicked.connect(self._save)
-        cancel = QPushButton("Cancel"); cancel.setObjectName("ghost"); cancel.clicked.connect(self.reject)
-        bar.addWidget(cancel); bar.addWidget(save)
+        add = QPushButton("+ Add line")
+        add.clicked.connect(self._add_row)
+        rm = QPushButton("Remove")
+        rm.setObjectName("ghost")
+        rm.clicked.connect(self._remove_row)
+        up = QPushButton("↑ Up")
+        up.setObjectName("ghost")
+        up.clicked.connect(lambda: self._move(-1))
+        dn = QPushButton("↓ Down")
+        dn.setObjectName("ghost")
+        dn.clicked.connect(lambda: self._move(1))
+        bar.addWidget(add)
+        bar.addWidget(rm)
+        bar.addWidget(up)
+        bar.addWidget(dn)
+        bar.addStretch(1)
+        save = QPushButton("Save")
+        save.clicked.connect(self._save)
+        cancel = QPushButton("Cancel")
+        cancel.setObjectName("ghost")
+        cancel.clicked.connect(self.reject)
+        bar.addWidget(cancel)
+        bar.addWidget(save)
         lay.addLayout(bar)
 
-        self.rows = [dict(r) for r in self.con.execute(
-            "SELECT * FROM test_parameters WHERE test_id=? ORDER BY seq, id", (test_id,)).fetchall()]
+        self.rows = [
+            dict(r)
+            for r in self.con.execute(
+                "SELECT * FROM test_parameters WHERE test_id=? ORDER BY seq, id", (test_id,)
+            ).fetchall()
+        ]
         self._render()
 
     def _type_combo(self, value):
@@ -117,7 +168,8 @@ class ParametersDialog(QDialog):
     def _render(self):
         self.table.setRowCount(0)
         for r in self.rows:
-            i = self.table.rowCount(); self.table.insertRow(i)
+            i = self.table.rowCount()
+            self.table.insertRow(i)
             self.table.setCellWidget(i, 0, self._type_combo(r.get("part_type")))
             self.table.setItem(i, 1, QTableWidgetItem(r.get("name") or ""))
             self.table.setItem(i, 2, QTableWidgetItem(r.get("units") or ""))
@@ -143,8 +195,17 @@ class ParametersDialog(QDialog):
 
     def _add_row(self):
         self._sync()
-        self.rows.append({"id": None, "part_type": "N", "name": "", "units": "",
-                          "ref_male": "", "ref_female": "", "default_result": ""})
+        self.rows.append(
+            {
+                "id": None,
+                "part_type": "N",
+                "name": "",
+                "units": "",
+                "ref_male": "",
+                "ref_female": "",
+                "default_result": "",
+            }
+        )
         self._render()
         self.table.selectRow(len(self.rows) - 1)
 
@@ -169,8 +230,11 @@ class ParametersDialog(QDialog):
     def _save(self):
         self._sync()
         # drop fully-empty rows so accidental blank lines don't print
-        rows = [r for r in self.rows
-                if (r.get("name") or "").strip() or (r.get("part_type") or "N") != "N"]
+        rows = [
+            r
+            for r in self.rows
+            if (r.get("name") or "").strip() or (r.get("part_type") or "N") != "N"
+        ]
         try:
             db.save_test_parameters(self.con, self.test_id, rows)
         except db.ParameterInUseError as e:
@@ -179,13 +243,18 @@ class ParametersDialog(QDialog):
         except Exception as e:
             QMessageBox.warning(self, "Parameters", f"Could not save the parameters:\n{e}")
             return
-        db.log_audit(self.con, self.user["username"], "parameters_edited",
-                     f"test #{self.test_id} ({len(rows)} lines)")
+        db.log_audit(
+            self.con,
+            self.user["username"],
+            "parameters_edited",
+            f"test #{self.test_id} ({len(rows)} lines)",
+        )
         self.accept()
 
 
 class PanelsDialog(QDialog):
     """Manage test panels / profiles — named bundles of tests added together."""
+
     def __init__(self, con, user, parent=None):
         super().__init__(parent)
         self.con = con
@@ -202,27 +271,39 @@ class PanelsDialog(QDialog):
         self.panel_list.currentItemChanged.connect(self._load_panel)
         left.addWidget(self.panel_list, 1)
         lb = QHBoxLayout()
-        new = QPushButton("New"); new.clicked.connect(self._new_panel)
-        self.del_btn = QPushButton("Delete"); self.del_btn.setObjectName("ghost")
-        self.del_btn.clicked.connect(self._delete_panel); self.del_btn.setEnabled(False)
-        lb.addWidget(new); lb.addWidget(self.del_btn)
+        new = QPushButton("New")
+        new.clicked.connect(self._new_panel)
+        self.del_btn = QPushButton("Delete")
+        self.del_btn.setObjectName("ghost")
+        self.del_btn.clicked.connect(self._delete_panel)
+        self.del_btn.setEnabled(False)
+        lb.addWidget(new)
+        lb.addWidget(self.del_btn)
         left.addLayout(lb)
         root.addLayout(left, 2)
 
         # right: editor
         right = QVBoxLayout()
         right.addWidget(QLabel("Panel name"))
-        self.name = QLineEdit(); self.name.setPlaceholderText("e.g. Fever Profile")
+        self.name = QLineEdit()
+        self.name.setPlaceholderText("e.g. Fever Profile")
         right.addWidget(self.name)
         right.addWidget(QLabel("Tests in this panel (tick to include)"))
-        self.test_search = QLineEdit(); self.test_search.setPlaceholderText("Filter tests…")
+        self.test_search = QLineEdit()
+        self.test_search.setPlaceholderText("Filter tests…")
         self.test_search.textChanged.connect(self._filter_tests)
         right.addWidget(self.test_search)
         self.tests = QListWidget()
         right.addWidget(self.tests, 1)
-        save = QPushButton("Save panel"); save.clicked.connect(self._save)
-        close = QPushButton("Close"); close.setObjectName("ghost"); close.clicked.connect(self.accept)
-        rb = QHBoxLayout(); rb.addStretch(1); rb.addWidget(close); rb.addWidget(save)
+        save = QPushButton("Save panel")
+        save.clicked.connect(self._save)
+        close = QPushButton("Close")
+        close.setObjectName("ghost")
+        close.clicked.connect(self.accept)
+        rb = QHBoxLayout()
+        rb.addStretch(1)
+        rb.addWidget(close)
+        rb.addWidget(save)
         right.addLayout(rb)
         root.addLayout(right, 3)
 
@@ -232,7 +313,8 @@ class PanelsDialog(QDialog):
 
     def _load_all_tests(self):
         self._all_tests = self.con.execute(
-            "SELECT id, name FROM tests WHERE active=1 ORDER BY name COLLATE NOCASE").fetchall()
+            "SELECT id, name FROM tests WHERE active=1 ORDER BY name COLLATE NOCASE"
+        ).fetchall()
 
     def _populate_tests(self, checked_ids):
         checked = set(checked_ids or [])
@@ -301,9 +383,12 @@ class PanelsDialog(QDialog):
             QMessageBox.warning(self, "Panel", "Tick at least one test for the panel.")
             return
         pid = db.save_panel(self.con, name, ids, self._panel_id)
-        db.log_audit(self.con, self.user["username"],
-                     "panel_updated" if self._panel_id else "panel_created",
-                     f"{name} ({len(ids)} tests)")
+        db.log_audit(
+            self.con,
+            self.user["username"],
+            "panel_updated" if self._panel_id else "panel_created",
+            f"{name} ({len(ids)} tests)",
+        )
         self._panel_id = pid
         self._refresh_panels()
         # re-select the saved panel
@@ -330,33 +415,45 @@ class CatalogPage(QWidget):
         super().__init__()
         self.con = con
         self.user = user
-        self._ids = []   # parallel to tests table rows; filled by refresh
+        self._ids = []  # parallel to tests table rows; filled by refresh
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(12)
 
-        add = QPushButton("+ Add test"); add.clicked.connect(self.add)
-        edit = QPushButton("Edit"); edit.setObjectName("ghost"); edit.clicked.connect(self.edit)
-        self.retire_btn = QPushButton("Retire / Restore"); self.retire_btn.setObjectName("ghost")
+        add = QPushButton("+ Add test")
+        add.clicked.connect(self.add)
+        edit = QPushButton("Edit")
+        edit.setObjectName("ghost")
+        edit.clicked.connect(self.edit)
+        self.retire_btn = QPushButton("Retire / Restore")
+        self.retire_btn.setObjectName("ghost")
         self.retire_btn.clicked.connect(self.toggle_retire)
-        self.params_btn = QPushButton("Edit parameters…"); self.params_btn.setObjectName("ghost")
+        self.params_btn = QPushButton("Edit parameters…")
+        self.params_btn.setObjectName("ghost")
         self.params_btn.clicked.connect(self.edit_parameters)
-        self.panels_btn = QPushButton("Panels…"); self.panels_btn.setObjectName("ghost")
+        self.panels_btn = QPushButton("Panels…")
+        self.panels_btn.setObjectName("ghost")
         self.panels_btn.clicked.connect(self.manage_panels)
         if not can(user["role"], "edit_catalog"):
-            add.hide(); edit.hide(); self.retire_btn.hide()  # read-only for lower roles
-            self.params_btn.hide(); self.panels_btn.hide()
-        header, self.sub = page_header("Test Catalog", "", add, edit, self.retire_btn,
-                                       self.params_btn, self.panels_btn)
+            add.hide()
+            edit.hide()
+            self.retire_btn.hide()  # read-only for lower roles
+            self.params_btn.hide()
+            self.panels_btn.hide()
+        header, self.sub = page_header(
+            "Test Catalog", "", add, edit, self.retire_btn, self.params_btn, self.panels_btn
+        )
         lay.addWidget(header)
 
         bar = QHBoxLayout()
-        self.search = QLineEdit(); self.search.setPlaceholderText("Search tests by name…")
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search tests by name…")
         self.search.setMinimumHeight(40)
         self.search.textChanged.connect(tasks.debounce(self, self.refresh))
         self.show_retired = QCheckBox("Show retired")
         self.show_retired.toggled.connect(self.refresh)
-        bar.addWidget(self.search, 1); bar.addWidget(self.show_retired)
+        bar.addWidget(self.search, 1)
+        bar.addWidget(self.show_retired)
         lay.addLayout(bar)
 
         split = QSplitter()
@@ -364,22 +461,25 @@ class CatalogPage(QWidget):
         self.tests = QTableWidget(0, 3)
         self.tests.setHorizontalHeaderLabels(["Test", "Charges (Rs.)", "Category"])
         _th = self.tests.horizontalHeader()
-        _th.setSectionResizeMode(0, QHeaderView.Stretch)            # Test name fills
-        _th.setSectionResizeMode(1, QHeaderView.ResizeToContents)   # "Charges (Rs.)" no longer clipped
-        _th.setSectionResizeMode(2, QHeaderView.ResizeToContents)   # Category
+        _th.setSectionResizeMode(0, QHeaderView.Stretch)  # Test name fills
+        _th.setSectionResizeMode(
+            1, QHeaderView.ResizeToContents
+        )  # "Charges (Rs.)" no longer clipped
+        _th.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Category
         self.tests.setSelectionBehavior(QTableWidget.SelectRows)
         self.tests.setEditTriggers(QTableWidget.NoEditTriggers)
         self.tests.itemSelectionChanged.connect(self.show_params)
         self.tests.doubleClicked.connect(self.edit)
         split.addWidget(self.tests)
 
-        right = QWidget(); rl = QVBoxLayout(right)
+        right = QWidget()
+        rl = QVBoxLayout(right)
         rl.addWidget(QLabel("Parameters / report lines"))
         self.params = QTableWidget(0, 5)
         self.params.setHorizontalHeaderLabels(["#", "Parameter", "Units", "Ref (M)", "Ref (F)"])
         ph = self.params.horizontalHeader()
         ph.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # narrow #
-        ph.setSectionResizeMode(1, QHeaderView.Stretch)           # parameter name
+        ph.setSectionResizeMode(1, QHeaderView.Stretch)  # parameter name
         ph.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # units
         ph.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         ph.setSectionResizeMode(4, QHeaderView.ResizeToContents)
@@ -408,7 +508,8 @@ class CatalogPage(QWidget):
         self.tests.setRowCount(0)
         self._ids = []
         for r in rows:
-            i = self.tests.rowCount(); self.tests.insertRow(i)
+            i = self.tests.rowCount()
+            self.tests.insertRow(i)
             self._ids.append(r["id"])
             name = r["name"] + ("  (retired)" if not r["active"] else "")
             item = QTableWidgetItem(name)
@@ -435,7 +536,8 @@ class CatalogPage(QWidget):
             "SELECT * FROM test_parameters WHERE test_id=? ORDER BY seq", (tid,)
         ).fetchall()
         for r in rows:
-            i = self.params.rowCount(); self.params.insertRow(i)
+            i = self.params.rowCount()
+            self.params.insertRow(i)
             self.params.setItem(i, 0, QTableWidgetItem(str(r["seq"] + 1)))
             self.params.setItem(i, 1, QTableWidgetItem(r["name"] or ""))
             self.params.setItem(i, 2, QTableWidgetItem(r["units"] or ""))
@@ -453,8 +555,14 @@ class CatalogPage(QWidget):
             self.con.execute(
                 "INSERT INTO tests(name,charges,category,sample_required,report_head,method_note)"
                 " VALUES (?,?,?,?,?,?)",
-                (v["name"], v["charges"], v["category"], v["sample_required"],
-                 v["report_head"], v["method_note"]),
+                (
+                    v["name"],
+                    v["charges"],
+                    v["category"],
+                    v["sample_required"],
+                    v["report_head"],
+                    v["method_note"],
+                ),
             )
             self.con.commit()
             db.log_audit(self.con, self.user["username"], "test_created", v["name"])
@@ -471,12 +579,19 @@ class CatalogPage(QWidget):
         if d.exec() == QDialog.Accepted:
             v = d.values()
             if not v["name"]:
-                return                       # never blank a test's name (matches add())
+                return  # never blank a test's name (matches add())
             self.con.execute(
                 "UPDATE tests SET name=?,charges=?,category=?,sample_required=?,"
                 "report_head=?,method_note=? WHERE id=?",
-                (v["name"], v["charges"], v["category"], v["sample_required"],
-                 v["report_head"], v["method_note"], tid),
+                (
+                    v["name"],
+                    v["charges"],
+                    v["category"],
+                    v["sample_required"],
+                    v["report_head"],
+                    v["method_note"],
+                    tid,
+                ),
             )
             self.con.commit()
             db.log_audit(self.con, self.user["username"], "test_updated", v["name"])
@@ -497,7 +612,7 @@ class CatalogPage(QWidget):
         row = self.con.execute("SELECT name FROM tests WHERE id=?", (tid,)).fetchone()
         dlg = ParametersDialog(self.con, self.user, tid, row["name"] if row else "", self)
         if dlg.exec() == QDialog.Accepted:
-            self.show_params()   # refresh the read-only preview pane
+            self.show_params()  # refresh the read-only preview pane
 
     def toggle_retire(self):
         if not can(self.user["role"], "edit_catalog"):
@@ -510,11 +625,17 @@ class CatalogPage(QWidget):
             return
         new_active = 0 if row["active"] else 1
         verb = "restore" if new_active else "retire"
-        if QMessageBox.question(self, "Catalog",
-                                f"{verb.capitalize()} test “{row['name']}”?") != QMessageBox.Yes:
+        if (
+            QMessageBox.question(self, "Catalog", f"{verb.capitalize()} test “{row['name']}”?")
+            != QMessageBox.Yes
+        ):
             return
         self.con.execute("UPDATE tests SET active=? WHERE id=?", (new_active, tid))
         self.con.commit()
-        db.log_audit(self.con, self.user["username"],
-                     "test_activated" if new_active else "test_deactivated", row["name"])
+        db.log_audit(
+            self.con,
+            self.user["username"],
+            "test_activated" if new_active else "test_deactivated",
+            row["name"],
+        )
         self.refresh()

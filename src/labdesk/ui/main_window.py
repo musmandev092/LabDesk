@@ -1,14 +1,25 @@
 """Main application window: sidebar navigation + stacked pages."""
+
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QEvent, QTimer
-from PySide6.QtGui import QPixmap, QShortcut, QKeySequence
+from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtGui import QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget,
-    QPushButton, QLabel, QButtonGroup, QApplication, QDialog, QScrollArea, QFrame,
+    QApplication,
+    QButtonGroup,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QPushButton,
+    QScrollArea,
     QSizePolicy,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from .. import db, render
@@ -22,20 +33,21 @@ def _autocrop(pm: QPixmap) -> QPixmap:
     the sidebar brand mark and the printed report/receipt letterhead trim margins with
     exactly the same logic — one source of truth."""
     return QPixmap.fromImage(render.autocrop_image(pm.toImage()))
-from ..roles import can_view_page, role_label
-from .style import PRODUCT_NAME, PRODUCT_TAGLINE, DEVELOPER, DEVELOPER_GITHUB
-from .. import __version__
-from .dashboard import DashboardPage
-from .reception import ReceptionPage
-from .receipts import ReceiptsPage
-from .worklist import WorklistPage
-from .catalog import CatalogPage
-from .doctors import DoctorsPage
-from .microbiology import MicrobiologyPage
-from .accounts import AccountsPage
-from .settings import SettingsPage
-from .logs import LogsPage
 
+
+from .. import __version__
+from ..roles import can_view_page, role_label
+from .accounts import AccountsPage
+from .catalog import CatalogPage
+from .dashboard import DashboardPage
+from .doctors import DoctorsPage
+from .logs import LogsPage
+from .microbiology import MicrobiologyPage
+from .receipts import ReceiptsPage
+from .reception import ReceptionPage
+from .settings import SettingsPage
+from .style import DEVELOPER, DEVELOPER_GITHUB, PRODUCT_NAME, PRODUCT_TAGLINE
+from .worklist import WorklistPage
 
 NAV = [
     ("Dashboard", DashboardPage),
@@ -66,7 +78,7 @@ class MainWindow(QMainWindow):
         # (not 720) so a 1280x720 panel whose taskbar leaves ~680 px usable doesn't
         # push the window bottom under the taskbar; the page scrolls if shorter.
         self.setMinimumSize(1280, 640)
-        self.resize(1280, 820)        # windowed-fallback size; showMaximized() at launch
+        self.resize(1280, 820)  # windowed-fallback size; showMaximized() at launch
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -78,7 +90,7 @@ class MainWindow(QMainWindow):
         sidebar = QWidget()
         sidebar.setObjectName("Sidebar")
         sidebar.setFixedWidth(230)
-        self._sidebar = sidebar          # kept for the responsive resizeEvent (Rule 5)
+        self._sidebar = sidebar  # kept for the responsive resizeEvent (Rule 5)
         sb = QVBoxLayout(sidebar)
         sb.setContentsMargins(0, 0, 0, 0)
         sb.setSpacing(0)
@@ -127,7 +139,7 @@ class MainWindow(QMainWindow):
             self.btn_group.addButton(btn, i)
             page = PageCls(con, user)
             page.setObjectName("page")
-            page.navigate = self.navigate_to   # let pages jump to other pages
+            page.navigate = self.navigate_to  # let pages jump to other pages
             self._page_index[label] = i
             self.pages.append(page)
             self.stack.addWidget(page)
@@ -149,7 +161,9 @@ class MainWindow(QMainWindow):
         sb.addWidget(logout)
 
         # developer credit footer
-        credit = QLabel(f"{PRODUCT_NAME} v{__version__}\nDeveloped by {DEVELOPER}\n{DEVELOPER_GITHUB}")
+        credit = QLabel(
+            f"{PRODUCT_NAME} v{__version__}\nDeveloped by {DEVELOPER}\n{DEVELOPER_GITHUB}"
+        )
         credit.setObjectName("SidebarCredit")
         credit.setAlignment(Qt.AlignCenter)
         sb.addWidget(credit)
@@ -206,9 +220,13 @@ class MainWindow(QMainWindow):
         self._idle_timer.start(self._idle_ms)
 
     def eventFilter(self, obj, event):
-        if self._idle_ms and not self._locked and event.type() in (
-                QEvent.MouseMove, QEvent.KeyPress, QEvent.MouseButtonPress, QEvent.Wheel):
-            self._idle_timer.start(self._idle_ms)   # reset the countdown on activity
+        if (
+            self._idle_ms
+            and not self._locked
+            and event.type()
+            in (QEvent.MouseMove, QEvent.KeyPress, QEvent.MouseButtonPress, QEvent.Wheel)
+        ):
+            self._idle_timer.start(self._idle_ms)  # reset the countdown on activity
         return super().eventFilter(obj, event)
 
     def _lock_screen(self):
@@ -216,6 +234,7 @@ class MainWindow(QMainWindow):
             return
         self._locked = True
         from .login import LoginDialog
+
         db.log_audit(self.con, self.user["username"], "logout", "auto-locked (idle)")
         dlg = LoginDialog(self.con, self)
         dlg.setWindowTitle("Locked — sign in to continue")
@@ -225,8 +244,12 @@ class MainWindow(QMainWindow):
                 # for — and still carry the identity/privileges of — the user who
                 # locked it. Don't let them be operated under the new identity; end
                 # this session so the new user starts their own (correct) one.
-                db.log_audit(self.con, self.user["username"], "logout",
-                             f"locked session ended — {dlg.user['username']} signed in instead")
+                db.log_audit(
+                    self.con,
+                    self.user["username"],
+                    "logout",
+                    f"locked session ended — {dlg.user['username']} signed in instead",
+                )
                 self.close()
                 return
             self.user = dlg.user
@@ -234,7 +257,7 @@ class MainWindow(QMainWindow):
             self._locked = False
             self._idle_timer.start(self._idle_ms)
         else:
-            self.close()        # couldn't re-auth → end the session
+            self.close()  # couldn't re-auth → end the session
 
     def closeEvent(self, event):
         # records sign-out (the "Sign out" button calls close()) and window close

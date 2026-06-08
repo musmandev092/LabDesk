@@ -1,4 +1,5 @@
 """Application bootstrap: init DB, run first-run setup, login, main window."""
+
 from __future__ import annotations
 
 import contextlib
@@ -12,10 +13,10 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
 from . import db
-from .ui.style import QSS, PRODUCT_NAME, build_qss, apply_theme
 from .ui.login import LoginDialog
-from .ui.setup_wizard import SetupWizard
 from .ui.main_window import MainWindow
+from .ui.setup_wizard import SetupWizard
+from .ui.style import PRODUCT_NAME, apply_theme
 
 # product icon (the microscope logo) — shown in the title bar + taskbar/dock
 APP_ICON = Path(__file__).resolve().parent / "assets" / "app_icon_256.png"
@@ -29,9 +30,10 @@ def _acquire_single_instance():
     stale-lock cleanup to do."""
     import fcntl
     import tempfile
+
     try:
         uid = os.getuid()
-    except AttributeError:               # non-POSIX fallback
+    except AttributeError:  # non-POSIX fallback
         uid = "x"
     runtime = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
     path = os.path.join(runtime, f"LabDesk-{uid}.lock")
@@ -39,9 +41,10 @@ def _acquire_single_instance():
         f = open(path, "w")
         fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        return None                      # another instance holds the lock
+        return None  # another instance holds the lock
     with contextlib.suppress(OSError):
-        f.write(str(os.getpid())); f.flush()
+        f.write(str(os.getpid()))
+        f.flush()
     return f
 
 
@@ -75,9 +78,10 @@ def _integrate_appimage(con) -> str | None:
         import threading
 
         def _refresh_caches():
-            for cmd in (["update-desktop-database", str(apps)],
-                        ["gtk-update-icon-cache",
-                         str(Path.home() / ".local/share/icons/hicolor")]):
+            for cmd in (
+                ["update-desktop-database", str(apps)],
+                ["gtk-update-icon-cache", str(Path.home() / ".local/share/icons/hicolor")],
+            ):
                 try:
                     subprocess.run(cmd, capture_output=True, timeout=10)
                 except Exception:
@@ -88,8 +92,10 @@ def _integrate_appimage(con) -> str | None:
         return None
     db.set_setting(con, "installed_version", db.APP_VERSION)
     if not prev_ver:
-        return ("LabDesk has been added to your applications menu.\n"
-                "Launch it from the menu (or pin it to your dock) next time.")
+        return (
+            "LabDesk has been added to your applications menu.\n"
+            "Launch it from the menu (or pin it to your dock) next time."
+        )
     if prev_ver != db.APP_VERSION:
         return f"Updated to v{db.APP_VERSION} successfully."
     return None
@@ -100,6 +106,7 @@ def _setup_crash_logging() -> None:
     user where to find the details, instead of the app vanishing silently."""
     import logging
     from logging.handlers import RotatingFileHandler
+
     logdir = db.data_dir() / "logs"
     try:
         logdir.mkdir(parents=True, exist_ok=True)
@@ -114,12 +121,18 @@ def _setup_crash_logging() -> None:
 
     def _hook(exc_type, exc, tb):
         import traceback
-        logger.error("Uncaught exception:\n%s", "".join(traceback.format_exception(exc_type, exc, tb)))
+
+        logger.error(
+            "Uncaught exception:\n%s", "".join(traceback.format_exception(exc_type, exc, tb))
+        )
         if os.environ.get("LABDESK_SELFTEST") != "1":
             try:
-                QMessageBox.critical(None, "LabDesk",
-                                     "Something went wrong. The details were saved to:\n"
-                                     f"{logdir / 'labdesk.log'}")
+                QMessageBox.critical(
+                    None,
+                    "LabDesk",
+                    "Something went wrong. The details were saved to:\n"
+                    f"{logdir / 'labdesk.log'}",
+                )
             except Exception:
                 pass
         sys.__excepthook__(exc_type, exc, tb)
@@ -134,8 +147,10 @@ def run(argv: list[str]) -> int:
     # setting it explicitly is portable and must happen before QApplication is built.
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QGuiApplication
+
     QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
-        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
     app = QApplication(argv)
     app.setApplicationName(PRODUCT_NAME)
     app.setOrganizationName(PRODUCT_NAME)
@@ -143,11 +158,12 @@ def run(argv: list[str]) -> int:
     app.setDesktopFileName("LabDesk")
     if APP_ICON.exists():
         app.setWindowIcon(QIcon(str(APP_ICON)))
-    apply_theme(app, "light")   # splash is light; the saved theme is applied below
+    apply_theme(app, "light")  # splash is light; the saved theme is applied below
 
     # Load the report font once here on the main thread; PDF building runs on a
     # worker thread and must not touch QFontDatabase off-thread.
     from . import render
+
     render.preload()
 
     # Single instance: if LabDesk is already open, quit this launch.
@@ -155,7 +171,7 @@ def run(argv: list[str]) -> int:
         lock = _acquire_single_instance()
         if lock is None:
             return 0
-        app._labdesk_lock = lock          # keep the lock file alive for the run
+        app._labdesk_lock = lock  # keep the lock file alive for the run
 
     # Brief splash so startup (incl. the one-time catalog sync after an update,
     # ~1s) shows feedback instead of a blank window. Flashes by on normal launches.
@@ -164,6 +180,7 @@ def run(argv: list[str]) -> int:
         from PySide6.QtCore import Qt
         from PySide6.QtGui import QPixmap
         from PySide6.QtWidgets import QSplashScreen
+
         pm = QPixmap(str(APP_ICON)).scaled(220, 220, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         splash = QSplashScreen(pm)
         splash.showMessage("Starting LabDesk…", Qt.AlignHCenter | Qt.AlignBottom, Qt.gray)

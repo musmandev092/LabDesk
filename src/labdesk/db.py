@@ -5,6 +5,7 @@ schema, seeds default settings + an admin user, and hands out connections.
 The DB lives next to the user's data (XDG dir when packaged), so the AppImage
 stays read-only while data persists across updates.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -19,7 +20,7 @@ from pathlib import Path
 
 # Neutral, white-label product identity (per-lab branding is set by the wizard).
 APP_NAME = "LabDesk"
-APP_VERSION = "1.0.0"          # bump on each release (shown in the update notice)
+APP_VERSION = "1.0.0"  # bump on each release (shown in the update notice)
 SCHEMA_FILE = Path(__file__).with_name("schema.sql")
 SEED_DB = Path(__file__).with_name("seed.sqlite")  # ships with the catalog
 
@@ -28,9 +29,9 @@ SEED_DB = Path(__file__).with_name("seed.sqlite")  # ships with the catalog
 CATALOG_VERSION = "5"
 
 DEFAULT_SETTINGS = {
-    "configured": "0",            # set to "1" once the first-run wizard completes
+    "configured": "0",  # set to "1" once the first-run wizard completes
     "catalog_version": CATALOG_VERSION,
-    "lab_name": "",              # filled in by each lab via the setup wizard
+    "lab_name": "",  # filled in by each lab via the setup wizard
     "lab_subtitle": "",
     "address": "",
     "phone": "",
@@ -47,8 +48,8 @@ DEFAULT_SETTINGS = {
     "logo_path": "",
     "lab_no_prefix": "LAB",
     # registration / accreditation (shown on the report header)
-    "phc_reg_no": "",            # Punjab Healthcare Commission registration no.
-    "lab_reg_no": "",            # lab / pharmacy registration no.
+    "phc_reg_no": "",  # Punjab Healthcare Commission registration no.
+    "lab_reg_no": "",  # lab / pharmacy registration no.
     "phc_logo_path": "",
     "accred_logo_1": "",
     "accred_logo_2": "",
@@ -61,46 +62,61 @@ DEFAULT_SETTINGS = {
     "dept_band": "HEMATOLOGY  |  CHEMICAL PATHOLOGY  |  HORMONES  |  MOLECULAR BIOLOGY  |  HISTOPATHOLOGY",
     # cash-receipt footer text (was hard-coded in report.py; now lab-editable)
     "receipt_footer_note": "Computer-generated document. No signature required.",
-    "receipt_remarks": ("Please present this receipt to collect your report. Reports are "
-                        "issued strictly following final verification and signature by the "
-                        "consultant pathologist."),
+    "receipt_remarks": (
+        "Please present this receipt to collect your report. Reports are "
+        "issued strictly following final verification and signature by the "
+        "consultant pathologist."
+    ),
     # Appearance
-    "theme": "light",            # "light" | "dark"
+    "theme": "light",  # "light" | "dark"
     # security: auto-lock the screen after N minutes idle (0 = off)
     "idle_lock_minutes": "0",
     # WhatsApp (self-hosted wuzapi gateway, see whatsapp.py)
-    "whatsapp_url": "",          # e.g. http://localhost:8080
+    "whatsapp_url": "",  # e.g. http://localhost:8080
     "whatsapp_session": "default",
     "whatsapp_country_code": "92",
-    "whatsapp_auto": "0",        # "1" => auto-send report when results saved
+    "whatsapp_auto": "0",  # "1" => auto-send report when results saved
     "whatsapp_auto_receipt": "0",  # "1" => auto-send the bill when a receipt is saved
     # NOTE: whatsapp_api_key is deliberately NOT a default setting — the token
     # lives only in the 0600 .secrets.json file, never in the DB/backups.
     # caption templates ({lab}, {lab_no}, {name} placeholders; blank = built-in)
     "whatsapp_report_caption": "",
     "whatsapp_receipt_caption": "",
-    "whatsapp_timeout": "40",    # seconds for the upload before giving up
+    "whatsapp_timeout": "40",  # seconds for the upload before giving up
 }
 
 # Columns added after v1 — created on existing databases if missing.
 _EXTRA_COLUMNS = {
-    "patients": [("title", "TEXT"), ("mr_no", "TEXT"),
-                 ("wa_optout", "INTEGER NOT NULL DEFAULT 0"),
-                 # when the WhatsApp consent choice was last set (audit trail)
-                 ("wa_consent_at", "TEXT")],
-    "receipts": [("title", "TEXT"), ("mr_no", "TEXT"), ("case_no", "TEXT"),
-                 ("reported_at", "TEXT"), ("payment_method", "TEXT"),
-                 ("voided", "INTEGER NOT NULL DEFAULT 0"), ("void_reason", "TEXT"),
-                 ("voided_at", "TEXT"), ("voided_by", "TEXT"),
-                 ("delivered_at", "TEXT"), ("delivered_by", "TEXT")],
+    "patients": [
+        ("title", "TEXT"),
+        ("mr_no", "TEXT"),
+        ("wa_optout", "INTEGER NOT NULL DEFAULT 0"),
+        # when the WhatsApp consent choice was last set (audit trail)
+        ("wa_consent_at", "TEXT"),
+    ],
+    "receipts": [
+        ("title", "TEXT"),
+        ("mr_no", "TEXT"),
+        ("case_no", "TEXT"),
+        ("reported_at", "TEXT"),
+        ("payment_method", "TEXT"),
+        ("voided", "INTEGER NOT NULL DEFAULT 0"),
+        ("void_reason", "TEXT"),
+        ("voided_at", "TEXT"),
+        ("voided_by", "TEXT"),
+        ("delivered_at", "TEXT"),
+        ("delivered_by", "TEXT"),
+    ],
     # per-test free-text remarks printed under the results table
     "receipt_items": [("remarks", "TEXT")],
     # hide a parameter row from the printed report (kept in the entry screen)
     "results": [("hidden", "INTEGER NOT NULL DEFAULT 0")],
     # security: force first-login password change + brute-force lockout
-    "users": [("must_change_password", "INTEGER NOT NULL DEFAULT 0"),
-              ("failed_attempts", "INTEGER NOT NULL DEFAULT 0"),
-              ("locked_until", "TEXT")],
+    "users": [
+        ("must_change_password", "INTEGER NOT NULL DEFAULT 0"),
+        ("failed_attempts", "INTEGER NOT NULL DEFAULT 0"),
+        ("locked_until", "TEXT"),
+    ],
     # audit tamper-evidence: rolling hash chain
     "audit_log": [("hash", "TEXT")],
 }
@@ -202,9 +218,15 @@ def set_secret(key: str, value: str) -> None:
 # ---------------------------------------------------------------------------
 def hash_password(password: str, salt: str | None = None) -> tuple[str, str]:
     salt = salt or secrets.token_hex(16)
-    dk = hashlib.scrypt(password.encode("utf-8"), salt=salt.encode("utf-8"),
-                        n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P,
-                        maxmem=_SCRYPT_MAXMEM, dklen=32)
+    dk = hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt.encode("utf-8"),
+        n=_SCRYPT_N,
+        r=_SCRYPT_R,
+        p=_SCRYPT_P,
+        maxmem=_SCRYPT_MAXMEM,
+        dklen=32,
+    )
     return f"scrypt${_SCRYPT_N}${_SCRYPT_R}${_SCRYPT_P}${salt}${dk.hex()}", ""
 
 
@@ -214,9 +236,15 @@ def _verify_password(password: str, stored: str, legacy_salt: str) -> bool:
     if stored.startswith("scrypt$"):
         try:
             _, n, r, p, salt, hexh = stored.split("$", 5)
-            dk = hashlib.scrypt(password.encode("utf-8"), salt=salt.encode("utf-8"),
-                                n=int(n), r=int(r), p=int(p),
-                                maxmem=_SCRYPT_MAXMEM, dklen=len(hexh) // 2)
+            dk = hashlib.scrypt(
+                password.encode("utf-8"),
+                salt=salt.encode("utf-8"),
+                n=int(n),
+                r=int(r),
+                p=int(p),
+                maxmem=_SCRYPT_MAXMEM,
+                dklen=len(hexh) // 2,
+            )
             return hmac.compare_digest(dk.hex(), hexh)
         except Exception:
             return False
@@ -258,13 +286,11 @@ def init_db(
     con = connect(path)
     con.executescript(SCHEMA_FILE.read_text(encoding="utf-8"))
     _ensure_columns(con)
-    _ensure_indexes(con)           # after columns exist (some indexes depend on them)
-    _sync_catalog_from_seed(con)   # pull updated tests/ranges into existing installs
+    _ensure_indexes(con)  # after columns exist (some indexes depend on them)
+    _sync_catalog_from_seed(con)  # pull updated tests/ranges into existing installs
     # seed default settings (only missing keys)
     for k, v in DEFAULT_SETTINGS.items():
-        con.execute(
-            "INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v)
-        )
+        con.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
     # seed default admin if no users exist
     if seed_admin:
         n = con.execute("SELECT COUNT(*) FROM users").fetchone()[0]
@@ -317,8 +343,7 @@ def _sync_catalog_from_seed(con: sqlite3.Connection) -> None:
         return
     try:
         seed_ro = sqlite3.connect(f"file:{SEED_DB}?mode=ro", uri=True)
-        row = seed_ro.execute(
-            "SELECT value FROM settings WHERE key='catalog_version'").fetchone()
+        row = seed_ro.execute("SELECT value FROM settings WHERE key='catalog_version'").fetchone()
         seed_ro.close()
     except Exception:
         return
@@ -336,19 +361,20 @@ def _sync_catalog_from_seed(con: sqlite3.Connection) -> None:
         scols = {r[1] for r in con.execute("PRAGMA seed.table_info('tests')")}
         cols = ", ".join(f'"{c}"' for c in tcols if c in scols)
         con.execute(
-            f'INSERT INTO tests ({cols}) SELECT {cols} FROM seed.tests '
-            f'WHERE id NOT IN (SELECT id FROM tests)'
+            f"INSERT INTO tests ({cols}) SELECT {cols} FROM seed.tests "
+            f"WHERE id NOT IN (SELECT id FROM tests)"
         )
         pcols = [r[1] for r in con.execute('PRAGMA table_info("test_parameters")')]
         spcols = {r[1] for r in con.execute("PRAGMA seed.table_info('test_parameters')")}
         cols = ", ".join(f'"{c}"' for c in pcols if c in spcols)
         con.execute(
-            f'INSERT INTO test_parameters ({cols}) SELECT {cols} FROM seed.test_parameters '
-            f'WHERE id NOT IN (SELECT id FROM test_parameters)'
+            f"INSERT INTO test_parameters ({cols}) SELECT {cols} FROM seed.test_parameters "
+            f"WHERE id NOT IN (SELECT id FROM test_parameters)"
         )
         con.execute(
             "INSERT INTO settings(key,value) VALUES ('catalog_version',?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(seed_ver),)
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(seed_ver),),
         )
         con.commit()  # must commit before DETACH (no open transaction allowed)
     finally:
@@ -383,7 +409,7 @@ def _ensure_indexes(con: sqlite3.Connection) -> None:
         try:
             con.execute(ddl)
         except sqlite3.OperationalError:
-            pass   # e.g. duplicate lab_no already present on a legacy DB
+            pass  # e.g. duplicate lab_no already present on a legacy DB
 
 
 # SQL fragment: receipts that are not voided (voided column is added post-v1, so
@@ -392,8 +418,9 @@ NOT_VOIDED = "COALESCE(voided,0)=0"
 
 # SQL fragment: rows whose received_at falls in today (local time). Written as a
 # half-open range so a plain index on received_at can be used (no date() wrap).
-RECEIVED_TODAY = ("received_at >= date('now','localtime') "
-                  "AND received_at < date('now','localtime','+1 day')")
+RECEIVED_TODAY = (
+    "received_at >= date('now','localtime') " "AND received_at < date('now','localtime','+1 day')"
+)
 
 # ---------------------------------------------------------------------------
 # Patient ID — the lab's unique patient identifier (formerly "MR No").
@@ -426,7 +453,7 @@ def format_patient_id(seq: int, year: int | None = None) -> str:
     `year` defaults to the current local year."""
     yy = f"{(year if year is not None else int(time.strftime('%Y'))) % 100:02d}"
     s = f"{int(seq):05d}"
-    head, tail = s[:-2], s[-2:]          # all but last 2, then last 2
+    head, tail = s[:-2], s[-2:]  # all but last 2, then last 2
     letter = _pid_check_letter(yy + s)
     return f"{yy}-{head}-{tail}{letter}"
 
@@ -534,8 +561,15 @@ def verify_audit_chain(con: sqlite3.Connection):
             continue  # legacy rows that predate the hash chain
         started = True
         expect = hashlib.sha256(
-            "|".join([prev, row["at"] or "", row["username"] or "",
-                      row["action"] or "", row["detail"] or ""]).encode("utf-8")
+            "|".join(
+                [
+                    prev,
+                    row["at"] or "",
+                    row["username"] or "",
+                    row["action"] or "",
+                    row["detail"] or "",
+                ]
+            ).encode("utf-8")
         ).hexdigest()
         if row["hash"] != expect:
             return False, row["id"]
@@ -553,8 +587,9 @@ def rechain_audit(con: sqlite3.Connection) -> None:
     prev = ""
     for r in rows:
         h = hashlib.sha256(
-            "|".join([prev, r["at"] or "", r["username"] or "",
-                      r["action"] or "", r["detail"] or ""]).encode("utf-8")
+            "|".join(
+                [prev, r["at"] or "", r["username"] or "", r["action"] or "", r["detail"] or ""]
+            ).encode("utf-8")
         ).hexdigest()
         con.execute("UPDATE audit_log SET hash=? WHERE id=?", (h, r["id"]))
         prev = h
@@ -582,7 +617,8 @@ def backup_db(reason: str = "auto", keep: int = 14) -> Path | None:
         dc = sqlite3.connect(dest)
         with dc:
             sc.backup(dc)
-        sc.close(); dc.close()
+        sc.close()
+        dc.close()
         os.chmod(dest, 0o600)
     except Exception:
         return None
@@ -652,11 +688,9 @@ def lock_remaining(con: sqlite3.Connection, username: str) -> int:
 
 
 def verify_user(con: sqlite3.Connection, username: str, password: str):
-    row = con.execute(
-        "SELECT * FROM users WHERE username=? AND active=1", (username,)
-    ).fetchone()
+    row = con.execute("SELECT * FROM users WHERE username=? AND active=1", (username,)).fetchone()
     if not row:
-        _dummy_verify(password)   # equalise timing so missing users aren't detectable
+        _dummy_verify(password)  # equalise timing so missing users aren't detectable
         return None
     cols = row.keys()
     # locked out from too many recent failures?
@@ -673,8 +707,9 @@ def verify_user(con: sqlite3.Connection, username: str, password: str):
             if not (row["pass_hash"] or "").startswith("scrypt$"):
                 newh, _ = hash_password(password)
                 con.execute("UPDATE users SET pass_hash=?, salt='' WHERE id=?", (newh, row["id"]))
-            con.execute("UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id=?",
-                        (row["id"],))
+            con.execute(
+                "UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id=?", (row["id"],)
+            )
             con.commit()
         except Exception:
             pass
@@ -682,13 +717,16 @@ def verify_user(con: sqlite3.Connection, username: str, password: str):
     # wrong password → count the failure, then lock with an exponentially
     # growing window once past _MAX_FAILS (60s, 120s, 240s … capped).
     try:
-        fa = (row["failed_attempts"] if "failed_attempts" in cols and row["failed_attempts"] else 0) + 1
+        fa = (
+            row["failed_attempts"] if "failed_attempts" in cols and row["failed_attempts"] else 0
+        ) + 1
         lock = None
         if fa >= _MAX_FAILS:
             backoff = min(_LOCK_SECONDS * (2 ** (fa - _MAX_FAILS)), _LOCK_MAX_SECONDS)
             lock = str(time.time() + backoff)
-        con.execute("UPDATE users SET failed_attempts=?, locked_until=? WHERE id=?",
-                    (fa, lock, row["id"]))
+        con.execute(
+            "UPDATE users SET failed_attempts=?, locked_until=? WHERE id=?", (fa, lock, row["id"])
+        )
         con.commit()
     except Exception:
         pass
@@ -710,7 +748,8 @@ def panel_tests(con: sqlite3.Connection, panel_id: int):
     return con.execute(
         "SELECT t.id, t.name, t.charges FROM panel_items pi "
         "JOIN tests t ON t.id = pi.test_id "
-        "WHERE pi.panel_id=? ORDER BY t.name COLLATE NOCASE", (panel_id,)
+        "WHERE pi.panel_id=? ORDER BY t.name COLLATE NOCASE",
+        (panel_id,),
     ).fetchall()
 
 
@@ -721,8 +760,9 @@ def save_panel(con: sqlite3.Connection, name: str, test_ids, panel_id: int | Non
         raise ValueError("panel name is required")
     ids = [int(t) for t in test_ids]
     if panel_id is None:
-        panel_id = con.execute(
-            "INSERT INTO panels(name, active) VALUES (?,1)", (name,)).lastrowid
+        panel_id = con.execute("INSERT INTO panels(name, active) VALUES (?,1)", (name,)).lastrowid
+        if panel_id is None:
+            raise RuntimeError("failed to create panel")
     else:
         con.execute("UPDATE panels SET name=?, active=1 WHERE id=?", (name, panel_id))
         con.execute("DELETE FROM panel_items WHERE panel_id=?", (panel_id,))
@@ -744,7 +784,8 @@ def receive_due(con: sqlite3.Connection, receipt_id: int, amount: float, usernam
     paid/due, audited. Returns (lab_no, new_paid, new_due) or None if nothing
     is owed. Shared by the Receipts page and the Accounts dues tab."""
     r = con.execute(
-        "SELECT lab_no, net_amount, paid, due FROM receipts WHERE id=?", (receipt_id,)).fetchone()
+        "SELECT lab_no, net_amount, paid, due FROM receipts WHERE id=?", (receipt_id,)
+    ).fetchone()
     if not r or not r["due"] or r["due"] <= 0 or amount <= 0:
         return None
     new_paid = round((r["paid"] or 0) + amount, 2)
@@ -752,12 +793,17 @@ def receive_due(con: sqlite3.Connection, receipt_id: int, amount: float, usernam
     con.execute(
         "INSERT INTO ledger(kind,ref_id,detail,credit,date) "
         "VALUES ('due_recovery',?,?,?,date('now','localtime'))",
-        (receipt_id, f"Due recovered {r['lab_no']}", amount))
+        (receipt_id, f"Due recovered {r['lab_no']}", amount),
+    )
     con.execute("UPDATE receipts SET paid=?, due=? WHERE id=?", (new_paid, new_due, receipt_id))
     con.commit()
     cur = currency(con)
-    log_audit(con, username, "due_received",
-              f"{r['lab_no']} — {cur} {amount:,.0f} (due now {cur} {new_due:,.0f})")
+    log_audit(
+        con,
+        username,
+        "due_received",
+        f"{r['lab_no']} — {cur} {amount:,.0f} (due now {cur} {new_due:,.0f})",
+    )
     return (r["lab_no"], new_paid, new_due)
 
 
@@ -765,11 +811,13 @@ def receive_due(con: sqlite3.Connection, receipt_id: int, amount: float, usernam
 class ParameterInUseError(Exception):
     """Raised when the editor tries to remove a parameter that already has saved
     results on a patient report (deleting it would orphan that history)."""
+
     def __init__(self, names):
         self.names = list(names)
         super().__init__(
             "These parameters have saved patient results and can't be removed: "
-            + ", ".join(self.names))
+            + ", ".join(self.names)
+        )
 
 
 def save_test_parameters(con: sqlite3.Connection, test_id: int, rows) -> None:
@@ -780,28 +828,37 @@ def save_test_parameters(con: sqlite3.Connection, test_id: int, rows) -> None:
     rows the user removed are DELETEd — unless they already have saved results,
     in which case nothing is saved and ParameterInUseError is raised.
     """
-    old = con.execute(
-        "SELECT id, name FROM test_parameters WHERE test_id=?", (test_id,)).fetchall()
+    old = con.execute("SELECT id, name FROM test_parameters WHERE test_id=?", (test_id,)).fetchall()
     old_ids = {r["id"]: (r["name"] or "") for r in old}
     keep = set()
     try:
         for seq, r in enumerate(rows):
-            vals = (seq, (r.get("part_type") or "N"), r.get("name") or "",
-                    r.get("units") or "", r.get("ref_male") or "", r.get("ref_female") or "",
-                    r.get("default_result") or "", r.get("superscript") or "",
-                    r.get("group_head") or "")
+            vals = (
+                seq,
+                (r.get("part_type") or "N"),
+                r.get("name") or "",
+                r.get("units") or "",
+                r.get("ref_male") or "",
+                r.get("ref_female") or "",
+                r.get("default_result") or "",
+                r.get("superscript") or "",
+                r.get("group_head") or "",
+            )
             pid = r.get("id")
             if pid and pid in old_ids:
                 con.execute(
                     "UPDATE test_parameters SET seq=?,part_type=?,name=?,units=?,ref_male=?,"
                     "ref_female=?,default_result=?,superscript=?,group_head=? WHERE id=?",
-                    (*vals, pid))
+                    (*vals, pid),
+                )
                 keep.add(pid)
             else:
                 con.execute(
                     "INSERT INTO test_parameters(test_id,seq,part_type,name,units,ref_male,"
                     "ref_female,default_result,superscript,group_head) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?)", (test_id, *vals))
+                    "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (test_id, *vals),
+                )
         in_use = []
         for pid, name in old_ids.items():
             if pid in keep:

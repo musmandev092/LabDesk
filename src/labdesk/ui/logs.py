@@ -1,15 +1,25 @@
 """Logs: the admin-only audit trail of actions across the app."""
+
 from __future__ import annotations
 
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QLineEdit,
-    QComboBox, QHeaderView, QCheckBox, QPushButton, QMessageBox,
+    QCheckBox,
+    QComboBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
-from .widgets import muted, page_header
-from . import tasks
 from .. import db
+from . import tasks
+from .widgets import muted, page_header
 
 # action key -> (friendly label, colour) for the table
 ACTION_LABELS = {
@@ -81,12 +91,15 @@ class LogsPage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(12)
-        self.verify_btn = QPushButton("Verify integrity"); self.verify_btn.setObjectName("ghost")
+        self.verify_btn = QPushButton("Verify integrity")
+        self.verify_btn.setObjectName("ghost")
         self.verify_btn.clicked.connect(self.verify_integrity)
-        self.clear_btn = QPushButton("Clear old logs…"); self.clear_btn.setObjectName("ghost")
+        self.clear_btn = QPushButton("Clear old logs…")
+        self.clear_btn.setObjectName("ghost")
         self.clear_btn.clicked.connect(self.clear_old)
-        header, self.sub = page_header("Logs", "Audit trail of activity",
-                                       self.verify_btn, self.clear_btn)
+        header, self.sub = page_header(
+            "Logs", "Audit trail of activity", self.verify_btn, self.clear_btn
+        )
         root.addWidget(header)
 
         bar = QHBoxLayout()
@@ -94,12 +107,14 @@ class LogsPage(QWidget):
         self.search.setPlaceholderText("Search user / action / detail…")
         self.search.setMinimumHeight(40)
         self.search.textChanged.connect(tasks.debounce(self, self.refresh))
-        self.action = QComboBox(); self.action.setMinimumHeight(40)
+        self.action = QComboBox()
+        self.action.setMinimumHeight(40)
         self.action.addItem("All actions", "")
         for key, (lbl, _c) in ACTION_LABELS.items():
             self.action.addItem(lbl, key)
         self.action.currentIndexChanged.connect(self.refresh)
-        self.today = QCheckBox("Today only"); self.today.toggled.connect(self.refresh)
+        self.today = QCheckBox("Today only")
+        self.today.toggled.connect(self.refresh)
         bar.addWidget(self.search, 1)
         bar.addWidget(self.action)
         bar.addWidget(self.today)
@@ -126,26 +141,32 @@ class LogsPage(QWidget):
 
     def refresh(self):
         q = f"%{self.search.text().strip()}%"
-        sql = ("SELECT at, username, action, detail FROM audit_log "
-               "WHERE (username LIKE ? OR action LIKE ? OR detail LIKE ?)")
+        sql = (
+            "SELECT at, username, action, detail FROM audit_log "
+            "WHERE (username LIKE ? OR action LIKE ? OR detail LIKE ?)"
+        )
         args = [q, q, q]
         a = self.action.currentData()
         if a:
-            sql += " AND action=?"; args.append(a)
+            sql += " AND action=?"
+            args.append(a)
         if self.today.isChecked():
             sql += " AND date(at)=date('now','localtime')"
         sql += " ORDER BY id DESC LIMIT 1000"
         rows = self.con.execute(sql, args).fetchall()
         self.table.setRowCount(0)
         for r in rows:
-            i = self.table.rowCount(); self.table.insertRow(i)
+            i = self.table.rowCount()
+            self.table.insertRow(i)
             self.table.setItem(i, 0, QTableWidgetItem((r["at"] or "")[:19]))
             self.table.setItem(i, 1, QTableWidgetItem(r["username"] or ""))
             lbl, col = ACTION_LABELS.get(r["action"], (r["action"] or "", None))
             ai = QTableWidgetItem(lbl)
             if col:
                 ai.setForeground(QColor(col))
-                f = ai.font(); f.setBold(True); ai.setFont(f)
+                f = ai.font()
+                f.setBold(True)
+                ai.setFont(f)
             self.table.setItem(i, 2, ai)
             self.table.setItem(i, 3, QTableWidgetItem(r["detail"] or ""))
         n = len(rows)
@@ -159,20 +180,31 @@ class LogsPage(QWidget):
                 return
             ok, bad = result
             if ok:
-                QMessageBox.information(self, "Logs",
-                                        "Audit log integrity OK — the hash chain is intact.")
+                QMessageBox.information(
+                    self, "Logs", "Audit log integrity OK — the hash chain is intact."
+                )
             else:
-                QMessageBox.warning(self, "Logs",
-                                    f"Integrity check FAILED near entry #{bad}. "
-                                    "The audit log appears to have been altered or truncated.")
-        tasks.run_in_background(self, lambda con: db.verify_audit_chain(con), done,
-                                clicked=self.verify_btn, lock=(self.clear_btn,),
-                                busy_text="Verifying…")
+                QMessageBox.warning(
+                    self,
+                    "Logs",
+                    f"Integrity check FAILED near entry #{bad}. "
+                    "The audit log appears to have been altered or truncated.",
+                )
+
+        tasks.run_in_background(
+            self,
+            lambda con: db.verify_audit_chain(con),
+            done,
+            clicked=self.verify_btn,
+            lock=(self.clear_btn,),
+            busy_text="Verifying…",
+        )
 
     def clear_old(self):
-        if QMessageBox.question(
-            self, "Clear logs", "Delete audit-log entries older than 90 days?"
-        ) != QMessageBox.Yes:
+        if (
+            QMessageBox.question(self, "Clear logs", "Delete audit-log entries older than 90 days?")
+            != QMessageBox.Yes
+        ):
             return
         user = self.user["username"]
 
@@ -189,5 +221,6 @@ class LogsPage(QWidget):
                 QMessageBox.warning(self, "Clear logs", f"Could not clear logs:\n{result}")
             self.refresh()
 
-        tasks.run_in_background(self, work, done, clicked=self.clear_btn,
-                                lock=(self.verify_btn,), busy_text="Clearing…")
+        tasks.run_in_background(
+            self, work, done, clicked=self.clear_btn, lock=(self.verify_btn,), busy_text="Clearing…"
+        )

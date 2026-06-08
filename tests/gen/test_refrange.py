@@ -14,6 +14,7 @@ Boundary behaviour is asserted against the REAL implementation contract:
 Colours: GREEN=#059669 (Normal), AMBER=#d97706 (Low), RED=#dc2626 (High).
 This module alone emits well over 5,000 cases.
 """
+
 from __future__ import annotations
 
 GREEN = "#059669"
@@ -39,11 +40,12 @@ def register(t):
         (70.0, 110.0),
         (0.5, 1.2),
         (135.0, 145.0),
-        (-5.0, 5.0),      # negative lower bound
-        (10.0, 10.0),     # degenerate lo==hi
+        (-5.0, 5.0),  # negative lower bound
+        (10.0, 10.0),  # degenerate lo==hi
         (40.0, 60.0),
         (1.0, 9.0),
     ]
+
     # textual presentations of the same range that must behave identically
     def range_texts(lo, hi):
         return [
@@ -51,7 +53,7 @@ def register(t):
             f"{lo}-{hi}",
             f"{lo} - {hi}",
             f"  {lo}   -   {hi}  ",
-            f"{lo}–{hi}",            # en-dash normalised to '-'
+            f"{lo}–{hi}",  # en-dash normalised to '-'
             f"Normal: {lo} - {hi} mg/dL",  # surrounding text, search finds range
         ]
 
@@ -66,8 +68,7 @@ def register(t):
             x += step
         # plus exact boundaries and tiny offsets
         eps = 1e-6
-        vals += [lo, hi, lo - eps, lo + eps, hi - eps, hi + eps,
-                 lo - 1e-9, hi + 1e-9]
+        vals += [lo, hi, lo - eps, lo + eps, hi - eps, hi + eps, lo - 1e-9, hi + 1e-9]
         for ref in range_texts(lo, hi):
             for v in vals:
                 if v < lo:
@@ -168,11 +169,44 @@ def register(t):
     # ------------------------------------------------------------------
     t.section("non-numeric / empty / None values -> None")
     BAD_VALUES = [
-        None, "", "   ", "abc", "Positive", "Negative", "Trace", "Nil",
-        "N/A", "-", "+", "++", "+++", "see note", "pending", "TNTC",
-        "1.2.3", "1-2", "<5", ">5", "5%", "10^3", "e", "nan%", "..",
-        ",", "1..2", "++/-", "?", "*", "1 2", "0x10", "10mg",
-        "yes", "no", "reactive", "non-reactive", "  positive  ",
+        None,
+        "",
+        "   ",
+        "abc",
+        "Positive",
+        "Negative",
+        "Trace",
+        "Nil",
+        "N/A",
+        "-",
+        "+",
+        "++",
+        "+++",
+        "see note",
+        "pending",
+        "TNTC",
+        "1.2.3",
+        "1-2",
+        "<5",
+        ">5",
+        "5%",
+        "10^3",
+        "e",
+        "nan%",
+        "..",
+        ",",
+        "1..2",
+        "++/-",
+        "?",
+        "*",
+        "1 2",
+        "0x10",
+        "10mg",
+        "yes",
+        "no",
+        "reactive",
+        "non-reactive",
+        "  positive  ",
     ]
     GOOD_REFS = ["0 - 100", "< 50", "> 5", "<= 10", ">= 1", "3.5 - 5.5"]
     for bv in BAD_VALUES:
@@ -187,8 +221,10 @@ def register(t):
         for tok in ["inf", "-inf", "+1", "  3.0  ", "1e2", ".5", "5.", "00"]:
             got = flag(tok, ref)
             # must not crash; result is None only if float() rejected it
-            t.check(got is None or (isinstance(got, tuple) and len(got) == 2),
-                    f"edge token {tok!r} ref {ref!r} well-formed result")
+            t.check(
+                got is None or (isinstance(got, tuple) and len(got) == 2),
+                f"edge token {tok!r} ref {ref!r} well-formed result",
+            )
     # specific numeric checks for scientific / signed / leading-zero forms
     t.eq(flag("1e2", "0 - 50"), HIGH, "sci 1e2=100 High")
     t.eq(flag("1e2", "0 - 1000"), NORMAL, "sci 1e2=100 Normal")
@@ -202,9 +238,21 @@ def register(t):
     # 6. Empty / unparsable REF -> None (no numeric pattern found)
     # ------------------------------------------------------------------
     t.section("empty / non-numeric ref -> None")
-    BAD_REFS = [None, "", "   ", "normal", "see comment", "Negative",
-                "refer clinician", "varies", "N/A", "--", "abc - def",
-                "low to high", "x-y"]
+    BAD_REFS = [
+        None,
+        "",
+        "   ",
+        "normal",
+        "see comment",
+        "Negative",
+        "refer clinician",
+        "varies",
+        "N/A",
+        "--",
+        "abc - def",
+        "low to high",
+        "x-y",
+    ]
     for ref in BAD_REFS:
         for v in [0, 1, 5, 50, 100, -3, 99999]:
             t.eq(flag(v, ref), None, f"unparsable ref {ref!r} v={v} -> None")
@@ -227,8 +275,10 @@ def register(t):
         t.eq(flag(b, f"> {b*2:.0f}"), LOW, f"big {b} Low > {b*2}")
     # value-side scientific notation IS accepted by float() and judged correctly
     for tok, ref, want in [
-        ("1e6", "0 - 5000000", NORMAL), ("1e6", "0 - 100", HIGH),
-        ("1e9", "> 1000000000000", LOW), ("1e12", "< 1000000000", HIGH),
+        ("1e6", "0 - 5000000", NORMAL),
+        ("1e6", "0 - 100", HIGH),
+        ("1e9", "> 1000000000000", LOW),
+        ("1e12", "< 1000000000", HIGH),
     ]:
         t.eq(flag(tok, ref), want, f"sci value {tok} ref {ref}")
 

@@ -12,6 +12,7 @@ Contract (see tests/gen/test_billing.py):
   * assertions only via t.check / t.eq / t.near / t.has
   * isolated DB only (t.con); no network
 """
+
 from __future__ import annotations
 
 
@@ -45,10 +46,10 @@ def register(t):
         [pool[0], pool[1]],
         [pool[2], pool[3], pool[4]],
         list(pool[:5]),
-        list(pool),                       # all of them
-        [pool[0], pool[0]],               # duplicate test id
-        [pool[1], pool[1], pool[2]],      # dup + extra
-        [pool[5], pool[3], pool[1]],      # out-of-order ids -> alphabetical out
+        list(pool),  # all of them
+        [pool[0], pool[0]],  # duplicate test id
+        [pool[1], pool[1], pool[2]],  # dup + extra
+        [pool[5], pool[3], pool[1]],  # out-of-order ids -> alphabetical out
         [pool[13], pool[0]],
         [pool[2]],
         [pool[6], pool[7]],
@@ -57,7 +58,7 @@ def register(t):
         [pool[11], pool[12], pool[13]],
         [pool[0], pool[2], pool[4], pool[6], pool[8], pool[10], pool[12]],
         [pool[1], pool[3], pool[5], pool[7], pool[9], pool[11], pool[13]],
-        [pool[4], pool[4], pool[5], pool[5]],   # multiple dups
+        [pool[4], pool[4], pool[5], pool[5]],  # multiple dups
     ]
 
     created_panels = []
@@ -77,8 +78,7 @@ def register(t):
         raw = con.execute(
             "SELECT test_id FROM panel_items WHERE panel_id=? ORDER BY id", (pid,)
         ).fetchall()
-        t.eq([r["test_id"] for r in raw], list(members),
-             f"panel_items mirror input ids set={idx}")
+        t.eq([r["test_id"] for r in raw], list(members), f"panel_items mirror input ids set={idx}")
 
         # panel_tests joins to live tests, DISTINCT-free, alphabetical by name
         pt = db.panel_tests(con, pid)
@@ -97,8 +97,10 @@ def register(t):
             want = con.execute("SELECT charges FROM tests WHERE id=?", (m["id"],)).fetchone()[0]
             t.eq(m["charges"], want, f"panel_tests charge matches test set={idx}")
         # list_panels (active) includes this panel
-        t.check(any(p["id"] == pid for p in db.list_panels(con)),
-                f"list_panels includes new panel set={idx}")
+        t.check(
+            any(p["id"] == pid for p in db.list_panels(con)),
+            f"list_panels includes new panel set={idx}",
+        )
 
     # =====================================================================
     # PART 2 — save_panel UPDATE path replaces members + renames
@@ -111,7 +113,7 @@ def register(t):
     UPDATE_SEQ = [
         ("Renamable v2", [pool[3]]),
         ("Renamable v3", [pool[4], pool[5], pool[6], pool[7]]),
-        ("Renamable v4", []),                       # update to empty
+        ("Renamable v4", []),  # update to empty
         ("Renamable v5", [pool[0], pool[0], pool[1]]),  # dup on update
         ("Renamable v6", list(pool[:8])),
     ]
@@ -119,23 +121,41 @@ def register(t):
         rid = db.save_panel(con, uname, umembers, up_pid)
         t.eq(rid, up_pid, f"save_panel update returns same id ({uname})")
         # name updated
-        t.eq(con.execute("SELECT name FROM panels WHERE id=?", (up_pid,)).fetchone()[0],
-             uname, f"save_panel update renames ({uname})")
+        t.eq(
+            con.execute("SELECT name FROM panels WHERE id=?", (up_pid,)).fetchone()[0],
+            uname,
+            f"save_panel update renames ({uname})",
+        )
         # members fully replaced (no leftovers from prior state)
-        raw = [r["test_id"] for r in con.execute(
-            "SELECT test_id FROM panel_items WHERE panel_id=? ORDER BY id", (up_pid,)).fetchall()]
+        raw = [
+            r["test_id"]
+            for r in con.execute(
+                "SELECT test_id FROM panel_items WHERE panel_id=? ORDER BY id", (up_pid,)
+            ).fetchall()
+        ]
         t.eq(raw, list(umembers), f"save_panel update replaces members ({uname})")
         # re-activates (active stays 1)
-        t.eq(con.execute("SELECT active FROM panels WHERE id=?", (up_pid,)).fetchone()[0], 1,
-             f"save_panel update keeps active=1 ({uname})")
+        t.eq(
+            con.execute("SELECT active FROM panels WHERE id=?", (up_pid,)).fetchone()[0],
+            1,
+            f"save_panel update keeps active=1 ({uname})",
+        )
 
     # idempotent re-save: saving the SAME thing twice yields the same state
     db.save_panel(con, "Idem", [pool[0], pool[1], pool[2]], up_pid)
-    snap1 = [r["test_id"] for r in con.execute(
-        "SELECT test_id FROM panel_items WHERE panel_id=? ORDER BY test_id", (up_pid,)).fetchall()]
+    snap1 = [
+        r["test_id"]
+        for r in con.execute(
+            "SELECT test_id FROM panel_items WHERE panel_id=? ORDER BY test_id", (up_pid,)
+        ).fetchall()
+    ]
     db.save_panel(con, "Idem", [pool[0], pool[1], pool[2]], up_pid)
-    snap2 = [r["test_id"] for r in con.execute(
-        "SELECT test_id FROM panel_items WHERE panel_id=? ORDER BY test_id", (up_pid,)).fetchall()]
+    snap2 = [
+        r["test_id"]
+        for r in con.execute(
+            "SELECT test_id FROM panel_items WHERE panel_id=? ORDER BY test_id", (up_pid,)
+        ).fetchall()
+    ]
     t.eq(snap1, snap2, "save_panel idempotent re-save: same members")
     t.eq(len(snap2), 3, "save_panel idempotent re-save: no duplicate rows")
 
@@ -146,8 +166,11 @@ def register(t):
 
     # whitespace is stripped
     sp = db.save_panel(con, "   Trimmed Name   ", [pool[0]])
-    t.eq(con.execute("SELECT name FROM panels WHERE id=?", (sp,)).fetchone()[0],
-         "Trimmed Name", "save_panel strips surrounding whitespace")
+    t.eq(
+        con.execute("SELECT name FROM panels WHERE id=?", (sp,)).fetchone()[0],
+        "Trimmed Name",
+        "save_panel strips surrounding whitespace",
+    )
 
     # blank / whitespace-only / None names rejected with ValueError, no row added
     for bad in ["", "   ", "\t", "\n", None]:
@@ -169,8 +192,11 @@ def register(t):
 
     # string-coercible test ids are accepted (int(t) in save_panel)
     sc = db.save_panel(con, "StrIds", [str(pool[0]), str(pool[1])])
-    t.eq({m["id"] for m in db.panel_tests(con, sc)}, {pool[0], pool[1]},
-         "save_panel coerces string ids via int()")
+    t.eq(
+        {m["id"] for m in db.panel_tests(con, sc)},
+        {pool[0], pool[1]},
+        "save_panel coerces string ids via int()",
+    )
 
     # =====================================================================
     # PART 4 — delete_panel: soft delete hides + clears members
@@ -178,22 +204,36 @@ def register(t):
     t.section("delete_panel soft-delete semantics")
 
     for idx in range(8):
-        dp = db.save_panel(con, f"Doomed {idx}", [pool[idx % len(pool)], pool[(idx + 1) % len(pool)]])
-        t.check(any(p["id"] == dp for p in db.list_panels(con)),
-                f"doomed panel listed before delete {idx}")
+        dp = db.save_panel(
+            con, f"Doomed {idx}", [pool[idx % len(pool)], pool[(idx + 1) % len(pool)]]
+        )
+        t.check(
+            any(p["id"] == dp for p in db.list_panels(con)),
+            f"doomed panel listed before delete {idx}",
+        )
         db.delete_panel(con, dp)
         # active flag flipped to 0
-        t.eq(con.execute("SELECT active FROM panels WHERE id=?", (dp,)).fetchone()[0], 0,
-             f"delete_panel sets active=0 {idx}")
+        t.eq(
+            con.execute("SELECT active FROM panels WHERE id=?", (dp,)).fetchone()[0],
+            0,
+            f"delete_panel sets active=0 {idx}",
+        )
         # hidden from default list_panels
-        t.check(not any(p["id"] == dp for p in db.list_panels(con)),
-                f"delete_panel hides from list_panels {idx}")
+        t.check(
+            not any(p["id"] == dp for p in db.list_panels(con)),
+            f"delete_panel hides from list_panels {idx}",
+        )
         # but visible with include_inactive=True
-        t.check(any(p["id"] == dp for p in db.list_panels(con, include_inactive=True)),
-                f"delete_panel still in include_inactive list {idx}")
+        t.check(
+            any(p["id"] == dp for p in db.list_panels(con, include_inactive=True)),
+            f"delete_panel still in include_inactive list {idx}",
+        )
         # member rows removed
-        t.eq(con.execute("SELECT COUNT(*) FROM panel_items WHERE panel_id=?", (dp,)).fetchone()[0], 0,
-             f"delete_panel clears panel_items {idx}")
+        t.eq(
+            con.execute("SELECT COUNT(*) FROM panel_items WHERE panel_id=?", (dp,)).fetchone()[0],
+            0,
+            f"delete_panel clears panel_items {idx}",
+        )
         # panel_tests now empty
         t.eq(len(db.panel_tests(con, dp)), 0, f"panel_tests empty after delete {idx}")
 
@@ -201,16 +241,25 @@ def register(t):
     dd = db.save_panel(con, "DoubleDelete", [pool[0]])
     db.delete_panel(con, dd)
     db.delete_panel(con, dd)
-    t.eq(con.execute("SELECT active FROM panels WHERE id=?", (dd,)).fetchone()[0], 0,
-         "double delete_panel stays inactive")
-    t.eq(con.execute("SELECT COUNT(*) FROM panel_items WHERE panel_id=?", (dd,)).fetchone()[0], 0,
-         "double delete_panel keeps members cleared")
+    t.eq(
+        con.execute("SELECT active FROM panels WHERE id=?", (dd,)).fetchone()[0],
+        0,
+        "double delete_panel stays inactive",
+    )
+    t.eq(
+        con.execute("SELECT COUNT(*) FROM panel_items WHERE panel_id=?", (dd,)).fetchone()[0],
+        0,
+        "double delete_panel keeps members cleared",
+    )
 
     # delete of a non-existent panel id does not raise and adds nothing
     before_cnt = con.execute("SELECT COUNT(*) FROM panels").fetchone()[0]
     db.delete_panel(con, 9_999_999)
-    t.eq(con.execute("SELECT COUNT(*) FROM panels").fetchone()[0], before_cnt,
-         "delete_panel of missing id is a no-op")
+    t.eq(
+        con.execute("SELECT COUNT(*) FROM panels").fetchone()[0],
+        before_cnt,
+        "delete_panel of missing id is a no-op",
+    )
 
     # =====================================================================
     # PART 5 — list_panels ordering (alphabetical, case-insensitive)
@@ -234,10 +283,14 @@ def register(t):
 
     def _row(i, ptype="N"):
         return {
-            "id": None, "part_type": ptype,
-            "name": f"Param {i}", "units": f"u{i}",
-            "ref_male": f"m{i}", "ref_female": f"f{i}",
-            "default_result": f"d{i}", "superscript": f"s{i}",
+            "id": None,
+            "part_type": ptype,
+            "name": f"Param {i}",
+            "units": f"u{i}",
+            "ref_male": f"m{i}",
+            "ref_female": f"f{i}",
+            "default_result": f"d{i}",
+            "superscript": f"s{i}",
             "group_head": f"g{i}",
         }
 
@@ -247,7 +300,8 @@ def register(t):
         rows = [_row(i, PART_TYPES[i % len(PART_TYPES)]) for i in range(n)]
         db.save_test_parameters(con, tid, rows)
         stored = con.execute(
-            "SELECT * FROM test_parameters WHERE test_id=? ORDER BY seq", (tid,)).fetchall()
+            "SELECT * FROM test_parameters WHERE test_id=? ORDER BY seq", (tid,)
+        ).fetchall()
         t.eq(len(stored), n, f"insert count matches n={n}")
         # seq is a dense 0..n-1 sequence in insertion order
         t.eq([r["seq"] for r in stored], list(range(n)), f"seq dense 0..n-1 n={n}")
@@ -260,8 +314,9 @@ def register(t):
             t.eq(r["default_result"], f"d{i}", f"default round-trip n={n} i={i}")
             t.eq(r["superscript"], f"s{i}", f"superscript round-trip n={n} i={i}")
             t.eq(r["group_head"], f"g{i}", f"group_head round-trip n={n} i={i}")
-            t.eq(r["part_type"], PART_TYPES[i % len(PART_TYPES)],
-                 f"part_type round-trip n={n} i={i}")
+            t.eq(
+                r["part_type"], PART_TYPES[i % len(PART_TYPES)], f"part_type round-trip n={n} i={i}"
+            )
             t.eq(r["test_id"], tid, f"test_id stamped n={n} i={i}")
 
     # =====================================================================
@@ -270,14 +325,19 @@ def register(t):
     t.section("save_test_parameters defaults for missing/None keys")
 
     dt = _mk_test(con, "DefaultsTest")
-    db.save_test_parameters(con, dt, [
-        {},                                       # totally empty -> all defaults
-        {"name": "OnlyName"},                     # only name
-        {"part_type": None, "name": None},        # explicit None -> defaults
-        {"part_type": "", "name": "EmptyType"},   # empty part_type -> 'N'
-    ])
+    db.save_test_parameters(
+        con,
+        dt,
+        [
+            {},  # totally empty -> all defaults
+            {"name": "OnlyName"},  # only name
+            {"part_type": None, "name": None},  # explicit None -> defaults
+            {"part_type": "", "name": "EmptyType"},  # empty part_type -> 'N'
+        ],
+    )
     drows = con.execute(
-        "SELECT * FROM test_parameters WHERE test_id=? ORDER BY seq", (dt,)).fetchall()
+        "SELECT * FROM test_parameters WHERE test_id=? ORDER BY seq", (dt,)
+    ).fetchall()
     t.eq(len(drows), 4, "defaults: all four rows inserted")
     t.eq(drows[0]["part_type"], "N", "empty dict -> part_type 'N'")
     t.eq(drows[0]["name"], "", "empty dict -> name ''")
@@ -298,7 +358,8 @@ def register(t):
     et = _mk_test(con, "EditTest")
     db.save_test_parameters(con, et, [_row(i) for i in range(6)])
     base = con.execute(
-        "SELECT id,seq,name FROM test_parameters WHERE test_id=? ORDER BY seq", (et,)).fetchall()
+        "SELECT id,seq,name FROM test_parameters WHERE test_id=? ORDER BY seq", (et,)
+    ).fetchall()
     ids = [r["id"] for r in base]
 
     # 8a: re-save identical rows WITH their ids -> same ids, same count (idempotent)
@@ -309,7 +370,8 @@ def register(t):
         same_rows.append(d)
     db.save_test_parameters(con, et, same_rows)
     after = con.execute(
-        "SELECT id,seq FROM test_parameters WHERE test_id=? ORDER BY seq", (et,)).fetchall()
+        "SELECT id,seq FROM test_parameters WHERE test_id=? ORDER BY seq", (et,)
+    ).fetchall()
     t.eq([r["id"] for r in after], ids, "idempotent re-save preserves ids + order")
     t.eq(len(after), 6, "idempotent re-save no duplicate rows")
 
@@ -317,18 +379,28 @@ def register(t):
     for rep in range(5):
         db.save_test_parameters(con, et, same_rows)
         chk = con.execute(
-            "SELECT id FROM test_parameters WHERE test_id=? ORDER BY seq", (et,)).fetchall()
+            "SELECT id FROM test_parameters WHERE test_id=? ORDER BY seq", (et,)
+        ).fetchall()
         t.eq([r["id"] for r in chk], ids, f"repeated idempotent re-save stable rep={rep}")
-        t.eq(con.execute("SELECT COUNT(*) FROM test_parameters WHERE test_id=?", (et,)).fetchone()[0],
-             6, f"repeated re-save no growth rep={rep}")
+        t.eq(
+            con.execute("SELECT COUNT(*) FROM test_parameters WHERE test_id=?", (et,)).fetchone()[
+                0
+            ],
+            6,
+            f"repeated re-save no growth rep={rep}",
+        )
 
     # 8b: reverse the order, keeping ids -> ids follow new seq order
     rev = list(reversed(same_rows))
     db.save_test_parameters(con, et, rev)
     rev_after = con.execute(
-        "SELECT id,seq FROM test_parameters WHERE test_id=? ORDER BY seq", (et,)).fetchall()
-    t.eq([r["id"] for r in rev_after], list(reversed(ids)),
-         "reorder by reversing keeps ids, flips order")
+        "SELECT id,seq FROM test_parameters WHERE test_id=? ORDER BY seq", (et,)
+    ).fetchall()
+    t.eq(
+        [r["id"] for r in rev_after],
+        list(reversed(ids)),
+        "reorder by reversing keeps ids, flips order",
+    )
     t.eq([r["seq"] for r in rev_after], list(range(6)), "reorder re-densifies seq 0..5")
 
     # 8c: edit a field in place keeps id, updates value
@@ -340,9 +412,9 @@ def register(t):
         edit_rows.append(d)
     db.save_test_parameters(con, et, edit_rows)
     edited = con.execute(
-        "SELECT id,name FROM test_parameters WHERE test_id=? ORDER BY seq", (et,)).fetchall()
-    t.eq([r["id"] for r in edited], [r["id"] for r in rev_after],
-         "in-place edit keeps ids")
+        "SELECT id,name FROM test_parameters WHERE test_id=? ORDER BY seq", (et,)
+    ).fetchall()
+    t.eq([r["id"] for r in edited], [r["id"] for r in rev_after], "in-place edit keeps ids")
     for i, r in enumerate(edited):
         t.eq(r["name"], f"Edited {i}", f"in-place edit updates name i={i}")
 
@@ -351,14 +423,20 @@ def register(t):
     survivor_ids = [r["id"] for r in keep_rows]
     db.save_test_parameters(con, et, keep_rows)
     surv = con.execute(
-        "SELECT id FROM test_parameters WHERE test_id=? ORDER BY seq", (et,)).fetchall()
-    t.eq([r["id"] for r in surv], survivor_ids, "dropping unused rows removes them, keeps survivors")
+        "SELECT id FROM test_parameters WHERE test_id=? ORDER BY seq", (et,)
+    ).fetchall()
+    t.eq(
+        [r["id"] for r in surv], survivor_ids, "dropping unused rows removes them, keeps survivors"
+    )
     t.eq(len(surv), 3, "dropped rows actually deleted")
 
     # 8e: clear all rows
     db.save_test_parameters(con, et, [])
-    t.eq(con.execute("SELECT COUNT(*) FROM test_parameters WHERE test_id=?", (et,)).fetchone()[0], 0,
-         "save_test_parameters with [] clears all rows")
+    t.eq(
+        con.execute("SELECT COUNT(*) FROM test_parameters WHERE test_id=?", (et,)).fetchone()[0],
+        0,
+        "save_test_parameters with [] clears all rows",
+    )
 
     # =====================================================================
     # PART 9 — unknown id treated as new INSERT (not UPDATE of foreign row)
@@ -368,11 +446,14 @@ def register(t):
     ut = _mk_test(con, "UnknownIdTest")
     # id that doesn't belong to this test (huge) should be inserted as new,
     # NOT update some other test's parameter
-    db.save_test_parameters(con, ut, [
-        {"id": 9_000_001, "part_type": "N", "name": "Ghost"},
-    ])
-    grows = con.execute(
-        "SELECT id,name FROM test_parameters WHERE test_id=?", (ut,)).fetchall()
+    db.save_test_parameters(
+        con,
+        ut,
+        [
+            {"id": 9_000_001, "part_type": "N", "name": "Ghost"},
+        ],
+    )
+    grows = con.execute("SELECT id,name FROM test_parameters WHERE test_id=?", (ut,)).fetchall()
     t.eq(len(grows), 1, "unknown id inserts one row")
     t.eq(grows[0]["name"], "Ghost", "unknown-id row stored under this test")
     t.check(grows[0]["id"] != 9_000_001, "unknown id NOT reused (autoincrement assigns fresh)")
@@ -384,32 +465,44 @@ def register(t):
 
     for trial in range(12):
         gt = _mk_test(con, f"GuardTest {trial}")
-        db.save_test_parameters(con, gt, [
-            {"id": None, "part_type": "N", "name": f"Keep{trial}"},
-            {"id": None, "part_type": "N", "name": f"Used{trial}"},
-            {"id": None, "part_type": "N", "name": f"Other{trial}"},
-        ])
+        db.save_test_parameters(
+            con,
+            gt,
+            [
+                {"id": None, "part_type": "N", "name": f"Keep{trial}"},
+                {"id": None, "part_type": "N", "name": f"Used{trial}"},
+                {"id": None, "part_type": "N", "name": f"Other{trial}"},
+            ],
+        )
         rows = con.execute(
-            "SELECT id,name FROM test_parameters WHERE test_id=? ORDER BY seq", (gt,)).fetchall()
+            "SELECT id,name FROM test_parameters WHERE test_id=? ORDER BY seq", (gt,)
+        ).fetchall()
         used_id = rows[1]["id"]
         # attach a saved result to the middle parameter
         gri = con.execute(
             "INSERT INTO receipts(lab_no,patient_name,sex,status) VALUES(?,?,?,?)",
-            (f"LAB_GUARD_{trial}", "GP", "Male", "reported")).lastrowid
+            (f"LAB_GUARD_{trial}", "GP", "Male", "reported"),
+        ).lastrowid
         git = con.execute(
             "INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) VALUES(?,?,?,0)",
-            (gri, gt, "x")).lastrowid
+            (gri, gt, "x"),
+        ).lastrowid
         con.execute(
             "INSERT INTO results(receipt_item_id,parameter_id,name,value) VALUES(?,?,?,?)",
-            (git, used_id, f"Used{trial}", "42"))
+            (git, used_id, f"Used{trial}", "42"),
+        )
         con.commit()
 
         # attempt to save a set that OMITS the in-use param -> must raise + rollback
         raised = False
         try:
-            db.save_test_parameters(con, gt, [
-                {"id": rows[0]["id"], "part_type": "N", "name": f"Keep{trial}-edited"},
-            ])
+            db.save_test_parameters(
+                con,
+                gt,
+                [
+                    {"id": rows[0]["id"], "part_type": "N", "name": f"Keep{trial}-edited"},
+                ],
+            )
         except db.ParameterInUseError as e:
             raised = True
             t.check(f"Used{trial}" in e.names, f"ParameterInUseError names the param trial={trial}")
@@ -417,29 +510,42 @@ def register(t):
 
         # rollback invariant: NOTHING from the rejected save persisted
         post = con.execute(
-            "SELECT id,name FROM test_parameters WHERE test_id=? ORDER BY seq", (gt,)).fetchall()
+            "SELECT id,name FROM test_parameters WHERE test_id=? ORDER BY seq", (gt,)
+        ).fetchall()
         t.eq(len(post), 3, f"rejected save rolled back: row count unchanged trial={trial}")
         post_names = {r["name"] for r in post}
-        t.check(f"Keep{trial}-edited" not in post_names,
-                f"rejected save did not apply the edit trial={trial}")
-        t.check(f"Keep{trial}" in post_names,
-                f"original Keep survives the rollback trial={trial}")
-        t.check(any(r["id"] == used_id for r in post),
-                f"in-use parameter survives rejected delete trial={trial}")
+        t.check(
+            f"Keep{trial}-edited" not in post_names,
+            f"rejected save did not apply the edit trial={trial}",
+        )
+        t.check(f"Keep{trial}" in post_names, f"original Keep survives the rollback trial={trial}")
+        t.check(
+            any(r["id"] == used_id for r in post),
+            f"in-use parameter survives rejected delete trial={trial}",
+        )
 
         # a save that KEEPS the in-use param (and edits others) succeeds
-        db.save_test_parameters(con, gt, [
-            {"id": rows[0]["id"], "part_type": "N", "name": f"Keep{trial}"},
-            {"id": used_id, "part_type": "N", "name": f"Used{trial}-renamed"},
-        ])
+        db.save_test_parameters(
+            con,
+            gt,
+            [
+                {"id": rows[0]["id"], "part_type": "N", "name": f"Keep{trial}"},
+                {"id": used_id, "part_type": "N", "name": f"Used{trial}-renamed"},
+            ],
+        )
         ok = con.execute(
-            "SELECT id,name FROM test_parameters WHERE test_id=? ORDER BY seq", (gt,)).fetchall()
+            "SELECT id,name FROM test_parameters WHERE test_id=? ORDER BY seq", (gt,)
+        ).fetchall()
         t.eq(len(ok), 2, f"keeping in-use param allows save trial={trial}")
-        t.check(any(r["id"] == used_id and r["name"] == f"Used{trial}-renamed" for r in ok),
-                f"in-use param can be renamed in place trial={trial}")
+        t.check(
+            any(r["id"] == used_id and r["name"] == f"Used{trial}-renamed" for r in ok),
+            f"in-use param can be renamed in place trial={trial}",
+        )
         # the Other param (no results) was dropped successfully
-        t.check(f"Other{trial}" not in {r["name"] for r in ok},
-                f"unused Other param dropped trial={trial}")
+        t.check(
+            f"Other{trial}" not in {r["name"] for r in ok},
+            f"unused Other param dropped trial={trial}",
+        )
 
     # =====================================================================
     # PART 11 — extreme / garbage values stored verbatim
@@ -453,11 +559,10 @@ def register(t):
         {"id": None, "part_type": "N", "name": big, "units": big},
         {"id": None, "part_type": "N", "name": weird, "ref_male": weird},
         {"id": None, "part_type": "N", "name": "neg-seq-test"},
-        {"id": None, "part_type": "ZZZZ", "name": "longtype"},   # part_type not validated
+        {"id": None, "part_type": "ZZZZ", "name": "longtype"},  # part_type not validated
     ]
     db.save_test_parameters(con, xt, xrows)
-    xs = con.execute(
-        "SELECT * FROM test_parameters WHERE test_id=? ORDER BY seq", (xt,)).fetchall()
+    xs = con.execute("SELECT * FROM test_parameters WHERE test_id=? ORDER BY seq", (xt,)).fetchall()
     t.eq(len(xs), 4, "extreme: all rows inserted")
     t.eq(xs[0]["name"], big, "very long name stored verbatim")
     t.eq(xs[0]["units"], big, "very long units stored verbatim")
@@ -475,13 +580,25 @@ def register(t):
     tb = _mk_test(con, "IsoB")
     db.save_test_parameters(con, ta, [_row(i) for i in range(4)])
     db.save_test_parameters(con, tb, [_row(i) for i in range(7)])
-    t.eq(con.execute("SELECT COUNT(*) FROM test_parameters WHERE test_id=?", (ta,)).fetchone()[0], 4,
-         "test A param count isolated")
-    t.eq(con.execute("SELECT COUNT(*) FROM test_parameters WHERE test_id=?", (tb,)).fetchone()[0], 7,
-         "test B param count isolated")
+    t.eq(
+        con.execute("SELECT COUNT(*) FROM test_parameters WHERE test_id=?", (ta,)).fetchone()[0],
+        4,
+        "test A param count isolated",
+    )
+    t.eq(
+        con.execute("SELECT COUNT(*) FROM test_parameters WHERE test_id=?", (tb,)).fetchone()[0],
+        7,
+        "test B param count isolated",
+    )
     # editing A leaves B untouched
     db.save_test_parameters(con, ta, [])
-    t.eq(con.execute("SELECT COUNT(*) FROM test_parameters WHERE test_id=?", (tb,)).fetchone()[0], 7,
-         "clearing A does not touch B")
-    t.eq(con.execute("SELECT COUNT(*) FROM test_parameters WHERE test_id=?", (ta,)).fetchone()[0], 0,
-         "clearing A actually clears A")
+    t.eq(
+        con.execute("SELECT COUNT(*) FROM test_parameters WHERE test_id=?", (tb,)).fetchone()[0],
+        7,
+        "clearing A does not touch B",
+    )
+    t.eq(
+        con.execute("SELECT COUNT(*) FROM test_parameters WHERE test_id=?", (ta,)).fetchone()[0],
+        0,
+        "clearing A actually clears A",
+    )

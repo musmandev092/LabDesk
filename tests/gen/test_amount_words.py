@@ -9,11 +9,31 @@ Focus: src/labdesk/report.py :: _amount_in_words(amount)
 
 Assertions only via t.check / t.eq / t.near / t.has.
 """
+
 from __future__ import annotations
 
-_ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
-         "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen",
-         "Eighteen", "Nineteen"]
+_ONES = [
+    "",
+    "One",
+    "Two",
+    "Three",
+    "Four",
+    "Five",
+    "Six",
+    "Seven",
+    "Eight",
+    "Nine",
+    "Ten",
+    "Eleven",
+    "Twelve",
+    "Thirteen",
+    "Fourteen",
+    "Fifteen",
+    "Sixteen",
+    "Seventeen",
+    "Eighteen",
+    "Nineteen",
+]
 _TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"]
 
 
@@ -120,10 +140,14 @@ def register(t):
         10000000: "One Crore Rupees Only",
         10000001: "One Crore One Rupees Only",
         10100000: "One Crore One Lakh Rupees Only",
-        12345678: ("One Crore Twenty Three Lakh Forty Five Thousand "
-                   "Six Hundred Seventy Eight Rupees Only"),
-        99999999: ("Nine Crore Ninety Nine Lakh Ninety Nine Thousand "
-                   "Nine Hundred Ninety Nine Rupees Only"),
+        12345678: (
+            "One Crore Twenty Three Lakh Forty Five Thousand "
+            "Six Hundred Seventy Eight Rupees Only"
+        ),
+        99999999: (
+            "Nine Crore Ninety Nine Lakh Ninety Nine Thousand "
+            "Nine Hundred Ninety Nine Rupees Only"
+        ),
         100000000: "Ten Crore Rupees Only",
         990000000: "Ninety Nine Crore Rupees Only",
     }
@@ -135,7 +159,7 @@ def register(t):
     # ------------------------------------------------------------------ #
     t.section("lakh/crore boundaries")
     boundaries = []
-    for base in (1000, 100_000, 10_000_000):           # thousand, lakh, crore
+    for base in (1000, 100_000, 10_000_000):  # thousand, lakh, crore
         for k in (1, 2, 9, 10, 11, 99):
             center = base * k
             for d in (-2, -1, 0, 1, 2):
@@ -175,12 +199,12 @@ def register(t):
     frac_cases = {
         0.0: "Zero Rupees Only",
         0.4: "Zero Rupees Only",
-        0.5: "Zero Rupees Only",      # banker's: round(0.5)==0
+        0.5: "Zero Rupees Only",  # banker's: round(0.5)==0
         0.6: "One Rupees Only",
-        1.5: "Two Rupees Only",       # banker's: round(1.5)==2
-        2.5: "Two Rupees Only",       # banker's: round(2.5)==2
+        1.5: "Two Rupees Only",  # banker's: round(1.5)==2
+        2.5: "Two Rupees Only",  # banker's: round(2.5)==2
         99.49: "Ninety Nine Rupees Only",
-        99.5: "One Hundred Rupees Only",   # round(99.5)==100
+        99.5: "One Hundred Rupees Only",  # round(99.5)==100
         999.6: "One Thousand Rupees Only",
         1000.49: "One Thousand Rupees Only",
     }
@@ -206,8 +230,12 @@ def register(t):
     # ------------------------------------------------------------------ #
     t.section("large/extreme values")
     extremes = [
-        25_00_00_000, 50_00_00_000, 75_00_00_000,
-        98_76_54_321, 99_00_00_000, 99_99_99_999,   # 99,99,99,999 = max < 100cr
+        25_00_00_000,
+        50_00_00_000,
+        75_00_00_000,
+        98_76_54_321,
+        99_00_00_000,
+        99_99_99_999,  # 99,99,99,999 = max < 100cr
     ]
     for v in extremes:
         got = w(v)
@@ -224,6 +252,5 @@ def register(t):
     for v in range(0, 99_99_99_999, 137_911):
         got = w(v)
         t.eq(got, _ref_words(v), f"stride({v})")
-        t.check(got.endswith(" Rupees Only") or got == "Zero Rupees Only",
-                f"stride-suffix({v})")
+        t.check(got.endswith(" Rupees Only") or got == "Zero Rupees Only", f"stride-suffix({v})")
         t.check("  " not in got, f"stride-no-double-space({v})")

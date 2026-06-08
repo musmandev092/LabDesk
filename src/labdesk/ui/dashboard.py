@@ -1,11 +1,12 @@
 """Dashboard: at-a-glance stats."""
+
 from __future__ import annotations
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QGridLayout
+from PySide6.QtWidgets import QGridLayout, QVBoxLayout, QWidget
 
-from .widgets import page_header, stat_card, money, card, muted
-from .style import ACCENT, PRIMARY_DARK, AMBER
 from .. import db
+from .style import ACCENT, AMBER, PRIMARY_DARK
+from .widgets import card, money, muted, page_header, stat_card
 
 
 class DashboardPage(QWidget):
@@ -21,14 +22,18 @@ class DashboardPage(QWidget):
 
         grid = QGridLayout()
         grid.setSpacing(14)
-        self.c_receipts = stat_card("Receipts today", "0",
-                                    on_click=lambda: self._go("Receipts / Reports", today=True))
-        self.c_income = stat_card("Income today", "—", ACCENT,
-                                  on_click=lambda: self._go("Accounts"))
-        self.c_pending = stat_card("Pending reports", "0", AMBER,
-                                   on_click=lambda: self._go("Worklist / Results"))
-        self.c_tests = stat_card("Tests in catalog", "0", PRIMARY_DARK,
-                                 on_click=lambda: self._go("Test Catalog"))
+        self.c_receipts = stat_card(
+            "Receipts today", "0", on_click=lambda: self._go("Receipts / Reports", today=True)
+        )
+        self.c_income = stat_card(
+            "Income today", "—", ACCENT, on_click=lambda: self._go("Accounts")
+        )
+        self.c_pending = stat_card(
+            "Pending reports", "0", AMBER, on_click=lambda: self._go("Worklist / Results")
+        )
+        self.c_tests = stat_card(
+            "Tests in catalog", "0", PRIMARY_DARK, on_click=lambda: self._go("Test Catalog")
+        )
         for i, w in enumerate((self.c_receipts, self.c_income, self.c_pending, self.c_tests)):
             grid.addWidget(w, 0, i)
             grid.setColumnStretch(i, 1)
@@ -42,7 +47,9 @@ class DashboardPage(QWidget):
         ]
         step_labels = []
         for s in steps:
-            lbl = muted(s); lbl.setWordWrap(True); step_labels.append(lbl)
+            lbl = muted(s)
+            lbl.setWordWrap(True)
+            step_labels.append(lbl)
         lay.addWidget(card(*step_labels, title="Getting started"))
         lay.addStretch(1)
 

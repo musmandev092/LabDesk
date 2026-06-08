@@ -16,13 +16,12 @@ Covers:
 All assertions are real invariants / known-correct expected values, computed
 independently of the app SQL where possible so a wrong app would FAIL.
 """
-from __future__ import annotations
 
+from __future__ import annotations
 
 # The exact query DoctorsPage.refresh() runs (mirrors doctors.py:102-105).
 _SEARCH_SQL = (
-    "SELECT * FROM doctors WHERE active=1 AND (name LIKE ? OR hospital LIKE ?)"
-    " ORDER BY name"
+    "SELECT * FROM doctors WHERE active=1 AND (name LIKE ? OR hospital LIKE ?)" " ORDER BY name"
 )
 
 
@@ -39,10 +38,13 @@ def _py_match(name, hospital, term):
     LIKE semantics. ASCII casefold mirrors SQLite's default LIKE.
     """
     needle = term.strip()
+
     def low(s):
         # SQLite LIKE lowercases only ASCII A-Z; emulate that, not full unicode.
-        return "".join(chr(c + 32) if 65 <= c <= 90 else chr(c)
-                        for c in (ord(ch) for ch in (s or "")))
+        return "".join(
+            chr(c + 32) if 65 <= c <= 90 else chr(c) for c in (ord(ch) for ch in (s or ""))
+        )
+
     n = low(needle)
     return n in low(name or "") or n in low(hospital or "")
 
@@ -60,8 +62,9 @@ def register(t):
         # Remove receipts that reference our scratch doctors first, else the
         # enforced FK would block the doctor DELETE.
         con.execute(
-            "DELETE FROM receipts WHERE doctor_id IN"
-            " (SELECT id FROM doctors WHERE area=?)", (TAG,))
+            "DELETE FROM receipts WHERE doctor_id IN" " (SELECT id FROM doctors WHERE area=?)",
+            (TAG,),
+        )
         con.execute("DELETE FROM doctors WHERE area=?", (TAG,))
         con.commit()
 
@@ -76,16 +79,24 @@ def register(t):
     # 1. DoctorDialog.values() stripping contract (doctors.py:46-53)
     # ======================================================================
     t.section("dialog values(): whitespace stripping")
-    RAW = ["  Dr. Khan  ", "\tNo Tab\t", "trailing ", " leading", "no_ws",
-           "   ", "", "  multi  word  ", "\n\nNL\n", "x" * 200 + "   "]
+    RAW = [
+        "  Dr. Khan  ",
+        "\tNo Tab\t",
+        "trailing ",
+        " leading",
+        "no_ws",
+        "   ",
+        "",
+        "  multi  word  ",
+        "\n\nNL\n",
+        "x" * 200 + "   ",
+    ]
     for raw in RAW:
         # values() does .strip() on every field.
         stripped = raw.strip()
         t.eq(raw.strip(), stripped, f"strip idempotent {raw!r}")
-        t.check(not stripped.startswith((" ", "\t", "\n")),
-                f"no leading ws {raw!r}")
-        t.check(not stripped.endswith((" ", "\t", "\n")),
-                f"no trailing ws {raw!r}")
+        t.check(not stripped.startswith((" ", "\t", "\n")), f"no leading ws {raw!r}")
+        t.check(not stripped.endswith((" ", "\t", "\n")), f"no trailing ws {raw!r}")
         # add() / edit() reject empty name AFTER stripping.
         name_ok = bool(stripped)
         t.eq(name_ok, len(stripped) > 0, f"empty-name gate {raw!r}")
@@ -95,10 +106,32 @@ def register(t):
     # ======================================================================
     t.section("CRUD: insert / update / soft-delete")
     reset()
-    NAMES = ["Aslam", "Bukhari", "Chaudhry", "Dawood", "Ehsan", "Farid",
-             "Gul", "Habib", "Iqbal", "Javed", "Khan", "Latif",
-             "Mahmood", "Nadeem", "Omar", "Pervez", "Qadir", "Rashid",
-             "Saleem", "Tariq", "Usman", "Waqar", "Yousaf", "Zahid"]
+    NAMES = [
+        "Aslam",
+        "Bukhari",
+        "Chaudhry",
+        "Dawood",
+        "Ehsan",
+        "Farid",
+        "Gul",
+        "Habib",
+        "Iqbal",
+        "Javed",
+        "Khan",
+        "Latif",
+        "Mahmood",
+        "Nadeem",
+        "Omar",
+        "Pervez",
+        "Qadir",
+        "Rashid",
+        "Saleem",
+        "Tariq",
+        "Usman",
+        "Waqar",
+        "Yousaf",
+        "Zahid",
+    ]
     HOSPS = ["City", "General", "DHQ", "THQ", "Allied", "", "Mayo", "Services"]
     ids = []
     for i, nm in enumerate(NAMES):
@@ -145,8 +178,7 @@ def register(t):
 
     # Remaining (still-active) ones DO appear in an empty search.
     active_ids = set(ids[8:])
-    empty_listed = {r["id"] for r in _search(con, "")
-                    if r["area"] == TAG}
+    empty_listed = {r["id"] for r in _search(con, "") if r["area"] == TAG}
     for did in active_ids:
         t.check(did in empty_listed, f"active listed in empty search {did}")
 
@@ -163,8 +195,8 @@ def register(t):
         ("Dr. Chaudhry", "DHQ Sargodha"),
         ("Dr. Hassan Raza", "Allied Lab"),
         ("Dr. Zafar", ""),
-        ("Dr. ümair", "Mayo"),     # non-ASCII name
-        ("Dr. Solo", None),         # NULL hospital
+        ("Dr. ümair", "Mayo"),  # non-ASCII name
+        ("Dr. Solo", None),  # NULL hospital
     ]
     fids = [add_doc(n, h if h is not None else None) for n, h in fixtures]
     # Patch the NULL-hospital one (add_doc passes "" default); set real NULL.
@@ -181,8 +213,11 @@ def register(t):
     t.check("dr. bashir" not in res, "search ali excludes bashir")
     # Same set regardless of query case (ASCII).
     for variant in ["ali", "ALI", "Ali", "aLi"]:
-        t.eq({r["name"] for r in scoped(variant)}, res,
-             f"search case-insensitive variant {variant!r}")
+        t.eq(
+            {r["name"] for r in scoped(variant)},
+            res,
+            f"search case-insensitive variant {variant!r}",
+        )
 
     # 3b. Hospital is searched too; area/tel/mobile are NOT.
     res = {r["name"] for r in scoped("city")}
@@ -196,8 +231,10 @@ def register(t):
     res = {r["name"] for r in scoped("solo")}
     t.eq(res, {"Dr. Solo"}, "NULL-hospital row matched by name")
     # And a hospital-only term simply skips the NULL row (no crash).
-    t.check("Dr. Solo" not in {r["name"] for r in scoped("Mayo")},
-            "NULL hospital not matched by hospital term")
+    t.check(
+        "Dr. Solo" not in {r["name"] for r in scoped("Mayo")},
+        "NULL hospital not matched by hospital term",
+    )
 
     # 3d. Non-ASCII case-folding: SQLite LIKE only lowercases ASCII, so a query
     # with the WRONG unicode case does NOT match (documented SQLite behavior).
@@ -207,8 +244,7 @@ def register(t):
     # 3e. Empty / whitespace search returns ALL active in-scope rows.
     all_scoped = {r["id"] for r in scoped("")}
     t.eq(all_scoped, set(fids), "empty search returns all active")
-    t.eq({r["id"] for r in scoped("   ")}, set(fids),
-         "whitespace-only search stripped -> all")
+    t.eq({r["id"] for r in scoped("   ")}, set(fids), "whitespace-only search stripped -> all")
 
     # 3f. ORDER BY name — result is sorted ascending by name.
     ordered = [r["name"] for r in scoped("")]
@@ -219,11 +255,26 @@ def register(t):
         t.eq(len(scoped(miss)), 0, f"no-match empty {miss!r}")
 
     # 3h. Pure-substring oracle cross-check over many terms (no LIKE metachars).
-    for term in ["Dr", "Hassan", "Ali", "Chaudhry", "Zafar", "Raza",
-                 "Hospital", "DHQ", "Allied", "clinic", "Sargodha", "o"]:
+    for term in [
+        "Dr",
+        "Hassan",
+        "Ali",
+        "Chaudhry",
+        "Zafar",
+        "Raza",
+        "Hospital",
+        "DHQ",
+        "Allied",
+        "clinic",
+        "Sargodha",
+        "o",
+    ]:
         got = {r["id"] for r in scoped(term)}
-        want = {fid for fid, (n, h) in zip(fids, fixtures)
-                if _py_match(n, (h if h is not None else None), term)}
+        want = {
+            fid
+            for fid, (n, h) in zip(fids, fixtures, strict=False)
+            if _py_match(n, (h if h is not None else None), term)
+        }
         t.eq(got, want, f"oracle match term {term!r}")
 
     # 3i. Wildcard leakage: '_' and '%' in an UNescaped term act as LIKE
@@ -261,14 +312,16 @@ def register(t):
     r1 = make_rec_with_doctor(d1, "Dr. Referrer One")
     con.commit()
     joined = con.execute(
-        "SELECT d.name AS dn FROM receipts r JOIN doctors d ON d.id=r.doctor_id"
-        " WHERE r.id=?", (r1,)).fetchone()
+        "SELECT d.name AS dn FROM receipts r JOIN doctors d ON d.id=r.doctor_id" " WHERE r.id=?",
+        (r1,),
+    ).fetchone()
     t.eq(joined["dn"], "Dr. Referrer One", "receipt joins to its doctor")
 
     # 4b. doctor_id may be NULL (walk-in / unknown referrer) — allowed.
     r_null = con.execute(
         "INSERT INTO receipts(doctor_id,subtotal,net_amount,paid,due,status)"
-        " VALUES (NULL,0,0,0,0,'pending')").lastrowid
+        " VALUES (NULL,0,0,0,0,'pending')"
+    ).lastrowid
     con.commit()
     row = con.execute("SELECT doctor_id FROM receipts WHERE id=?", (r_null,)).fetchone()
     t.check(row["doctor_id"] is None, "NULL doctor_id allowed (walk-in)")
@@ -278,7 +331,8 @@ def register(t):
     try:
         con.execute(
             "INSERT INTO receipts(doctor_id,subtotal,net_amount,paid,due,status)"
-            " VALUES (9999999,0,0,0,0,'pending')")
+            " VALUES (9999999,0,0,0,0,'pending')"
+        )
         con.commit()
     except Exception:
         con.rollback()
@@ -292,7 +346,9 @@ def register(t):
     con.commit()
     still = con.execute(
         "SELECT d.name AS dn, d.active AS act FROM receipts r"
-        " JOIN doctors d ON d.id=r.doctor_id WHERE r.doctor_id=?", (d2,)).fetchone()
+        " JOIN doctors d ON d.id=r.doctor_id WHERE r.doctor_id=?",
+        (d2,),
+    ).fetchone()
     t.eq(still["dn"], "Dr. Referrer Two", "linkage survives soft-delete")
     t.eq(still["act"], 0, "referrer now inactive but row present")
 
@@ -300,8 +356,7 @@ def register(t):
     for k in range(5):
         make_rec_with_doctor(d1, "Dr. Referrer One")
     con.commit()
-    cnt = con.execute(
-        "SELECT count(*) FROM receipts WHERE doctor_id=?", (d1,)).fetchone()[0]
+    cnt = con.execute("SELECT count(*) FROM receipts WHERE doctor_id=?", (d1,)).fetchone()[0]
     t.eq(cnt, 6, "referral count per doctor (1 + 5)")
 
     # ======================================================================
@@ -310,12 +365,12 @@ def register(t):
     t.section("RBAC: delete capability gating")
     # CAP_MIN_LEVEL['delete'] == 4; admin(5) only among defined roles.
     EXPECT = {
-        "receptionist": False,   # level 2
-        "technician": False,     # level 3
-        "admin": True,           # level 5
-        "":  False,              # unknown -> level 0
-        "ghost": False,          # unknown role
-        None: False,             # bad input
+        "receptionist": False,  # level 2
+        "technician": False,  # level 3
+        "admin": True,  # level 5
+        "": False,  # unknown -> level 0
+        "ghost": False,  # unknown role
+        None: False,  # bad input
     }
     for role, want in EXPECT.items():
         t.eq(roles.can(role, "delete"), want, f"can({role!r},'delete')")
@@ -323,15 +378,16 @@ def register(t):
     for role, can_del in EXPECT.items():
         for has_selection in (True, False):
             enabled = has_selection and roles.can(role, "delete")
-            t.eq(enabled, has_selection and EXPECT[role],
-                 f"del_btn enabled role={role!r} sel={has_selection}")
+            t.eq(
+                enabled,
+                has_selection and EXPECT[role],
+                f"del_btn enabled role={role!r} sel={has_selection}",
+            )
     # Strict hierarchy: any role that can delete can also do lower caps.
     for role in ROLES_ITER(roles):
         if roles.can(role, "delete"):
-            t.check(roles.can(role, "apply_discount"),
-                    f"{role} delete implies apply_discount")
-            t.check(roles.can(role, "edit_catalog"),
-                    f"{role} delete implies edit_catalog")
+            t.check(roles.can(role, "apply_discount"), f"{role} delete implies apply_discount")
+            t.check(roles.can(role, "edit_catalog"), f"{role} delete implies edit_catalog")
 
     # ======================================================================
     # 6. Boundary / garbage / extreme inputs into doctors table
@@ -362,14 +418,16 @@ def register(t):
 
     # Searching for a literal '%'/'_' name still finds it (term contains the
     # metachar which also matches itself).
-    t.check(any(r["name"] == "Dr. 100% Sure" for r in scoped("100% Sure")),
-            "literal-percent name findable")
+    t.check(
+        any(r["name"] == "Dr. 100% Sure" for r in scoped("100% Sure")),
+        "literal-percent name findable",
+    )
 
     # NULL optional fields are permitted (only name is NOT NULL).
     nid = con.execute(
-        "INSERT INTO doctors(name,hospital,address,area,tel,mobile)"
-        " VALUES (?,?,?,?,?,?)",
-        ("Dr. Minimal", None, None, TAG, None, None)).lastrowid
+        "INSERT INTO doctors(name,hospital,address,area,tel,mobile)" " VALUES (?,?,?,?,?,?)",
+        ("Dr. Minimal", None, None, TAG, None, None),
+    ).lastrowid
     con.commit()
     row = con.execute("SELECT * FROM doctors WHERE id=?", (nid,)).fetchone()
     t.check(row["hospital"] is None, "NULL hospital stored")
@@ -397,11 +455,40 @@ def register(t):
     t.section("fuzz sweep: many doctors x many search terms")
     reset()
     bulk = []
-    surnames = ["Khan", "Ali", "Hassan", "Raza", "Malik", "Butt", "Sheikh",
-                "Mirza", "Shah", "Baig", "Awan", "Cheema", "Gondal", "Dar",
-                "Bhatti", "Sial", "Joya", "Tiwana", "Noon", "Bhutto"]
-    hosps = ["City", "General", "DHQ", "THQ", "Allied", "Mayo", "Services",
-             "Jinnah", "Nishtar", "Civil"]
+    surnames = [
+        "Khan",
+        "Ali",
+        "Hassan",
+        "Raza",
+        "Malik",
+        "Butt",
+        "Sheikh",
+        "Mirza",
+        "Shah",
+        "Baig",
+        "Awan",
+        "Cheema",
+        "Gondal",
+        "Dar",
+        "Bhatti",
+        "Sial",
+        "Joya",
+        "Tiwana",
+        "Noon",
+        "Bhutto",
+    ]
+    hosps = [
+        "City",
+        "General",
+        "DHQ",
+        "THQ",
+        "Allied",
+        "Mayo",
+        "Services",
+        "Jinnah",
+        "Nishtar",
+        "Civil",
+    ]
     for i, sn in enumerate(surnames):
         for j in range(3):
             nm = f"Dr. {sn} {j}"
@@ -438,8 +525,18 @@ def register(t):
     t.section("wide cross-product: substrings x fixtures")
     reset()
     catalog = []
-    firsts = ["Aslam", "Bilal", "Camran", "Danish", "Erum", "Faraz",
-              "Ghazala", "Hamid", "Imran", "Junaid"]
+    firsts = [
+        "Aslam",
+        "Bilal",
+        "Camran",
+        "Danish",
+        "Erum",
+        "Faraz",
+        "Ghazala",
+        "Hamid",
+        "Imran",
+        "Junaid",
+    ]
     places = ["City", "DHQ", "Allied", "Mayo", "Civil", "", "Jinnah"]
     for i, fn in enumerate(firsts):
         nm = f"Dr. {fn}"
@@ -450,10 +547,33 @@ def register(t):
 
     # Single-letter + bigram substrings (no metachars) -> oracle cross-check.
     import string
+
     probes = list(string.ascii_lowercase) + [
-        "dr", "al", "ll", "an", "ci", "ty", "hq", "ay", "vi", "ji", "li",
-        "Dr.", "Aslam", "Mayo", "Allied", "City", "DHQ", "Civil", "Jinnah",
-        "x", "q", "z", " ", "", "  ",
+        "dr",
+        "al",
+        "ll",
+        "an",
+        "ci",
+        "ty",
+        "hq",
+        "ay",
+        "vi",
+        "ji",
+        "li",
+        "Dr.",
+        "Aslam",
+        "Mayo",
+        "Allied",
+        "City",
+        "DHQ",
+        "Civil",
+        "Jinnah",
+        "x",
+        "q",
+        "z",
+        " ",
+        "",
+        "  ",
     ]
     for term in probes:
         if any(c in term for c in "%_"):
@@ -467,12 +587,11 @@ def register(t):
     target_id, old_nm, _ = catalog[0]
     con.execute("UPDATE doctors SET name=? WHERE id=?", ("Dr. Renamed Xyz", target_id))
     con.commit()
-    t.check(target_id not in {r["id"] for r in scoped("Aslam")},
-            "renamed: old term no longer matches")
-    t.check(target_id in {r["id"] for r in scoped("Renamed")},
-            "renamed: new term matches")
-    t.check(target_id in {r["id"] for r in scoped("Xyz")},
-            "renamed: new token matches")
+    t.check(
+        target_id not in {r["id"] for r in scoped("Aslam")}, "renamed: old term no longer matches"
+    )
+    t.check(target_id in {r["id"] for r in scoped("Renamed")}, "renamed: new term matches")
+    t.check(target_id in {r["id"] for r in scoped("Xyz")}, "renamed: new token matches")
 
     # Idempotency: refresh() over the same term twice returns identical ids.
     for term in ["Dr", "City", "a", "Mayo", ""]:
@@ -494,7 +613,8 @@ def register(t):
         mob = f"03{i:08d}"
         did = con.execute(
             "INSERT INTO doctors(name,hospital,area,tel,mobile) VALUES (?,?,?,?,?)",
-            (nm, hp, ar, tel, mob)).lastrowid
+            (nm, hp, ar, tel, mob),
+        ).lastrowid
         rows.append((did, nm, hp, tel, mob))
     con.commit()
     for did, nm, hp, tel, mob in rows:
@@ -507,7 +627,8 @@ def register(t):
     for did, nm, hp, tel, mob in rows:
         con.execute(
             "UPDATE doctors SET name=?,hospital=?,area=?,tel=?,mobile=? WHERE id=?",
-            (nm, hp, TAG, tel, mob + "9", did))
+            (nm, hp, TAG, tel, mob + "9", did),
+        )
     con.commit()
     for did, nm, hp, tel, mob in rows:
         r = con.execute("SELECT * FROM doctors WHERE id=?", (did,)).fetchone()
@@ -524,7 +645,8 @@ def register(t):
         t.check(did in listed, f"bulk odd still listed {did}")
     # Count of active in-scope matches expectation.
     active_n = con.execute(
-        "SELECT count(*) FROM doctors WHERE area=? AND active=1", (TAG,)).fetchone()[0]
+        "SELECT count(*) FROM doctors WHERE area=? AND active=1", (TAG,)
+    ).fetchone()[0]
     t.eq(active_n, len(rows[1::2]), "active count after half soft-delete")
 
     reset()

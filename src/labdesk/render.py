@@ -7,6 +7,7 @@ Pillow. All data/business logic still lives in report.py; this module only draws
 Coordinate model: paint at 300 dpi, position everything in millimetres. Helpers
 mm() (mm→device units) and px() (CSS px@96 → mm) map the old CSS values exactly.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -14,8 +15,21 @@ from pathlib import Path
 
 from PySide6.QtCore import QBuffer, QByteArray, QMarginsF, QRectF, Qt
 from PySide6.QtGui import (
-    QColor, QFont, QFontDatabase, QFontMetricsF, QImage, QPageLayout, QPageSize,
-    QPainter, QPainterPath, QPdfWriter, QPen, qAlpha, qBlue, qGreen, qRed,
+    QColor,
+    QFont,
+    QFontDatabase,
+    QFontMetricsF,
+    QImage,
+    QPageLayout,
+    QPageSize,
+    QPainter,
+    QPainterPath,
+    QPdfWriter,
+    QPen,
+    qAlpha,
+    qBlue,
+    qGreen,
+    qRed,
 )
 
 ASSETS = Path(__file__).with_name("assets")
@@ -57,8 +71,11 @@ def autocrop_image(img: QImage) -> QImage:
             return True
         if abs(a - ba) > 40:
             return False
-        return (abs(qRed(px) - br) <= TOL and abs(qGreen(px) - bgc) <= TOL
-                and abs(qBlue(px) - bb) <= TOL)
+        return (
+            abs(qRed(px) - br) <= TOL
+            and abs(qGreen(px) - bgc) <= TOL
+            and abs(qBlue(px) - bb) <= TOL
+        )
 
     xs = range(0, w, max(1, w // 64))
     ys = range(0, h, max(1, h // 64))
@@ -80,9 +97,12 @@ def autocrop_image(img: QImage) -> QImage:
     if cw < w * 0.05 or ch < h * 0.05 or (cw >= w * 0.98 and ch >= h * 0.98):
         return img
     pad = max(2, int(min(cw, ch) * 0.05))
-    left = max(0, left - pad); top = max(0, top - pad)
-    right = min(w - 1, right + pad); bot = min(h - 1, bot + pad)
+    left = max(0, left - pad)
+    top = max(0, top - pad)
+    right = min(w - 1, right + pad)
+    bot = min(h - 1, bot + pad)
     return img.copy(left, top, right - left + 1, bot - top + 1)
+
 
 DPI = 300
 A4_W_MM, A4_H_MM = 210.0, 297.0
@@ -119,8 +139,10 @@ def _ensure_app():
     """Qt painting/font APIs need a QGuiApplication. The GUI always has one; this
     only kicks in for headless use (a script/test that exports a PDF directly)."""
     from PySide6.QtWidgets import QApplication
+
     if QApplication.instance() is None:
         import sys
+
         QApplication(sys.argv[:1])
 
 
@@ -183,7 +205,7 @@ class Doc:
             with contextlib.suppress(Exception):
                 self.w.setPageMargins(QMarginsF(0, 0, 0, 0), QPageLayout.Millimeter)
             with contextlib.suppress(Exception):
-                self.w.setFullPage(True)      # QPrinter: paint the whole sheet ourselves
+                self.w.setFullPage(True)  # QPrinter: paint the whole sheet ourselves
             self.p = QPainter(self.w)
             self._hints()
 
@@ -261,11 +283,11 @@ class Doc:
 
     def hline(self, x, y, w, color, width_px=1.0):
         self.p.setPen(QPen(QColor(color), mm(px(width_px))))
-        self.p.drawLine(QRectF(mm(x), mm(y), mm(w), 0).topLeft(),
-                        QRectF(mm(x), mm(y), mm(w), 0).topRight())
+        self.p.drawLine(
+            QRectF(mm(x), mm(y), mm(w), 0).topLeft(), QRectF(mm(x), mm(y), mm(w), 0).topRight()
+        )
 
-    def text(self, x, y, w, h, s, font, color, align=Qt.AlignLeft | Qt.AlignVCenter,
-             wrap=False):
+    def text(self, x, y, w, h, s, font, color, align=Qt.AlignLeft | Qt.AlignVCenter, wrap=False):
         self.p.setFont(font)
         self.p.setPen(QColor(color))
         flags = int(align)
@@ -282,8 +304,9 @@ class Doc:
             adv = fmpx.horizontalAdvance(s) / DPI * 25.4
             self.p.setFont(font)
             self.p.setPen(QColor(color))
-            self.p.drawText(QRectF(mm(cx), mm(y), mm(adv + 1), mm(h)),
-                            int(Qt.AlignLeft | Qt.AlignVCenter), s)
+            self.p.drawText(
+                QRectF(mm(cx), mm(y), mm(adv + 1), mm(h)), int(Qt.AlignLeft | Qt.AlignVCenter), s
+            )
             cx += adv
         return cx - x
 
@@ -291,14 +314,14 @@ class Doc:
         img = QImage(str(path))
         if img.isNull():
             return 0.0
-        img = autocrop_image(img)          # trim baked-in white/transparent margins
+        img = autocrop_image(img)  # trim baked-in white/transparent margins
         target_h = mm(px(h_px))
         scaled = img.scaledToHeight(int(target_h), Qt.SmoothTransformation)
         w_mm = scaled.width() / DPI * 25.4
-        if center_w is not None:           # horizontally centre within [x, x+center_w]
+        if center_w is not None:  # horizontally centre within [x, x+center_w]
             x = x + (center_w - w_mm) / 2
         self.p.drawImage(QRectF(mm(x), mm(y), scaled.width(), scaled.height()).topLeft(), scaled)
-        return w_mm                        # drawn width in mm
+        return w_mm  # drawn width in mm
 
     def text_height(self, s, font, w, wrap=True) -> float:
         """Measured height in mm for text in a width-w (mm) box."""
@@ -331,17 +354,31 @@ def _wrap_value(fm: QFontMetricsF, text: str, max_px: float, max_lines: int = 2)
     if cur:
         lines.append(cur)
     # elide any single word wider than the cell
-    lines = [ln if fm.horizontalAdvance(ln) <= max_px
-             else fm.elidedText(ln, Qt.ElideRight, max_px) for ln in lines]
+    lines = [
+        ln if fm.horizontalAdvance(ln) <= max_px else fm.elidedText(ln, Qt.ElideRight, max_px)
+        for ln in lines
+    ]
     if len(lines) > max_lines:
         keep = lines[:max_lines]
-        keep[-1] = fm.elidedText(" ".join(lines[max_lines - 1:]), Qt.ElideRight, max_px)
+        keep[-1] = fm.elidedText(" ".join(lines[max_lines - 1 :]), Qt.ElideRight, max_px)
         lines = keep
     return lines
 
 
-def _patient_card(d: Doc, x, y, pairs, *, card_pad=(5, 6), gap=(4, 6),
-                  l_pt=7.5, v_pt=9.5, radius=6, border=BORDER2, max_value_lines=2):
+def _patient_card(
+    d: Doc,
+    x,
+    y,
+    pairs,
+    *,
+    card_pad=(5, 6),
+    gap=(4, 6),
+    l_pt=7.5,
+    v_pt=9.5,
+    radius=6,
+    border=BORDER2,
+    max_value_lines=2,
+):
     """4-column patient card with word-wrapped values. Returns total height in mm."""
     cols = 4
     rows = (len(pairs) + cols - 1) // cols
@@ -366,8 +403,10 @@ def _patient_card(d: Doc, x, y, pairs, *, card_pad=(5, 6), gap=(4, 6),
     # per-row height adapts to the tallest (most-wrapped) value in that row
     row_h = []
     for r in range(rows):
-        n = max((len(wrapped[r * cols + c][1])
-                 for c in range(cols) if r * cols + c < len(wrapped)), default=1)
+        n = max(
+            (len(wrapped[r * cols + c][1]) for c in range(cols) if r * cols + c < len(wrapped)),
+            default=1,
+        )
         row_h.append(l_h + 0.6 + n * v_h + (n - 1) * line_gap)
     card_h = 2 * pv + sum(row_h) + (rows - 1) * gv
     d.rounded(x, y, d.content_w, card_h, radius, fill=LIGHT, border=border)
@@ -379,8 +418,7 @@ def _patient_card(d: Doc, x, y, pairs, *, card_pad=(5, 6), gap=(4, 6),
                 continue
             lbl, lines, vw = wrapped[i]
             cx = x + ph + c * (col_w + gh)
-            d.text(cx, cy, col_w, l_h, lbl.upper(), l_font, MUTED,
-                   Qt.AlignLeft | Qt.AlignVCenter)
+            d.text(cx, cy, col_w, l_h, lbl.upper(), l_font, MUTED, Qt.AlignLeft | Qt.AlignVCenter)
             vy = cy + l_h + 0.6
             for ln in lines:
                 d.text(cx, vy, vw, v_h, ln, v_font, INK, Qt.AlignLeft | Qt.AlignVCenter)
@@ -394,10 +432,12 @@ def _patient_card(d: Doc, x, y, pairs, *, card_pad=(5, 6), gap=(4, 6),
 # ---------------------------------------------------------------------------
 def build_receipt(con, receipt_id: int, device=None, images=False):
     from . import report as R
+
     g = R._g(con)
     r = con.execute("SELECT * FROM receipts WHERE id=?", (receipt_id,)).fetchone()
     items = con.execute(
-        "SELECT * FROM receipt_items WHERE receipt_id=? ORDER BY id", (receipt_id,)).fetchall()
+        "SELECT * FROM receipt_items WHERE receipt_id=? ORDER BY id", (receipt_id,)
+    ).fetchall()
     cur = g("currency", "Rs.")
     subtotal = r["subtotal"] or 0
     net = r["net_amount"] or 0
@@ -407,6 +447,7 @@ def build_receipt(con, receipt_id: int, device=None, images=False):
     change = max(0.0, paid - net)
     reg_by = R._user_display(con, r["created_by"] if "created_by" in r.keys() else "")
     from datetime import datetime
+
     year = (r["received_at"] or "")[:4] or datetime.now().strftime("%Y")
 
     d = Doc(margin_mm=(8, 8, 8, 8), device=device, images=images)
@@ -432,12 +473,28 @@ def build_receipt(con, receipt_id: int, device=None, images=False):
     h2 = _font(11, bold=True, spacing_px=1.0)
     d.text(x0, y, d.content_w, 7, "CASH RECEIPT", h2, TEAL, Qt.AlignRight | Qt.AlignTop)
     meta_f = _font(9)
-    d.text(x0, y + 7.5, d.content_w, 5, f"Date: {(r['received_at'] or '')[:16]}", meta_f, MUTED,
-           Qt.AlignRight | Qt.AlignTop)
+    d.text(
+        x0,
+        y + 7.5,
+        d.content_w,
+        5,
+        f"Date: {(r['received_at'] or '')[:16]}",
+        meta_f,
+        MUTED,
+        Qt.AlignRight | Qt.AlignTop,
+    )
     ry = y + 12.5
     if reg_by:
-        d.text(x0, y + 12, d.content_w, 5, f"Registered by: {reg_by}", meta_f, MUTED,
-               Qt.AlignRight | Qt.AlignTop)
+        d.text(
+            x0,
+            y + 12,
+            d.content_w,
+            5,
+            f"Registered by: {reg_by}",
+            meta_f,
+            MUTED,
+            Qt.AlignRight | Qt.AlignTop,
+        )
         ry = y + 17
     # centre: logo, horizontally AND vertically centred within the header band
     logo_path = (g("logo_path") or "").strip()
@@ -463,8 +520,16 @@ def build_receipt(con, receipt_id: int, device=None, images=False):
     th_f = _font(8.5, bold=True, spacing_px=0.3)
     d.text(x0, y, sr_w, 6, "SR.", th_f, TEAL, Qt.AlignHCenter | Qt.AlignVCenter)
     d.text(x0 + sr_w, y, desc_w, 6, "TEST DESCRIPTION", th_f, TEAL, Qt.AlignLeft | Qt.AlignVCenter)
-    d.text(x0 + sr_w + desc_w, y, rate_w, 6, f"RATE ({cur})", th_f, TEAL,
-           Qt.AlignRight | Qt.AlignVCenter)
+    d.text(
+        x0 + sr_w + desc_w,
+        y,
+        rate_w,
+        6,
+        f"RATE ({cur})",
+        th_f,
+        TEAL,
+        Qt.AlignRight | Qt.AlignVCenter,
+    )
     y += 6.5
     d.hline(x0, y, d.content_w, TEAL, 2)
     y += 0.5
@@ -472,10 +537,26 @@ def build_receipt(con, receipt_id: int, device=None, images=False):
     for i, it in enumerate(items):
         rh = 8.5
         d.text(x0, y, sr_w, rh, str(i + 1), row_f, INK, Qt.AlignHCenter | Qt.AlignVCenter)
-        d.text(x0 + sr_w, y, desc_w, rh, it["test_name"] or "", row_f, INK,
-               Qt.AlignLeft | Qt.AlignVCenter)
-        d.text(x0 + sr_w + desc_w, y, rate_w, rh, f"{(it['charge'] or 0):,.2f}", row_f, INK,
-               Qt.AlignRight | Qt.AlignVCenter)
+        d.text(
+            x0 + sr_w,
+            y,
+            desc_w,
+            rh,
+            it["test_name"] or "",
+            row_f,
+            INK,
+            Qt.AlignLeft | Qt.AlignVCenter,
+        )
+        d.text(
+            x0 + sr_w + desc_w,
+            y,
+            rate_w,
+            rh,
+            f"{(it['charge'] or 0):,.2f}",
+            row_f,
+            INK,
+            Qt.AlignRight | Qt.AlignVCenter,
+        )
         y += rh
         d.hline(x0, y, d.content_w, BORDER2, 1)
     y += 7
@@ -489,18 +570,32 @@ def build_receipt(con, receipt_id: int, device=None, images=False):
     wf_lbl = _font(9.5, bold=True)
     wf_val = _font(9.5)
     words_inner = notes_w - 8
-    wh = 4 + d.text_height("X", wf_lbl, words_inner, False) + 1 + \
-        d.text_height(words, wf_val, words_inner, True) + 4
+    wh = (
+        4
+        + d.text_height("X", wf_lbl, words_inner, False)
+        + 1
+        + d.text_height(words, wf_val, words_inner, True)
+        + 4
+    )
     ny = y
     d.rounded(x0, ny, notes_w, wh, 4, fill=LIGHT)
     d.fill_rect(x0, ny, px(3), wh, ACCENT)  # left accent bar
     d.text(x0 + 4, ny + 4, words_inner, 5, "Amount in words:", wf_lbl, INK)
-    d.text(x0 + 4, ny + 4 + d.text_height("X", wf_lbl, words_inner, False) + 1, words_inner, 10,
-           words, wf_val, INK, Qt.AlignLeft | Qt.AlignTop, wrap=True)
+    d.text(
+        x0 + 4,
+        ny + 4 + d.text_height("X", wf_lbl, words_inner, False) + 1,
+        words_inner,
+        10,
+        words,
+        wf_val,
+        INK,
+        Qt.AlignLeft | Qt.AlignTop,
+        wrap=True,
+    )
     ry = ny + wh + 6
     rem_lbl = _font(8.5, bold=True)
     rem_f = _font(8.5)
-    rem_txt = g("receipt_remarks")          # lab-editable in Settings → Receipt footer
+    rem_txt = g("receipt_remarks")  # lab-editable in Settings → Receipt footer
     d.text(x0, ry, notes_w, 4, "Remarks:", rem_lbl, MUTED)
     d.text(x0, ry + 4, notes_w, 30, rem_txt, rem_f, MUTED, Qt.AlignLeft | Qt.AlignTop, wrap=True)
 
@@ -509,21 +604,33 @@ def build_receipt(con, receipt_id: int, device=None, images=False):
     tfb = _font(10, bold=True)
     lbl_x = tot_x
     ty = y
-    def totrow(label, value, *, lbl_color=MUTED, val_color=INK, val_font=tfb,
-               net_row=False, lbl_font=tf):
+
+    def totrow(
+        label, value, *, lbl_color=MUTED, val_color=INK, val_font=tfb, net_row=False, lbl_font=tf
+    ):
         nonlocal ty
         rh = 8.5 if net_row else 6.5
         if net_row:
             d.hline(tot_x, ty, tot_w, BORDER, 1)
-        d.text(lbl_x, ty, tot_w * 0.5, rh, label, lbl_font, lbl_color, Qt.AlignLeft | Qt.AlignVCenter)
+        d.text(
+            lbl_x, ty, tot_w * 0.5, rh, label, lbl_font, lbl_color, Qt.AlignLeft | Qt.AlignVCenter
+        )
         d.text(tot_x, ty, tot_w, rh, value, val_font, val_color, Qt.AlignRight | Qt.AlignVCenter)
         ty += rh
         if net_row:
             d.hline(tot_x, ty, tot_w, BORDER, 1)
+
     totrow("Total:", f"{subtotal:,.2f}")
     totrow("Discount:", f"{discount:,.2f}")
-    totrow("To Be Paid:", f"{cur} {net:,.2f}", lbl_color=TEAL, val_color=TEAL,
-           val_font=_font(11, bold=True), lbl_font=_font(11, bold=True), net_row=True)
+    totrow(
+        "To Be Paid:",
+        f"{cur} {net:,.2f}",
+        lbl_color=TEAL,
+        val_color=TEAL,
+        val_font=_font(11, bold=True),
+        lbl_font=_font(11, bold=True),
+        net_row=True,
+    )
     totrow("Paid:", f"{paid:,.2f}")
     due_col = RED if due else GREEN
     totrow("Balance:", f"{cur} {due:,.2f}", lbl_color=due_col, val_color=due_col)
@@ -535,18 +642,34 @@ def build_receipt(con, receipt_id: int, device=None, images=False):
     d.hline(x0, fy, d.content_w, BORDER2, 1)
     ff = _font(8)
     ffi = _font(8)
-    d.text(x0, fy + 1.5, d.content_w, 5, f"{g('lab_name')} © {year}", ff, MUTED,
-           Qt.AlignLeft | Qt.AlignVCenter)
-    d.text(x0, fy + 1.5, d.content_w, 5, g("receipt_footer_note"),  # lab-editable in Settings
-           ffi, MUTED, Qt.AlignRight | Qt.AlignVCenter)
+    d.text(
+        x0,
+        fy + 1.5,
+        d.content_w,
+        5,
+        f"{g('lab_name')} © {year}",
+        ff,
+        MUTED,
+        Qt.AlignLeft | Qt.AlignVCenter,
+    )
+    d.text(
+        x0,
+        fy + 1.5,
+        d.content_w,
+        5,
+        g("receipt_footer_note"),  # lab-editable in Settings
+        ffi,
+        MUTED,
+        Qt.AlignRight | Qt.AlignVCenter,
+    )
     return d.tobytes()
 
 
 # ---------------------------------------------------------------------------
 # Lab report
 # ---------------------------------------------------------------------------
-REPORT_HEADER_MM = 57.0    # reserved running-header band (matches CSS @page margin)
-REPORT_FOOTER_MM = 27.0    # reserved running-footer band
+REPORT_HEADER_MM = 57.0  # reserved running-header band (matches CSS @page margin)
+REPORT_FOOTER_MM = 27.0  # reserved running-footer band
 
 
 def _report_letterhead(d: Doc, g, x0, y):
@@ -559,7 +682,9 @@ def _report_letterhead(d: Doc, g, x0, y):
     d.text(tx, y, 130, h1h + 1, g("lab_name"), h1, TEAL)
     cy = y + h1h + 0.8
     if g("lab_subtitle"):
-        d.text(tx, cy, 130, 3.6, g("lab_subtitle").upper(), _font(8, bold=True, spacing_px=0.4), ACCENT)
+        d.text(
+            tx, cy, 130, 3.6, g("lab_subtitle").upper(), _font(8, bold=True, spacing_px=0.4), ACCENT
+        )
         cy += 3.8
     pf = _font(7.3)
     for line in addr_lines:
@@ -587,27 +712,41 @@ def _report_letterhead(d: Doc, g, x0, y):
 
 
 def _rcontacts(g):
-    parts = [f"Ph: {g('phone')}" if g("phone") else "",
-             f"Mob: {g('mobile')}" if g("mobile") else "",
-             g("email") if g("email") else ""]
+    parts = [
+        f"Ph: {g('phone')}" if g("phone") else "",
+        f"Mob: {g('mobile')}" if g("mobile") else "",
+        g("email") if g("email") else "",
+    ]
     return " | ".join(p for p in parts if p)
 
 
 def _rregs(g):
-    parts = [f"PHC Reg #: {g('phc_reg_no')}" if g("phc_reg_no") else "",
-             f"Lab Reg #: {g('lab_reg_no')}" if g("lab_reg_no") else ""]
+    parts = [
+        f"PHC Reg #: {g('phc_reg_no')}" if g("phc_reg_no") else "",
+        f"Lab Reg #: {g('lab_reg_no')}" if g("lab_reg_no") else "",
+    ]
     return " | ".join(p for p in parts if p)
 
 
 def _report_header(d: Doc, con, g, r):
     """Full running header: letterhead + small patient card. Returns body-top y."""
     from . import report as R
+
     x0 = d.ml
     y = _report_letterhead(d, g, x0, d.mt)
     y += 3
-    ch = _patient_card(d, x0, y, R._patient_pairs(r),
-                       card_pad=(2.4, 5), gap=(1.6, 4), l_pt=6.6, v_pt=8.4,
-                       radius=5, border=BORDER)
+    ch = _patient_card(
+        d,
+        x0,
+        y,
+        R._patient_pairs(r),
+        card_pad=(2.4, 5),
+        gap=(1.6, 4),
+        l_pt=6.6,
+        v_pt=8.4,
+        radius=5,
+        border=BORDER,
+    )
     return y + ch + 3
 
 
@@ -621,16 +760,40 @@ def _report_footer(d: Doc, con, g, page_no, total):
     # build bottom-up from page bottom (+4mm: sit the footer a little lower on the page)
     yb = A4_H_MM - d.mb + 4
     # Page X of Y (bottom-right, below everything)
-    d.text(x0, yb - 4, d.content_w, 4, f"Page {page_no} of {total}", _font(7), FAINT,
-           Qt.AlignRight | Qt.AlignVCenter)
+    d.text(
+        x0,
+        yb - 4,
+        d.content_w,
+        4,
+        f"Page {page_no} of {total}",
+        _font(7),
+        FAINT,
+        Qt.AlignRight | Qt.AlignVCenter,
+    )
     cy = yb - 8
     if band:
-        d.text(x0, cy, d.content_w, 4, band, _font(7.3, bold=True, spacing_px=0.3), TEAL,
-               Qt.AlignHCenter | Qt.AlignVCenter)
+        d.text(
+            x0,
+            cy,
+            d.content_w,
+            4,
+            band,
+            _font(7.3, bold=True, spacing_px=0.3),
+            TEAL,
+            Qt.AlignHCenter | Qt.AlignVCenter,
+        )
         cy -= 4.5
     if fline:
-        d.text(x0 + 17, cy, d.content_w - 34, 4, fline, _font(7.3), MUTED,
-               Qt.AlignHCenter | Qt.AlignVCenter)
+        d.text(
+            x0 + 17,
+            cy,
+            d.content_w - 34,
+            4,
+            fline,
+            _font(7.3),
+            MUTED,
+            Qt.AlignHCenter | Qt.AlignVCenter,
+        )
         d.hline(x0 + 17, cy - 0.5, d.content_w - 34, BORDER, 1)
         cy -= 5
     if sigs:
@@ -638,7 +801,9 @@ def _report_footer(d: Doc, con, g, page_no, total):
         for i, (n, t) in enumerate(sigs):
             sx = x0 + 17 + i * sw
             # signatory (doctor) name — larger + bold so it reads as the signature
-            d.text(sx, cy - 5.2, sw, 4.5, n, _font(10, bold=True), INK, Qt.AlignHCenter | Qt.AlignTop)
+            d.text(
+                sx, cy - 5.2, sw, 4.5, n, _font(10, bold=True), INK, Qt.AlignHCenter | Qt.AlignTop
+            )
             d.text(sx, cy - 0.4, sw, 3.5, t, _font(7.3), MUTED, Qt.AlignHCenter | Qt.AlignTop)
 
 
@@ -665,12 +830,16 @@ def _measure_test(d: Doc, con, item, sex, receipt):
     """Return a layout dict for one (non-culture) test: title + columns + rows,
     with per-row heights, so we can paginate."""
     from . import report as R
+
     results = con.execute(
         """SELECT res.*, tp.ref_male AS p_male, tp.ref_female AS p_female
            FROM results res LEFT JOIN test_parameters tp ON tp.id = res.parameter_id
-           WHERE res.receipt_item_id=? ORDER BY res.seq""", (item["id"],)).fetchall()
-    head = con.execute("SELECT report_head, method_note FROM tests WHERE id=?",
-                       (item["test_id"],)).fetchone()
+           WHERE res.receipt_item_id=? ORDER BY res.seq""",
+        (item["id"],),
+    ).fetchall()
+    head = con.execute(
+        "SELECT report_head, method_note FROM tests WHERE id=?", (item["test_id"],)
+    ).fetchone()
     title = (head["report_head"] if head and head["report_head"] else item["test_name"]).title()
     hist_labels, hist_maps = R._history_for_item(con, item, receipt)
     cur_label = (receipt["received_at"] or "")[:10]
@@ -682,7 +851,7 @@ def _measure_test(d: Doc, con, item, sex, receipt):
     rest = d.content_w - cw["test"] - cw["unit"]
     cw["ref"] = rest * 0.46
     rows = []
-    name_f = _font(8.6)            # test name
+    name_f = _font(8.6)  # test name
     ref_f = _font(7.8)
     for res in results:
         if "hidden" in res.keys() and res["hidden"]:
@@ -691,7 +860,7 @@ def _measure_test(d: Doc, con, item, sex, receipt):
             rows.append({"kind": "subhead", "text": res["name"] or "", "h": 5.2})
             continue
         name = (res["name"] or "").strip()
-        val = (str(res["value"]).strip() if res["value"] is not None else "")
+        val = str(res["value"]).strip() if res["value"] is not None else ""
         if not name and not val:
             continue
         ref_ls, flag = _ref_lines(res, sex)
@@ -699,11 +868,28 @@ def _measure_test(d: Doc, con, item, sex, receipt):
         h_name = d.text_height(name, name_f, cw["test"] - 4)
         h_ref = sum(d.text_height(l, ref_f, cw["ref"] - 4) for l in ref_ls)
         rh = max(h_name, h_ref, 5.0) + 2.4
-        rows.append({"kind": "row", "name": name, "ref_lines": ref_ls, "flag": flag,
-                     "unit": res["units"] or "", "pid": pid, "value": res["value"],
-                     "hist": [m.get(pid) for m in hist_maps], "h": rh})
-    return {"title": title, "cw": cw, "hist_labels": hist_labels, "cur_label": cur_label,
-            "rows": rows, "head": head, "item": item}
+        rows.append(
+            {
+                "kind": "row",
+                "name": name,
+                "ref_lines": ref_ls,
+                "flag": flag,
+                "unit": res["units"] or "",
+                "pid": pid,
+                "value": res["value"],
+                "hist": [m.get(pid) for m in hist_maps],
+                "h": rh,
+            }
+        )
+    return {
+        "title": title,
+        "cw": cw,
+        "hist_labels": hist_labels,
+        "cur_label": cur_label,
+        "rows": rows,
+        "head": head,
+        "item": item,
+    }
 
 
 def _draw_test_table(d: Doc, lay, x0, y):
@@ -713,15 +899,26 @@ def _draw_test_table(d: Doc, lay, x0, y):
     body_bottom = A4_H_MM - d.mb - REPORT_FOOTER_MM + 24  # body may use most of page
     # title bar
     d.top_rounded(x0, y, d.content_w, 6.5, 4, TEAL)
-    d.text(x0 + 4, y, d.content_w - 8, 6.5, lay["title"], _font(11, bold=True), "#ffffff",
-           Qt.AlignLeft | Qt.AlignVCenter)
+    d.text(
+        x0 + 4,
+        y,
+        d.content_w - 8,
+        6.5,
+        lay["title"],
+        _font(11, bold=True),
+        "#ffffff",
+        Qt.AlignLeft | Qt.AlignVCenter,
+    )
     y += 6.5
     # header row
-    cols = [("TEST", cw["test"], Qt.AlignLeft), ("REFERENCE RANGE", cw["ref"], Qt.AlignHCenter),
-            ("UNIT", cw["unit"], Qt.AlignHCenter)]
-    valcols = lay["hist_labels"] + [None]   # None => current
+    cols = [
+        ("TEST", cw["test"], Qt.AlignLeft),
+        ("REFERENCE RANGE", cw["ref"], Qt.AlignHCenter),
+        ("UNIT", cw["unit"], Qt.AlignHCenter),
+    ]
+    valcols = lay["hist_labels"] + [None]  # None => current
     each = (d.content_w - cw["test"] - cw["ref"] - cw["unit"]) / len(valcols)
-    th_h = 11.0   # tall enough for "CURRENT" + a two-line date without clipping
+    th_h = 11.0  # tall enough for "CURRENT" + a two-line date without clipping
     cx = x0
     thf = _font(7, bold=True, spacing_px=0.3)
     for label, w, al in cols:
@@ -736,11 +933,18 @@ def _draw_test_table(d: Doc, lay, x0, y):
         if is_cur:
             d.text(cx, y + 1.3, each, 3.2, "CURRENT", thf, "#ffffff", Qt.AlignHCenter | Qt.AlignTop)
             dd = _fmt_two(lay["cur_label"])
-            d.text(cx, y + 4.6, each, 6.0, dd, _font(6.2), "#ffffff",
-                   Qt.AlignHCenter | Qt.AlignTop)
+            d.text(cx, y + 4.6, each, 6.0, dd, _font(6.2), "#ffffff", Qt.AlignHCenter | Qt.AlignTop)
         else:
-            d.text(cx, y, each, th_h, _fmt_one(vl), _font(6.4), "#ffffff",
-                   Qt.AlignHCenter | Qt.AlignVCenter)
+            d.text(
+                cx,
+                y,
+                each,
+                th_h,
+                _fmt_one(vl),
+                _font(6.4),
+                "#ffffff",
+                Qt.AlignHCenter | Qt.AlignVCenter,
+            )
         cx += each
     y += th_h
 
@@ -760,8 +964,16 @@ def _draw_test_table(d: Doc, lay, x0, y):
         if row["kind"] == "subhead":
             d.fill_rect(x0, y, ncols_w, rh, SUBHEAD_BG)
             d.rect(x0, y, ncols_w, rh, BORDER, 1)
-            d.text(x0 + 2, y, ncols_w - 4, rh, row["text"], _font(8.6, bold=True), TEAL_DARK,
-                   Qt.AlignLeft | Qt.AlignVCenter)
+            d.text(
+                x0 + 2,
+                y,
+                ncols_w - 4,
+                rh,
+                row["text"],
+                _font(8.6, bold=True),
+                TEAL_DARK,
+                Qt.AlignLeft | Qt.AlignVCenter,
+            )
             y += rh
             i += 1
             continue
@@ -771,16 +983,33 @@ def _draw_test_table(d: Doc, lay, x0, y):
         cx = x0
         # test name
         d.rect(cx, y, cw["test"], rh, BORDER, 1)
-        d.text(cx + 2, y, cw["test"] - 4, rh, row["name"], name_f, INK,
-               Qt.AlignLeft | Qt.AlignVCenter, wrap=True)
+        d.text(
+            cx + 2,
+            y,
+            cw["test"] - 4,
+            rh,
+            row["name"],
+            name_f,
+            INK,
+            Qt.AlignLeft | Qt.AlignVCenter,
+            wrap=True,
+        )
         cx += cw["test"]
         # ref (possibly 2 lines)
         d.rect(cx, y, cw["ref"], rh, BORDER, 1)
         nlines = len(row["ref_lines"])
         lh = rh / max(nlines, 1)
         for k, line in enumerate(row["ref_lines"]):
-            d.text(cx + 2, y + k * lh, cw["ref"] - 4, lh, line, ref_f, MUTED,
-                   Qt.AlignHCenter | Qt.AlignVCenter)
+            d.text(
+                cx + 2,
+                y + k * lh,
+                cw["ref"] - 4,
+                lh,
+                line,
+                ref_f,
+                MUTED,
+                Qt.AlignHCenter | Qt.AlignVCenter,
+            )
         cx += cw["ref"]
         # unit
         d.rect(cx, y, cw["unit"], rh, BORDER, 1)
@@ -800,6 +1029,7 @@ def _draw_test_table(d: Doc, lay, x0, y):
 
 def _draw_value(d: Doc, x, y, w, h, value, flag, font):
     from . import report as R
+
     if not value:
         d.text(x, y, w, h, "—", font, FAINT, Qt.AlignHCenter | Qt.AlignVCenter)
         return
@@ -820,6 +1050,7 @@ def _draw_value(d: Doc, x, y, w, h, value, flag, font):
 
 def _fmt_two(iso):
     from datetime import datetime
+
     s = (iso or "")[:10]
     try:
         return datetime.strptime(s, "%Y-%m-%d").strftime("%d %b\n%Y")
@@ -829,6 +1060,7 @@ def _fmt_two(iso):
 
 def _fmt_one(iso):
     from datetime import datetime
+
     s = (iso or "")[:10]
     try:
         return datetime.strptime(s, "%Y-%m-%d").strftime("%d %b %Y")
@@ -848,26 +1080,47 @@ def _draw_blocks_after_table(d: Doc, lay, x0, y):
         bh = th + 4
         d.rounded(x0, y, d.content_w, bh, 3, fill=LIGHT)
         d.fill_rect(x0, y, px(3), bh, ACCENT)
-        d.text(x0 + 3, y + 2, inner, bh, f"Remarks: {rem}", bf, INK,
-               Qt.AlignLeft | Qt.AlignTop, wrap=True)
+        d.text(
+            x0 + 3,
+            y + 2,
+            inner,
+            bh,
+            f"Remarks: {rem}",
+            bf,
+            INK,
+            Qt.AlignLeft | Qt.AlignTop,
+            wrap=True,
+        )
         y += bh
     head = lay["head"]
     if head and head["method_note"]:
         import re
+
         note = re.sub(r"[ \t]*\n[ \t]*\n+", "\n", head["method_note"].replace("\r", ""))
         note = re.sub(r"[ \t]{2,}", " ", note).strip()
         y += 2.5
-        d.text(x0, y, d.content_w, 40, f"Method / Comments: {note}", _font(7.5), MUTED,
-               Qt.AlignLeft | Qt.AlignTop, wrap=True)
+        d.text(
+            x0,
+            y,
+            d.content_w,
+            40,
+            f"Method / Comments: {note}",
+            _font(7.5),
+            MUTED,
+            Qt.AlignLeft | Qt.AlignTop,
+            wrap=True,
+        )
     return y
 
 
 def build_report(con, receipt_id: int, device=None, images=False):
     from . import report as R
+
     g = R._g(con)
     r = con.execute("SELECT * FROM receipts WHERE id=?", (receipt_id,)).fetchone()
-    items = con.execute("SELECT * FROM receipt_items WHERE receipt_id=? ORDER BY id",
-                        (receipt_id,)).fetchall()
+    items = con.execute(
+        "SELECT * FROM receipt_items WHERE receipt_id=? ORDER BY id", (receipt_id,)
+    ).fetchall()
     sex = r["sex"]
 
     d = Doc(margin_mm=(8, 8, 8, 8), device=device, images=images)
@@ -880,7 +1133,7 @@ def build_report(con, receipt_id: int, device=None, images=False):
             layouts.append(("culture", it))
         else:
             layouts.append(("test", _measure_test(d, con, it, sex, r)))
-    total_pages = max(1, len(layouts))   # one test per page (overflow adds pages, rare)
+    total_pages = max(1, len(layouts))  # one test per page (overflow adds pages, rare)
 
     page_no = 0
     for idx, (kind, lay) in enumerate(layouts):
@@ -894,67 +1147,134 @@ def build_report(con, receipt_id: int, device=None, images=False):
             y, remaining = _draw_test_table(d, lay, d.ml, body_top)
             while remaining:
                 _report_footer(d, con, g, page_no, total_pages + 1)  # will fix total below
-                d.new_page(); page_no += 1
+                d.new_page()
+                page_no += 1
                 body_top = _report_header(d, con, g, r)
-                lay2 = dict(lay); lay2["rows"] = remaining
+                lay2 = dict(lay)
+                lay2["rows"] = remaining
                 y, remaining = _draw_test_table(d, lay2, d.ml, body_top)
             _draw_blocks_after_table(d, lay, d.ml, y)
         _report_footer(d, con, g, page_no, max(total_pages, page_no))
     if not layouts:
         body_top = _report_header(d, con, g, r)
-        d.text(d.ml, body_top + 10, d.content_w, 10, "No tests on this receipt.",
-               _font(10), MUTED)
+        d.text(d.ml, body_top + 10, d.content_w, 10, "No tests on this receipt.", _font(10), MUTED)
         _report_footer(d, con, g, 1, 1)
     return d.tobytes()
 
 
 def _draw_culture(d: Doc, con, item, x0, y):
-    head = con.execute("SELECT report_head, method_note FROM tests WHERE id=?",
-                       (item["test_id"],)).fetchone()
+    head = con.execute(
+        "SELECT report_head, method_note FROM tests WHERE id=?", (item["test_id"],)
+    ).fetchone()
     title = (head["report_head"] if head and head["report_head"] else item["test_name"]).title()
     d.top_rounded(x0, y, d.content_w, 6.5, 4, TEAL)
-    d.text(x0 + 4, y, d.content_w - 8, 6.5, title, _font(11, bold=True), "#ffffff",
-           Qt.AlignLeft | Qt.AlignVCenter)
+    d.text(
+        x0 + 4,
+        y,
+        d.content_w - 8,
+        6.5,
+        title,
+        _font(11, bold=True),
+        "#ffffff",
+        Qt.AlignLeft | Qt.AlignVCenter,
+    )
     y += 6.5
-    cur = con.execute("SELECT * FROM cultures WHERE receipt_item_id=? ORDER BY id DESC LIMIT 1",
-                      (item["id"],)).fetchone()
+    cur = con.execute(
+        "SELECT * FROM cultures WHERE receipt_item_id=? ORDER BY id DESC LIMIT 1", (item["id"],)
+    ).fetchone()
     if not cur:
         d.text(x0 + 2, y + 2, d.content_w, 6, "No culture result entered.", _font(8.6), MUTED)
         return y + 8
-    for label, val in (("Specimen", cur["specimen"]), ("Growth", cur["growth"]),
-                       ("Organism", cur["organism"]), ("Colony count", cur["colony_count"]),
-                       ("Gram stain", cur["gram_stain"]), ("ZN stain", cur["zn_stain"])):
+    for label, val in (
+        ("Specimen", cur["specimen"]),
+        ("Growth", cur["growth"]),
+        ("Organism", cur["organism"]),
+        ("Colony count", cur["colony_count"]),
+        ("Gram stain", cur["gram_stain"]),
+        ("ZN stain", cur["zn_stain"]),
+    ):
         if not val:
             continue
         rh = 6.5
         d.rect(x0, y, d.content_w * 0.3, rh, BORDER, 1)
-        d.text(x0 + 2, y, d.content_w * 0.3 - 4, rh, label, _font(8.6), INK, Qt.AlignLeft | Qt.AlignVCenter)
+        d.text(
+            x0 + 2,
+            y,
+            d.content_w * 0.3 - 4,
+            rh,
+            label,
+            _font(8.6),
+            INK,
+            Qt.AlignLeft | Qt.AlignVCenter,
+        )
         d.rect(x0 + d.content_w * 0.3, y, d.content_w * 0.7, rh, BORDER, 1)
-        d.text(x0 + d.content_w * 0.3 + 2, y, d.content_w * 0.7 - 4, rh, str(val), _font(8.6, bold=True),
-               INK, Qt.AlignLeft | Qt.AlignVCenter)
+        d.text(
+            x0 + d.content_w * 0.3 + 2,
+            y,
+            d.content_w * 0.7 - 4,
+            rh,
+            str(val),
+            _font(8.6, bold=True),
+            INK,
+            Qt.AlignLeft | Qt.AlignVCenter,
+        )
         y += rh
-    sens = con.execute("SELECT antibiotic, result FROM culture_sensitivity WHERE culture_id=? "
-                       "ORDER BY antibiotic", (cur["id"],)).fetchall()
+    sens = con.execute(
+        "SELECT antibiotic, result FROM culture_sensitivity WHERE culture_id=? "
+        "ORDER BY antibiotic",
+        (cur["id"],),
+    ).fetchall()
     if sens:
         y += 3
         colour = {"S": GREEN, "I": AMBER, "R": RED}
         full = {"S": "Sensitive", "I": "Intermediate", "R": "Resistant"}
         d.fill_rect(x0, y, d.content_w, 7, TEAL)
-        d.text(x0 + 2, y, d.content_w * 0.5, 7, "ANTIBIOTIC", _font(7, bold=True), "#ffffff",
-               Qt.AlignLeft | Qt.AlignVCenter)
-        d.text(x0 + d.content_w * 0.5, y, d.content_w * 0.5, 7, "SENSITIVITY", _font(7, bold=True),
-               "#ffffff", Qt.AlignLeft | Qt.AlignVCenter)
+        d.text(
+            x0 + 2,
+            y,
+            d.content_w * 0.5,
+            7,
+            "ANTIBIOTIC",
+            _font(7, bold=True),
+            "#ffffff",
+            Qt.AlignLeft | Qt.AlignVCenter,
+        )
+        d.text(
+            x0 + d.content_w * 0.5,
+            y,
+            d.content_w * 0.5,
+            7,
+            "SENSITIVITY",
+            _font(7, bold=True),
+            "#ffffff",
+            Qt.AlignLeft | Qt.AlignVCenter,
+        )
         y += 7
         for s in sens:
             rh = 6.5
             res = (s["result"] or "").upper()
             d.rect(x0, y, d.content_w * 0.5, rh, BORDER, 1)
-            d.text(x0 + 2, y, d.content_w * 0.5 - 4, rh, s["antibiotic"] or "", _font(8.6), INK,
-                   Qt.AlignLeft | Qt.AlignVCenter)
+            d.text(
+                x0 + 2,
+                y,
+                d.content_w * 0.5 - 4,
+                rh,
+                s["antibiotic"] or "",
+                _font(8.6),
+                INK,
+                Qt.AlignLeft | Qt.AlignVCenter,
+            )
             d.rect(x0 + d.content_w * 0.5, y, d.content_w * 0.5, rh, BORDER, 1)
-            d.text(x0 + d.content_w * 0.5 + 2, y, d.content_w * 0.5 - 4, rh,
-                   f"{res} — {full.get(res, '')}", _font(8.6, bold=True), colour.get(res, INK),
-                   Qt.AlignLeft | Qt.AlignVCenter)
+            d.text(
+                x0 + d.content_w * 0.5 + 2,
+                y,
+                d.content_w * 0.5 - 4,
+                rh,
+                f"{res} — {full.get(res, '')}",
+                _font(8.6, bold=True),
+                colour.get(res, INK),
+                Qt.AlignLeft | Qt.AlignVCenter,
+            )
             y += rh
     return y
 
@@ -962,20 +1282,28 @@ def _draw_culture(d: Doc, con, item, x0, y):
 def build_test_page(printer_name: str = "", device=None):
     """A small printer-test page (native)."""
     from datetime import datetime
+
     d = Doc(margin_mm=(20, 20, 20, 20), device=device)
     x0 = d.ml
     y = d.mt
     d.rounded(x0, y, d.content_w, 60, 8, border=TEAL, border_px=2)
-    d.text(x0 + 8, y + 6, d.content_w - 16, 10, "LabDesk — Printer Test",
-           _font(20, bold=True), TEAL)
-    d.text(x0 + 8, y + 20, d.content_w - 16, 8, "If you can read this, your printer is working.",
-           _font(12), INK)
+    d.text(
+        x0 + 8, y + 6, d.content_w - 16, 10, "LabDesk — Printer Test", _font(20, bold=True), TEAL
+    )
+    d.text(
+        x0 + 8,
+        y + 20,
+        d.content_w - 16,
+        8,
+        "If you can read this, your printer is working.",
+        _font(12),
+        INK,
+    )
     target = printer_name or "Ask each time (print dialog)"
     when = datetime.now().strftime("%d %b %Y %H:%M")
     d.text(x0 + 8, y + 32, d.content_w - 16, 6, f"Printer: {target}", _font(10), MUTED)
     d.text(x0 + 8, y + 38, d.content_w - 16, 6, when, _font(10), MUTED)
-    d.text(x0 + 8, y + 47, d.content_w - 16, 8, "✓ ↑ ↓ Rs. 1,234.50",
-           _font(13, bold=True), TEAL)
+    d.text(x0 + 8, y + 47, d.content_w - 16, 8, "✓ ↑ ↓ Rs. 1,234.50", _font(13, bold=True), TEAL)
     return d.tobytes()
 
 

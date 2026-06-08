@@ -1,4 +1,5 @@
 """Application-wide palette and stylesheet (light + dark themes)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -40,31 +41,63 @@ SIDE_BOT = "#084a51"
 # Theme palettes. Surface colours differ; the teal brand stays constant.
 # ---------------------------------------------------------------------------
 _LIGHT = {
-    "bg": "#eef1f4", "card": "#ffffff", "text": "#152028", "muted": "#64727d",
-    "border": "#dde3e8", "heading": "#0a5f67", "ghost_text": "#0a5f67",
-    "primary": "#0e7c86", "primary_dark": "#0a5f67", "primary_light": "#e6f4f5",
-    "danger": "#c0392b", "input_bg": "#ffffff", "alt": "#f7fafb",
-    "header_bg": "#eaf1f2", "grid": "#eef1f3", "scroll": "#c2cccf",
-    "scroll_hover": "#aab6ba", "tab_bg": "#e3eaeb", "disabled_bg": "#aebfc1",
-    "disabled_text": "#f0f4f4", "listsep": "#f0f3f4", "side": "#084a51",
-    "side_text": "#cfeaec", "side_sub": "#c8e9eb",
+    "bg": "#eef1f4",
+    "card": "#ffffff",
+    "text": "#152028",
+    "muted": "#64727d",
+    "border": "#dde3e8",
+    "heading": "#0a5f67",
+    "ghost_text": "#0a5f67",
+    "primary": "#0e7c86",
+    "primary_dark": "#0a5f67",
+    "primary_light": "#e6f4f5",
+    "danger": "#c0392b",
+    "input_bg": "#ffffff",
+    "alt": "#f7fafb",
+    "header_bg": "#eaf1f2",
+    "grid": "#eef1f3",
+    "scroll": "#c2cccf",
+    "scroll_hover": "#aab6ba",
+    "tab_bg": "#e3eaeb",
+    "disabled_bg": "#aebfc1",
+    "disabled_text": "#f0f4f4",
+    "listsep": "#f0f3f4",
+    "side": "#084a51",
+    "side_text": "#cfeaec",
+    "side_sub": "#c8e9eb",
 }
 _DARK = {
-    "bg": "#0f1720", "card": "#18222c", "text": "#e6edf2", "muted": "#9aa7b2",
-    "border": "#2a3742", "heading": "#5fd0db", "ghost_text": "#5fd0db",
-    "primary": "#0e7c86", "primary_dark": "#0c6b73", "primary_light": "#15323a",
-    "danger": "#d9544a", "input_bg": "#121b23", "alt": "#1d2832",
-    "header_bg": "#1c2731", "grid": "#243039", "scroll": "#3a4a56",
-    "scroll_hover": "#4a5b68", "tab_bg": "#1c2731", "disabled_bg": "#2a3742",
-    "disabled_text": "#6b7782", "listsep": "#243039", "side": "#08191d",
-    "side_text": "#cfeaec", "side_sub": "#9fc7cb",
+    "bg": "#0f1720",
+    "card": "#18222c",
+    "text": "#e6edf2",
+    "muted": "#9aa7b2",
+    "border": "#2a3742",
+    "heading": "#5fd0db",
+    "ghost_text": "#5fd0db",
+    "primary": "#0e7c86",
+    "primary_dark": "#0c6b73",
+    "primary_light": "#15323a",
+    "danger": "#d9544a",
+    "input_bg": "#121b23",
+    "alt": "#1d2832",
+    "header_bg": "#1c2731",
+    "grid": "#243039",
+    "scroll": "#3a4a56",
+    "scroll_hover": "#4a5b68",
+    "tab_bg": "#1c2731",
+    "disabled_bg": "#2a3742",
+    "disabled_text": "#6b7782",
+    "listsep": "#243039",
+    "side": "#08191d",
+    "side_text": "#cfeaec",
+    "side_sub": "#9fc7cb",
 }
 THEMES = {"light": _LIGHT, "dark": _DARK}
 
 
 def build_qss(theme: str = "light") -> str:
     p = THEMES.get(theme, _LIGHT)
-    _check_line = (f"image: url({_CHECK.as_posix()});" if _CHECK.exists() else "")
+    _check_line = f"image: url({_CHECK.as_posix()});" if _CHECK.exists() else ""
     return f"""
 * {{
     font-family: "Segoe UI", "Inter", "Noto Sans", "DejaVu Sans", sans-serif;
@@ -232,7 +265,8 @@ def apply_theme(app, theme: str = "light") -> None:
     palette — which is white, so they wash out under the dark theme. Setting the
     palette too makes those surfaces follow the theme.
     """
-    from PySide6.QtGui import QPalette, QColor
+    from PySide6.QtGui import QColor, QPalette
+
     p = THEMES.get(theme, _LIGHT)
     app.setStyleSheet(build_qss(theme))
     pal = QPalette()

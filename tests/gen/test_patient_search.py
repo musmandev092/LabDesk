@@ -28,11 +28,12 @@ Visibility rules under test:
 
 Emits well over 1500 assertions.
 """
+
 from __future__ import annotations
 
 import re
 
-from labdesk.ui.widgets import like_term   # the helper the app's search now uses
+from labdesk.ui.widgets import like_term  # the helper the app's search now uses
 
 
 # ---------------------------------------------------------------------------
@@ -66,9 +67,7 @@ def _sqlite_like(pattern: str, value: str) -> bool:
 def _app_visible(name, lab, mr, term) -> bool:
     """Does this receipt match the receipts.py base search for `term`? (COALESCE→'')."""
     q = f"%{term.strip()}%"
-    return (_sqlite_like(q, name or "")
-            or _sqlite_like(q, lab or "")
-            or _sqlite_like(q, mr or ""))
+    return _sqlite_like(q, name or "") or _sqlite_like(q, lab or "") or _sqlite_like(q, mr or "")
 
 
 def register(t):
@@ -87,14 +86,32 @@ def register(t):
     rows = []
 
     base_names = [
-        "Ahmed Ali", "ahmed khan", "AHMED RAZA", "Fatima Noor", "fatima",
-        "Bilal", "bilal_butt", "100% Cotton", "John_Doe", "Jane%Doe",
-        "Zoe", "  Spaced Name  ", "Ünal Çelik", "naïve", "Ali", "ali",
-        "ALI", "Mr Underscore_X", "Pct%Sign", "x", "X", "",
+        "Ahmed Ali",
+        "ahmed khan",
+        "AHMED RAZA",
+        "Fatima Noor",
+        "fatima",
+        "Bilal",
+        "bilal_butt",
+        "100% Cotton",
+        "John_Doe",
+        "Jane%Doe",
+        "Zoe",
+        "  Spaced Name  ",
+        "Ünal Çelik",
+        "naïve",
+        "Ali",
+        "ali",
+        "ALI",
+        "Mr Underscore_X",
+        "Pct%Sign",
+        "x",
+        "X",
+        "",
     ]
     statuses = ["pending", "in_progress", "reported", "delivered"]
 
-    rid_meta = {}   # receipt_id -> (name, lab, mr, status, voided, due, paid, net)
+    rid_meta = {}  # receipt_id -> (name, lab, mr, status, voided, due, paid, net)
     n = 0
     for i, nm in enumerate(base_names):
         for j, st in enumerate(statuses):
@@ -134,37 +151,82 @@ def register(t):
     # equal the set the Python emulator predicts (over OUR rows only).
     t.section("base name/lab/mr LIKE filtering (DB == emulator)")
     search_terms = [
-        "", " ", "ahmed", "AHMED", "Ahmed", "ali", "ALI", "Ali",
-        "fatima", "Fatima", "bilal", "noor", "Doe", "doe",
-        "PSRCH", "PSRCH_LAB", f"{PFX}MR1", "Zoe", "zoe",
-        "Spaced", "spaced name", "Ünal", "ünal", "naïve", "NAÏVE",
-        "Cotton", "cotton", "Underscore", "Sign", "nonexistent_xyz_123",
-        "%", "_", "100%", "John_Doe", "Jane%Doe", "_butt", "Pct%",
-        "x", "X", " ali ", "  ", "z",
+        "",
+        " ",
+        "ahmed",
+        "AHMED",
+        "Ahmed",
+        "ali",
+        "ALI",
+        "Ali",
+        "fatima",
+        "Fatima",
+        "bilal",
+        "noor",
+        "Doe",
+        "doe",
+        "PSRCH",
+        "PSRCH_LAB",
+        f"{PFX}MR1",
+        "Zoe",
+        "zoe",
+        "Spaced",
+        "spaced name",
+        "Ünal",
+        "ünal",
+        "naïve",
+        "NAÏVE",
+        "Cotton",
+        "cotton",
+        "Underscore",
+        "Sign",
+        "nonexistent_xyz_123",
+        "%",
+        "_",
+        "100%",
+        "John_Doe",
+        "Jane%Doe",
+        "_butt",
+        "Pct%",
+        "x",
+        "X",
+        " ali ",
+        "  ",
+        "z",
     ]
-    sql_base = ("SELECT id FROM receipts WHERE (COALESCE(patient_name,'') LIKE ? "
-                "OR COALESCE(lab_no,'') LIKE ? OR COALESCE(mr_no,'') LIKE ?) "
-                "AND id IN (%s)" % ",".join(str(r) for r in rid_meta))
+    sql_base = (
+        "SELECT id FROM receipts WHERE (COALESCE(patient_name,'') LIKE ? "
+        "OR COALESCE(lab_no,'') LIKE ? OR COALESCE(mr_no,'') LIKE ?) "
+        "AND id IN (%s)" % ",".join(str(r) for r in rid_meta)
+    )
     for term in search_terms:
         q = f"%{term.strip()}%"
         got = {r[0] for r in con.execute(sql_base, (q, q, q)).fetchall()}
-        want = {rid for rid, m in all_meta()
-                if _app_visible(m[0], m[1], m[2], term)}
+        want = {rid for rid, m in all_meta() if _app_visible(m[0], m[1], m[2], term)}
         t.eq(got, want, f"base search set term={term!r}")
         # every returned row really matches the emulator (no extras)
         for rid in got:
             m = rid_meta[rid]
-            t.check(_app_visible(m[0], m[1], m[2], term),
-                    f"returned row matches term={term!r} rid={rid}")
+            t.check(
+                _app_visible(m[0], m[1], m[2], term),
+                f"returned row matches term={term!r} rid={rid}",
+            )
         # nothing predicted is missing
-        for rid in (want - got):
+        for rid in want - got:
             t.check(False, f"missing predicted row term={term!r} rid={rid}")
 
     # ============================================ B. case-insensitivity (ASCII)
     t.section("ASCII case-insensitivity")
-    case_pairs = [("ahmed", "AHMED"), ("ali", "ALI"), ("fatima", "FATIMA"),
-                  ("doe", "DOE"), ("cotton", "COTTON"), ("zoe", "ZOE"),
-                  ("psrch", "PSRCH"), ("spaced", "SPACED")]
+    case_pairs = [
+        ("ahmed", "AHMED"),
+        ("ali", "ALI"),
+        ("fatima", "FATIMA"),
+        ("doe", "DOE"),
+        ("cotton", "COTTON"),
+        ("zoe", "ZOE"),
+        ("psrch", "PSRCH"),
+        ("spaced", "SPACED"),
+    ]
     for lo, up in case_pairs:
         ql, qu = f"%{lo}%", f"%{up}%"
         slo = {r[0] for r in con.execute(sql_base, (ql, ql, ql)).fetchall()}
@@ -191,8 +253,20 @@ def register(t):
     # the ACTUAL behaviour the app exposes (these PASS), then separately flag the
     # escaping inconsistency vs. the catalog page as a bug (section H).
     t.section("raw SQL wildcard semantics (no ESCAPE, as app behaves)")
-    wild_terms = ["_", "%", "a_med", "Ah_ed", "J_hn_Doe", "100%Cotton",
-                  "Jane%Doe", "ali_", "_li", "Z_e", "____", "A%i"]
+    wild_terms = [
+        "_",
+        "%",
+        "a_med",
+        "Ah_ed",
+        "J_hn_Doe",
+        "100%Cotton",
+        "Jane%Doe",
+        "ali_",
+        "_li",
+        "Z_e",
+        "____",
+        "A%i",
+    ]
     for term in wild_terms:
         q = f"%{term.strip()}%"
         got = {r[0] for r in con.execute(sql_base, (q, q, q)).fetchall()}
@@ -204,8 +278,7 @@ def register(t):
     # i.e. essentially everything except the all-NULL rows. Pin that.
     q = "%_%"
     got_us = {r[0] for r in con.execute(sql_base, (q, q, q)).fetchall()}
-    non_null = {rid for rid, m in all_meta()
-                if (m[0] or "") or (m[1] or "") or (m[2] or "")}
+    non_null = {rid for rid, m in all_meta() if (m[0] or "") or (m[1] or "") or (m[2] or "")}
     t.eq(got_us, non_null, "bare '_' over-matches all non-empty rows (raw LIKE)")
 
     # ===================================================== E. VOIDED visibility
@@ -222,7 +295,7 @@ def register(t):
         t.check(rid in got, f"voided row visible in base search rid={rid}")
 
     # dues_only filter (AND due>0.005 AND COALESCE(voided,0)=0) excludes voided.
-    sql_dues = (sql_base + f" AND due>0.005 AND {t.db.NOT_VOIDED}")
+    sql_dues = sql_base + f" AND due>0.005 AND {t.db.NOT_VOIDED}"
     q = "%"
     dues_got = {r[0] for r in con.execute(sql_dues, (q, q, q)).fetchall()}
     for rid in dues_got:
@@ -237,10 +310,12 @@ def register(t):
 
     # money totals (refresh() skips voided): SUM over non-voided == manual sum.
     _idlist = ",".join(str(r) for r in rid_meta)
-    sql_tot = ("SELECT COALESCE(SUM(net_amount),0), COALESCE(SUM(paid),0), "
-               "COALESCE(SUM(due),0) FROM receipts "
-               "WHERE (COALESCE(patient_name,'') LIKE '%') "
-               "AND " + t.db.NOT_VOIDED + " AND id IN (" + _idlist + ")")
+    sql_tot = (
+        "SELECT COALESCE(SUM(net_amount),0), COALESCE(SUM(paid),0), "
+        "COALESCE(SUM(due),0) FROM receipts "
+        "WHERE (COALESCE(patient_name,'') LIKE '%') "
+        "AND " + t.db.NOT_VOIDED + " AND id IN (" + _idlist + ")"
+    )
     snet, spaid, sdue = con.execute(sql_tot).fetchone()
     mnet = sum(m[7] for m in rid_meta.values() if m[4] == 0)
     mpaid = sum(m[6] for m in rid_meta.values() if m[4] == 0)
@@ -249,7 +324,7 @@ def register(t):
     t.near(spaid, mpaid, "totals: paid sums over non-voided only", tol=1e-6)
     t.near(sdue, mdue, "totals: due sums over non-voided only", tol=1e-6)
     # NOT_VOIDED must treat NULL voided as not-voided (COALESCE)
-    t.check("COALESCE(voided,0)=0" == t.db.NOT_VOIDED, "NOT_VOIDED fragment is COALESCE-guarded")
+    t.check(t.db.NOT_VOIDED == "COALESCE(voided,0)=0", "NOT_VOIDED fragment is COALESCE-guarded")
 
     # ================================================ F. STATUS filter combos
     t.section("status filter ANDs with search")
@@ -262,9 +337,11 @@ def register(t):
                 sql += " AND status=?"
                 args.append(st)
             got = {r[0] for r in con.execute(sql, args).fetchall()}
-            want = {rid for rid, m in all_meta()
-                    if _app_visible(m[0], m[1], m[2], term)
-                    and (st == "All" or m[3] == st)}
+            want = {
+                rid
+                for rid, m in all_meta()
+                if _app_visible(m[0], m[1], m[2], term) and (st == "All" or m[3] == st)
+            }
             t.eq(got, want, f"status={st} term={term!r}")
             for rid in got:
                 if st != "All":
@@ -277,7 +354,8 @@ def register(t):
     target = rows[0]
     tgt_lab = rid_meta[target][1]
     real_test_id = con.execute(
-        "SELECT test_id FROM test_parameters GROUP BY test_id LIMIT 1").fetchone()[0]
+        "SELECT test_id FROM test_parameters GROUP BY test_id LIMIT 1"
+    ).fetchone()[0]
     item_id = con.execute(
         "INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) VALUES (?,?,?,?)",
         (target, real_test_id, "HiddenTest", 100.0),
@@ -285,8 +363,8 @@ def register(t):
     # parameter_id is nullable but UNIQUE(receipt_item_id,parameter_id) — distinct
     # real params keep the rows unique. Half hidden, half visible.
     real_params = con.execute(
-        "SELECT id FROM test_parameters WHERE test_id=? ORDER BY seq LIMIT 4",
-        (real_test_id,)).fetchall()
+        "SELECT id FROM test_parameters WHERE test_id=? ORDER BY seq LIMIT 4", (real_test_id,)
+    ).fetchall()
     for k, p in enumerate(real_params):
         con.execute(
             "INSERT INTO results(receipt_item_id,parameter_id,seq,part_type,name,units,"
@@ -334,15 +412,25 @@ def register(t):
     inclause = ",".join(str(i) for i in ids2)
     # App (raw) query for term "Carl_Sam":
     raw_q = "%Carl_Sam%"
-    raw_got = {r[0] for r in con.execute(
-        "SELECT id FROM receipts WHERE COALESCE(patient_name,'') LIKE ? AND id IN (%s)" % inclause,
-        (raw_q,)).fetchall()}
+    raw_got = {
+        r[0]
+        for r in con.execute(
+            "SELECT id FROM receipts WHERE COALESCE(patient_name,'') LIKE ? AND id IN (%s)"
+            % inclause,
+            (raw_q,),
+        ).fetchall()
+    }
     # Correct (escaped) query — what like_term()+ESCAPE would produce:
     esc_q = t.render and None  # noqa  (render unused; keep import discipline)
     esc_pat = "%Carl\\_Sam%"
-    esc_got = {r[0] for r in con.execute(
-        "SELECT id FROM receipts WHERE COALESCE(patient_name,'') LIKE ? ESCAPE '\\' "
-        "AND id IN (%s)" % inclause, (esc_pat,)).fetchall()}
+    esc_got = {
+        r[0]
+        for r in con.execute(
+            "SELECT id FROM receipts WHERE COALESCE(patient_name,'') LIKE ? ESCAPE '\\' "
+            "AND id IN (%s)" % inclause,
+            (esc_pat,),
+        ).fetchall()
+    }
     # Correct behaviour: only the literal row matches.
     t.eq(esc_got, {lit}, "escaped search matches only literal underscore name")
     # An UNescaped LIKE over-matches (the decoy slips in) — this is why the fix was needed.
@@ -350,11 +438,15 @@ def register(t):
     # REGRESSION GUARD: ui/receipts.py now builds the search with widgets.like_term()
     # + ESCAPE '\\'. Drive that exact helper and confirm a typed '_' matches the
     # literal row ONLY — never the wildcard decoy. Goes red if the fix is reverted.
-    app_got = {r[0] for r in con.execute(
-        "SELECT id FROM receipts WHERE COALESCE(patient_name,'') LIKE ? ESCAPE '\\' "
-        "AND id IN (%s)" % inclause, (like_term("Carl_Sam"),)).fetchall()}
-    t.eq(app_got, {lit},
-         "receipts search (like_term + ESCAPE) matches literal '_' only, not decoy")
+    app_got = {
+        r[0]
+        for r in con.execute(
+            "SELECT id FROM receipts WHERE COALESCE(patient_name,'') LIKE ? ESCAPE '\\' "
+            "AND id IN (%s)" % inclause,
+            (like_term("Carl_Sam"),),
+        ).fetchall()
+    }
+    t.eq(app_got, {lit}, "receipts search (like_term + ESCAPE) matches literal '_' only, not decoy")
 
     # Same story for a literal '%' typed in the box.
     pct_lit = con.execute(
@@ -369,20 +461,35 @@ def register(t):
     ).lastrowid
     con.commit()
     inc2 = f"{pct_lit},{pct_dec}"
-    raw2 = {r[0] for r in con.execute(
-        "SELECT id FROM receipts WHERE COALESCE(patient_name,'') LIKE ? AND id IN (%s)" % inc2,
-        ("%Disc50%Off%",)).fetchall()}
-    esc2 = {r[0] for r in con.execute(
-        "SELECT id FROM receipts WHERE COALESCE(patient_name,'') LIKE ? ESCAPE '\\' AND id IN (%s)"
-        % inc2, ("%Disc50\\%Off%",)).fetchall()}
+    raw2 = {
+        r[0]
+        for r in con.execute(
+            "SELECT id FROM receipts WHERE COALESCE(patient_name,'') LIKE ? AND id IN (%s)" % inc2,
+            ("%Disc50%Off%",),
+        ).fetchall()
+    }
+    esc2 = {
+        r[0]
+        for r in con.execute(
+            "SELECT id FROM receipts WHERE COALESCE(patient_name,'') LIKE ? ESCAPE '\\' AND id IN (%s)"
+            % inc2,
+            ("%Disc50\\%Off%",),
+        ).fetchall()
+    }
     t.eq(esc2, {pct_lit}, "escaped '%' search matches only literal percent name")
     t.check(pct_dec in raw2, "raw (unescaped) LIKE treats typed '%' as wildcard (over-match)")
     # REGRESSION GUARD via the real like_term() helper, same as the '_' case above.
-    app2 = {r[0] for r in con.execute(
-        "SELECT id FROM receipts WHERE COALESCE(patient_name,'') LIKE ? ESCAPE '\\' "
-        "AND id IN (%s)" % inc2, (like_term("Disc50%Off"),)).fetchall()}
-    t.eq(app2, {pct_lit},
-         "receipts search (like_term + ESCAPE) matches literal '%' only, not decoy")
+    app2 = {
+        r[0]
+        for r in con.execute(
+            "SELECT id FROM receipts WHERE COALESCE(patient_name,'') LIKE ? ESCAPE '\\' "
+            "AND id IN (%s)" % inc2,
+            (like_term("Disc50%Off"),),
+        ).fetchall()
+    }
+    t.eq(
+        app2, {pct_lit}, "receipts search (like_term + ESCAPE) matches literal '%' only, not decoy"
+    )
 
     # ===================================================== I. boundary / garbage
     t.section("boundary / empty / None / garbage / extreme")
@@ -394,8 +501,16 @@ def register(t):
     # term with SQL-meta but as parameter (no injection): treated literally-ish.
     # (NUL byte 0x00 is intentionally excluded: SQLite's C bindings truncate the
     #  pattern at the NUL, which is a driver quirk, not the app's LIKE semantics.)
-    for garbage in ["'; DROP TABLE receipts;--", "\" OR 1=1 --", "',,,)(", "\\\\",
-                    "%%%", "___", "a%b_c", "\t\n"]:
+    for garbage in [
+        "'; DROP TABLE receipts;--",
+        '" OR 1=1 --',
+        "',,,)(",
+        "\\\\",
+        "%%%",
+        "___",
+        "a%b_c",
+        "\t\n",
+    ]:
         q = f"%{garbage.strip()}%"
         # must not raise and must equal emulator
         got = {r[0] for r in con.execute(sql_base, (q, q, q)).fetchall()}
@@ -419,9 +534,12 @@ def register(t):
     t.eq(ga, gb, "search term is stripped before wrapping")
 
     # ORDER BY id DESC, LIMIT 1000 — verify ordering is descending for a broad term.
-    ordered = [r[0] for r in con.execute(
-        sql_base.replace("SELECT id", "SELECT id") + " ORDER BY id DESC", ("%", "%", "%")
-    ).fetchall()]
+    ordered = [
+        r[0]
+        for r in con.execute(
+            sql_base.replace("SELECT id", "SELECT id") + " ORDER BY id DESC", ("%", "%", "%")
+        ).fetchall()
+    ]
     t.check(ordered == sorted(ordered, reverse=True), "results ordered by id DESC")
 
     # cleanup our fixture so re-runs / other modules stay isolated. We delete by
@@ -429,6 +547,5 @@ def register(t):
     all_ids = list(rid_meta) + [lit, decoy, pct_lit, pct_dec]
     con.execute("DELETE FROM results WHERE receipt_item_id=?", (item_id,))
     con.execute("DELETE FROM receipt_items WHERE id=?", (item_id,))
-    con.execute("DELETE FROM receipts WHERE id IN (%s)"
-                % ",".join(str(i) for i in all_ids))
+    con.execute("DELETE FROM receipts WHERE id IN (%s)" % ",".join(str(i) for i in all_ids))
     con.commit()

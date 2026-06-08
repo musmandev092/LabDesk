@@ -19,16 +19,35 @@ regression in the receipt builder makes them FAIL.
 
 Assertions only via t.check / t.eq / t.near / t.has.
 """
-from __future__ import annotations
 
+from __future__ import annotations
 
 # ---------------------------------------------------------------------------
 # Independent reference for amount-in-words (mirrors report._amount_in_words'
 # *intended* Pakistani numbering). Used to confirm the words box value.
 # ---------------------------------------------------------------------------
-_ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
-         "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen",
-         "Eighteen", "Nineteen"]
+_ONES = [
+    "",
+    "One",
+    "Two",
+    "Three",
+    "Four",
+    "Five",
+    "Six",
+    "Seven",
+    "Eight",
+    "Nine",
+    "Ten",
+    "Eleven",
+    "Twelve",
+    "Thirteen",
+    "Fourteen",
+    "Fifteen",
+    "Sixteen",
+    "Seventeen",
+    "Eighteen",
+    "Nineteen",
+]
 _TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"]
 
 
@@ -80,8 +99,7 @@ def register(t):
         _seq[0] += 1
         return f"L_GEN_{_seq[0]:06d}"
 
-    def mk(sub, net, paid, due=None, *, charges=None, status="reported",
-           created_by=None, cur=None):
+    def mk(sub, net, paid, due=None, *, charges=None, status="reported", created_by=None, cur=None):
         """Insert a self-contained receipt with explicit money columns and item
         charges, so net != subtotal (real discounts) can be exercised — which
         t.make_receipt cannot do (it forces net == subtotal)."""
@@ -125,18 +143,19 @@ def register(t):
         discount = (sub or 0) - (net or 0)
         change = max(0.0, (paid or 0) - (net or 0))
         t.has(h, f"Total:</td><td class='val'>{_money(sub)}", f"{label}: Total cell")
-        t.has(h, f"Discount:</td><td class='val'>{_money(discount)}",
-              f"{label}: Discount cell")
-        t.has(h, f"To Be Paid:</td><td class='val'>Rs. {_money(net)}",
-              f"{label}: ToBePaid cell")
+        t.has(h, f"Discount:</td><td class='val'>{_money(discount)}", f"{label}: Discount cell")
+        t.has(h, f"To Be Paid:</td><td class='val'>Rs. {_money(net)}", f"{label}: ToBePaid cell")
         t.has(h, f"Paid:</td><td class='val'>{_money(paid)}", f"{label}: Paid cell")
-        t.has(h, f"Balance:</td>", f"{label}: Balance row")
+        t.has(h, "Balance:</td>", f"{label}: Balance row")
         t.check(f"Rs. {_money(due)}" in h, f"{label}: Balance value {_money(due)}")
         # --- change returned: present iff overpaid ---
         if change > 0:
             t.has(h, "Change returned", f"{label}: change shown")
-            t.check(f"Change returned:</td><td class='val' style='color:#059669;'>"
-                    f"Rs. {_money(change)}" in h, f"{label}: change value {_money(change)}")
+            t.check(
+                f"Change returned:</td><td class='val' style='color:#059669;'>"
+                f"Rs. {_money(change)}" in h,
+                f"{label}: change value {_money(change)}",
+            )
         else:
             t.check("Change returned" not in h, f"{label}: no change line")
         # --- amount in words = net (rounded), not subtotal ---
@@ -144,8 +163,7 @@ def register(t):
         t.eq(t.report._amount_in_words(net), _ref_words(net), f"{label}: words ref-match")
         # words must NOT be of subtotal when net differs by enough to change words
         if _ref_words(net) != _ref_words(sub):
-            t.check(f"<i>{_ref_words(sub)}</i>" not in h,
-                    f"{label}: words not subtotal")
+            t.check(f"<i>{_ref_words(sub)}</i>" not in h, f"{label}: words not subtotal")
         # --- structural ---
         t.has(h, "Cash Receipt", f"{label}: title")
         t.check(h.startswith("<!DOCTYPE html>"), f"{label}: doctype")
@@ -164,8 +182,14 @@ def register(t):
             net = round(max(0.0, sub - sub * disc / 100.0), 2)
             for paid in [0, round(net / 2, 2), net, net + 1, net + 500]:
                 due = max(0.0, net - paid)
-                assert_totals(mk(sub, net, paid, due), sub, net, paid, due,
-                              label=f"matrix sub={sub} disc={disc} paid={paid}")
+                assert_totals(
+                    mk(sub, net, paid, due),
+                    sub,
+                    net,
+                    paid,
+                    due,
+                    label=f"matrix sub={sub} disc={disc} paid={paid}",
+                )
                 n += 1
     t.section(f"  (matrix emitted {n} receipts)")
 
@@ -181,28 +205,45 @@ def register(t):
             rid = mk(net, net, paid, due)
             h = t.report.build_receipt_html(con, rid)
             # exactly one of due / change is positive (never both)
-            t.check(not (due > 1e-6 and change > 1e-6),
-                    f"boundary not both net={net} d={d}")
+            t.check(not (due > 1e-6 and change > 1e-6), f"boundary not both net={net} d={d}")
             if change > 0:
                 t.has(h, "Change returned", f"boundary change net={net} d={d}")
             else:
-                t.check("Change returned" not in h,
-                        f"boundary no-change net={net} d={d}")
+                t.check("Change returned" not in h, f"boundary no-change net={net} d={d}")
 
     # =====================================================================
     # 3) Amount-in-words tracks NET across landmark values
     # =====================================================================
     t.section("amount-in-words box reflects net")
-    WORD_NETS = [0, 1, 19, 20, 100, 101, 1000, 1500, 99999, 100000,
-                 123456, 1000000, 9999999, 10000000, 12345678]
+    WORD_NETS = [
+        0,
+        1,
+        19,
+        20,
+        100,
+        101,
+        1000,
+        1500,
+        99999,
+        100000,
+        123456,
+        1000000,
+        9999999,
+        10000000,
+        12345678,
+    ]
     for net in WORD_NETS:
         rid = mk(net, net, net, 0.0)
         h = t.report.build_receipt_html(con, rid)
         t.has(h, f"<i>{_ref_words(net)}</i>", f"words-box net={net}")
         t.eq(t.report._amount_in_words(net), _ref_words(net), f"words-fn net={net}")
     # fractional net rounds in the words box (round() banker's)
-    for net, words in [(99.5, "One Hundred"), (1000.49, "One Thousand"),
-                       (0.6, "One Rupees"), (0.4, "Zero Rupees")]:
+    for net, words in [
+        (99.5, "One Hundred"),
+        (1000.49, "One Thousand"),
+        (0.6, "One Rupees"),
+        (0.4, "Zero Rupees"),
+    ]:
         rid = mk(net, net, net, 0.0)
         h = t.report.build_receipt_html(con, rid)
         t.has(h, words, f"words-frac net={net}")
@@ -232,9 +273,12 @@ def register(t):
         for i in range(len(charges)):
             t.has(h, f"class='tc'>{i+1}</td>", f"multi sr {i+1} n={len(charges)}")
         # one <tr> per item in the items table region
-        body = h[h.find("class='items'"):h.find("class='summary'")]
-        t.eq(body.count("<tr>"), len(charges) + 1,  # +1 for header row
-             f"multi row count n={len(charges)}")
+        body = h[h.find("class='items'") : h.find("class='summary'")]
+        t.eq(
+            body.count("<tr>"),
+            len(charges) + 1,  # +1 for header row
+            f"multi row count n={len(charges)}",
+        )
 
     # =====================================================================
     # 5) NULL / missing money columns must render as 0.00 (never crash)
@@ -254,7 +298,7 @@ def register(t):
     t.has(h, _ref_words(0), "null words=Zero")
     t.check("Change returned" not in h, "null no-change")
     # a receipt with NO items at all still builds and shows empty items body
-    no_items_body = h[h.find("class='items'"):h.find("class='summary'")]
+    no_items_body = h[h.find("class='items'") : h.find("class='summary'")]
     t.eq(no_items_body.count("<tr>"), 1, "null no item rows (header only)")
 
     # =====================================================================
@@ -268,12 +312,16 @@ def register(t):
         b = t.report.build_receipt_bytes(con, rid)
         t.check(b[:4] == b"%PDF", f"cur PDF {cur}")
         from labdesk.report import _esc
+
         ec = _esc(cur)
         t.has(h, f"Rate ({ec})", f"cur rate header {cur}")
         t.has(h, f"To Be Paid:</td><td class='val'>{ec} 900.00", f"cur ToBePaid {cur}")
-        t.has(h, f"Balance:</td><td class='val' style='color:#059669;'>{ec} 0.00",
-              f"cur Balance {cur}")
-    t.db.set_setting(con, "currency", "Rs.")   # restore default
+        t.has(
+            h,
+            f"Balance:</td><td class='val' style='color:#059669;'>{ec} 0.00",
+            f"cur Balance {cur}",
+        )
+    t.db.set_setting(con, "currency", "Rs.")  # restore default
 
     # =====================================================================
     # 7) Extreme / large values still format and build
@@ -285,9 +333,8 @@ def register(t):
         h = t.report.build_receipt_html(con, rid)
         b = t.report.build_receipt_bytes(con, rid)
         t.check(b[:4] == b"%PDF" and len(b) > 1000, f"extreme PDF sub={sub}")
-        t.has(h, f"Total:</td><td class='val'>{_money(float(sub))}",
-              f"extreme Total sub={sub}")
-        if net < 1_000_000_000:   # within words helper's sensible domain
+        t.has(h, f"Total:</td><td class='val'>{_money(float(sub))}", f"extreme Total sub={sub}")
+        if net < 1_000_000_000:  # within words helper's sensible domain
             t.has(h, f"<i>{_ref_words(net)}</i>", f"extreme words sub={sub}")
 
     # =====================================================================

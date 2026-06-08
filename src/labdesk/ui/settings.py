@@ -1,26 +1,42 @@
 """Settings: lab branding, registration, report footer, WhatsApp, security."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QFormLayout, QLineEdit, QPushButton, QFileDialog,
-    QMessageBox, QHBoxLayout, QScrollArea, QCheckBox, QComboBox,
-    QTableWidget, QTableWidgetItem, QHeaderView, QDialog, QApplication, QLabel,
-)
-
 from PySide6.QtPrintSupport import QPrinterInfo
-
-from .widgets import muted, card, page_header, field_label, max_width_center
-from . import tasks
-from .. import db
-from .. import report, whatsapp
-from .style import (
-    build_qss, apply_theme, PRODUCT_NAME, PRODUCT_TAGLINE, DEVELOPER, DEVELOPER_GITHUB,
-    DEVELOPER_EMAILS,
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
-from .. import __version__
-from ..roles import ROLES, role_label, can
+
+from .. import __version__, db, report, whatsapp
+from ..roles import ROLES, can, role_label
+from . import tasks
+from .style import (
+    DEVELOPER,
+    DEVELOPER_EMAILS,
+    DEVELOPER_GITHUB,
+    PRODUCT_NAME,
+    PRODUCT_TAGLINE,
+    apply_theme,
+)
+from .widgets import card, field_label, max_width_center, muted, page_header
 
 _LABEL_W = 200  # shared label-column width so all settings cards align
 
@@ -33,7 +49,8 @@ class UserDialog(QDialog):
         form = QFormLayout(self)
         self.username = QLineEdit()
         self.full_name = QLineEdit()
-        self.password = QLineEdit(); self.password.setEchoMode(QLineEdit.Password)
+        self.password = QLineEdit()
+        self.password.setEchoMode(QLineEdit.Password)
         self.role = QComboBox()
         for key, (lvl, label, desc) in sorted(ROLES.items(), key=lambda kv: kv[1][0]):
             self.role.addItem(f"{label} — {desc}", key)
@@ -43,9 +60,14 @@ class UserDialog(QDialog):
         form.addRow("Password *", self.password)
         form.addRow("Role", self.role)
         btns = QHBoxLayout()
-        ok = QPushButton("Create"); ok.clicked.connect(self.accept)
-        cancel = QPushButton("Cancel"); cancel.setObjectName("ghost"); cancel.clicked.connect(self.reject)
-        btns.addStretch(1); btns.addWidget(cancel); btns.addWidget(ok)
+        ok = QPushButton("Create")
+        ok.clicked.connect(self.accept)
+        cancel = QPushButton("Cancel")
+        cancel.setObjectName("ghost")
+        cancel.clicked.connect(self.reject)
+        btns.addStretch(1)
+        btns.addWidget(cancel)
+        btns.addWidget(ok)
         form.addRow(btns)
 
     def values(self):
@@ -107,7 +129,7 @@ class SettingsPage(QWidget):
         super().__init__()
         self.con = con
         self.user = user
-        self._user_ids = []   # parallel to users_table rows; filled by refresh_users
+        self._user_ids = []  # parallel to users_table rows; filled by refresh_users
         self.inputs: dict[str, QLineEdit] = {}
 
         root = QVBoxLayout(self)
@@ -116,8 +138,11 @@ class SettingsPage(QWidget):
         header, _ = page_header("Settings", "Branding, registration and report options")
         root.addWidget(header)
 
-        scroll = QScrollArea(); scroll.setWidgetResizable(True)
-        host = QWidget(); col = QVBoxLayout(host); col.setSpacing(14)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        host = QWidget()
+        col = QVBoxLayout(host)
+        col.setSpacing(14)
 
         col.addWidget(self._appearance_card())
         col.addWidget(self._text_card("Laboratory information", LAB_FIELDS))
@@ -144,19 +169,22 @@ class SettingsPage(QWidget):
         scroll.setWidget(max_width_center(host, 880))
         root.addWidget(scroll, 1)
 
-        save = QPushButton("Save settings"); save.setMinimumHeight(42); save.clicked.connect(self.save)
+        save = QPushButton("Save settings")
+        save.setMinimumHeight(42)
+        save.clicked.connect(self.save)
         root.addWidget(save)
 
     # ---- builders ----
     def _flbl(self, text):
         lbl = field_label(text)
         lbl.setFixedWidth(_LABEL_W)
-        lbl.setWordWrap(True)                      # never clip a long label
+        lbl.setWordWrap(True)  # never clip a long label
         lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         return lbl
 
     def _form(self):
-        form = QFormLayout(); form.setSpacing(8)
+        form = QFormLayout()
+        form.setSpacing(8)
         form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
         form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
@@ -176,40 +204,50 @@ class SettingsPage(QWidget):
         form = self._form()
         for f in fields:
             self._add_field(form, f)
-        w = QWidget(); w.setLayout(form)
+        w = QWidget()
+        w.setLayout(form)
         return card(w, title=title)
 
     def _about_card(self):
         """Product + developer credit (the lab's own branding is set above; this
         is the fixed credit for whoever built the software)."""
-        col = QVBoxLayout(); col.setSpacing(6)
+        col = QVBoxLayout()
+        col.setSpacing(6)
         prod = QLabel(f"<b>{PRODUCT_NAME}</b> v{__version__} — {PRODUCT_TAGLINE}")
         prod.setTextInteractionFlags(Qt.TextSelectableByMouse)
         col.addWidget(prod)
-        emails = "  ·  ".join(
-            f"<a href='mailto:{e}'>{e}</a>" for e in DEVELOPER_EMAILS)
+        emails = "  ·  ".join(f"<a href='mailto:{e}'>{e}</a>" for e in DEVELOPER_EMAILS)
         info = QLabel(
             f"Developed by <b>{DEVELOPER}</b><br>"
             f"GitHub: <a href='https://{DEVELOPER_GITHUB}'>{DEVELOPER_GITHUB}</a><br>"
-            f"Email: {emails}")
+            f"Email: {emails}"
+        )
         info.setTextFormat(Qt.RichText)
         info.setOpenExternalLinks(True)
         info.setTextInteractionFlags(Qt.TextBrowserInteraction)
         col.addWidget(info)
-        w = QWidget(); w.setLayout(col)
+        w = QWidget()
+        w.setLayout(col)
         return card(w, title="About")
 
     def _logo_card(self):
         form = self._form()
         for key, label in LOGO_FIELDS:
-            le = QLineEdit(); le.setReadOnly(True); self.inputs[key] = le
-            btn = QPushButton("Choose…"); btn.setObjectName("ghost")
+            le = QLineEdit()
+            le.setReadOnly(True)
+            self.inputs[key] = le
+            btn = QPushButton("Choose…")
+            btn.setObjectName("ghost")
             btn.clicked.connect(lambda _=False, k=key: self._pick(k))
-            row = QHBoxLayout(); row.setContentsMargins(0, 0, 0, 0)
-            row.addWidget(le, 1); row.addWidget(btn)
-            rw = QWidget(); rw.setLayout(row)
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.addWidget(le, 1)
+            row.addWidget(btn)
+            rw = QWidget()
+            rw.setLayout(row)
             form.addRow(self._flbl(label), rw)
-        w = QWidget(); w.setLayout(form)
+        w = QWidget()
+        w.setLayout(form)
         return card(w, title="Logos")
 
     def _printer_card(self):
@@ -219,22 +257,26 @@ class SettingsPage(QWidget):
         for name in QPrinterInfo.availablePrinterNames():
             self.printer_combo.addItem(name, name)
         form.addRow(self._flbl("Default printer"), self.printer_combo)
-        test = QPushButton("Print test page"); test.setObjectName("ghost")
+        test = QPushButton("Print test page")
+        test.setObjectName("ghost")
         test.clicked.connect(self._test_printer)
         form.addRow("", test)
-        w = QWidget(); w.setLayout(form)
+        w = QWidget()
+        w.setLayout(form)
         return card(
-            muted("Pick a printer to print receipts/reports straight to it. "
-                  "Leave on “Ask each time” to choose at print time."),
-            w, title="Printer",
+            muted(
+                "Pick a printer to print receipts/reports straight to it. "
+                "Leave on “Ask each time” to choose at print time."
+            ),
+            w,
+            title="Printer",
         )
 
     def _test_printer(self):
         name = self.printer_combo.currentData() or ""
         try:
             report.print_test_page(self, name)
-            db.log_audit(self.con, self.user["username"], "printer_test",
-                         name or "ask-each-time")
+            db.log_audit(self.con, self.user["username"], "printer_test", name or "ask-each-time")
         except Exception as e:  # noqa: BLE001
             QMessageBox.warning(self, "Printer", f"Could not print:\n{e}")
 
@@ -246,11 +288,15 @@ class SettingsPage(QWidget):
         # No live preview: the theme is applied only when Save is pressed, so simply
         # picking Dark and leaving without saving never changes the look.
         form.addRow(self._flbl("Theme"), self.theme_combo)
-        w = QWidget(); w.setLayout(form)
+        w = QWidget()
+        w.setLayout(form)
         return card(
-            muted("Choose a light or dark look. The change takes effect when you "
-                  "click Save settings."),
-            w, title="Appearance",
+            muted(
+                "Choose a light or dark look. The change takes effect when you "
+                "click Save settings."
+            ),
+            w,
+            title="Appearance",
         )
 
     def _apply_theme(self):
@@ -272,44 +318,66 @@ class SettingsPage(QWidget):
         self.wa_status = muted("")
         form.addRow("", self.wa_status)
 
-        test = QPushButton("Test connection"); test.setObjectName("ghost")
+        test = QPushButton("Test connection")
+        test.setObjectName("ghost")
         test.clicked.connect(self._test_whatsapp)
-        link = QPushButton("Open linking page (QR)"); link.setObjectName("ghost")
+        link = QPushButton("Open linking page (QR)")
+        link.setObjectName("ghost")
         link.clicked.connect(self._open_wa_login)
-        row1 = QHBoxLayout(); row1.setContentsMargins(0, 0, 0, 0)
-        row1.addWidget(test); row1.addWidget(link); row1.addStretch(1)
-        rw1 = QWidget(); rw1.setLayout(row1)
+        row1 = QHBoxLayout()
+        row1.setContentsMargins(0, 0, 0, 0)
+        row1.addWidget(test)
+        row1.addWidget(link)
+        row1.addStretch(1)
+        rw1 = QWidget()
+        rw1.setLayout(row1)
         form.addRow("", rw1)
 
         # send a real test message (the user triggers this, not automatic)
-        self.wa_test_num = QLineEdit(); self.wa_test_num.setPlaceholderText("03XXXXXXXXX")
-        send = QPushButton("Send test message"); send.setObjectName("ghost")
+        self.wa_test_num = QLineEdit()
+        self.wa_test_num.setPlaceholderText("03XXXXXXXXX")
+        send = QPushButton("Send test message")
+        send.setObjectName("ghost")
         send.clicked.connect(self._send_test_whatsapp)
         self._wa_test_btn = send
-        row2 = QHBoxLayout(); row2.setContentsMargins(0, 0, 0, 0)
-        row2.addWidget(self.wa_test_num, 1); row2.addWidget(send)
-        rw2 = QWidget(); rw2.setLayout(row2)
+        row2 = QHBoxLayout()
+        row2.setContentsMargins(0, 0, 0, 0)
+        row2.addWidget(self.wa_test_num, 1)
+        row2.addWidget(send)
+        rw2 = QWidget()
+        rw2.setLayout(row2)
         form.addRow(self._flbl("Send test to"), rw2)
 
-        w = QWidget(); w.setLayout(form)
+        w = QWidget()
+        w.setLayout(form)
         return card(
-            muted("Self-hosted WhatsApp gateway (free, sends report/receipt PDFs). "
-                  "See WHATSAPP_SETUP.md — run it, scan the QR, then put its URL and "
-                  "access token here. Captions accept {lab}, {lab_no}, {name}.\n\n"
-                  "Privacy: reports/bills are delivered through WhatsApp (Meta). Only "
-                  "send to patients who have agreed — set per patient in Reception."),
-            w, title="WhatsApp gateway",
+            muted(
+                "Self-hosted WhatsApp gateway (free, sends report/receipt PDFs). "
+                "See WHATSAPP_SETUP.md — run it, scan the QR, then put its URL and "
+                "access token here. Captions accept {lab}, {lab_no}, {name}.\n\n"
+                "Privacy: reports/bills are delivered through WhatsApp (Meta). Only "
+                "send to patients who have agreed — set per patient in Reception."
+            ),
+            w,
+            title="WhatsApp gateway",
         )
 
     def _users_card(self):
         bar = QHBoxLayout()
-        add = QPushButton("+ Add user"); add.clicked.connect(self._add_user)
-        reset = QPushButton("Reset password"); reset.setObjectName("ghost")
+        add = QPushButton("+ Add user")
+        add.clicked.connect(self._add_user)
+        reset = QPushButton("Reset password")
+        reset.setObjectName("ghost")
         reset.clicked.connect(self._reset_user_pw)
-        disable = QPushButton("Enable / Disable"); disable.setObjectName("ghost")
+        disable = QPushButton("Enable / Disable")
+        disable.setObjectName("ghost")
         disable.clicked.connect(self._toggle_user)
-        bar.addStretch(1); bar.addWidget(add); bar.addWidget(reset); bar.addWidget(disable)
-        barw = QWidget(); barw.setLayout(bar)
+        bar.addStretch(1)
+        bar.addWidget(add)
+        bar.addWidget(reset)
+        bar.addWidget(disable)
+        barw = QWidget()
+        barw.setLayout(bar)
         self.users_table = QTableWidget(0, 4)
         self.users_table.setHorizontalHeaderLabels(["Username", "Full name", "Role", "Active"])
         hh = self.users_table.horizontalHeader()
@@ -324,17 +392,22 @@ class SettingsPage(QWidget):
         self.users_table.setSelectionBehavior(QTableWidget.SelectRows)
         return card(
             muted("Create staff logins and set their access level."),
-            barw, self.users_table, title="Users & roles",
+            barw,
+            self.users_table,
+            title="Users & roles",
         )
 
     def refresh_users(self):
         if not hasattr(self, "users_table"):
             return
         rows = self.con.execute(
-            "SELECT id,username,full_name,role,active FROM users ORDER BY username").fetchall()
-        self.users_table.setRowCount(0); self._user_ids = []
+            "SELECT id,username,full_name,role,active FROM users ORDER BY username"
+        ).fetchall()
+        self.users_table.setRowCount(0)
+        self._user_ids = []
         for r in rows:
-            i = self.users_table.rowCount(); self.users_table.insertRow(i)
+            i = self.users_table.rowCount()
+            self.users_table.insertRow(i)
             self._user_ids.append(r["id"])
             self.users_table.setItem(i, 0, QTableWidgetItem(r["username"]))
             self.users_table.setItem(i, 1, QTableWidgetItem(r["full_name"] or ""))
@@ -350,7 +423,9 @@ class SettingsPage(QWidget):
             if not v["username"] or len(v["password"]) < 6:
                 QMessageBox.warning(self, "User", "Username and a 6+ char password are required.")
                 return
-            if self.con.execute("SELECT 1 FROM users WHERE username=?", (v["username"],)).fetchone():
+            if self.con.execute(
+                "SELECT 1 FROM users WHERE username=?", (v["username"],)
+            ).fetchone():
                 QMessageBox.warning(self, "User", "That username already exists.")
                 return
             h, salt = db.hash_password(v["password"])
@@ -358,10 +433,15 @@ class SettingsPage(QWidget):
             self.con.execute(
                 "INSERT INTO users(username,full_name,pass_hash,salt,role,must_change_password) "
                 "VALUES (?,?,?,?,?,1)",
-                (v["username"], v["full_name"], h, salt, v["role"]))
+                (v["username"], v["full_name"], h, salt, v["role"]),
+            )
             self.con.commit()
-            db.log_audit(self.con, self.user["username"], "user_created",
-                         f"{v['username']} ({role_label(v['role'])})")
+            db.log_audit(
+                self.con,
+                self.user["username"],
+                "user_created",
+                f"{v['username']} ({role_label(v['role'])})",
+            )
             self.refresh_users()
 
     def _toggle_user(self):
@@ -378,24 +458,37 @@ class SettingsPage(QWidget):
         self.con.execute("UPDATE users SET active = 1 - active WHERE id=?", (uid,))
         self.con.commit()
         now_active = 0 if (row and row["active"]) else 1
-        db.log_audit(self.con, self.user["username"],
-                     "user_enabled" if now_active else "user_disabled",
-                     (row["username"] if row else str(uid)))
+        db.log_audit(
+            self.con,
+            self.user["username"],
+            "user_enabled" if now_active else "user_disabled",
+            (row["username"] if row else str(uid)),
+        )
         self.refresh_users()
 
     def _backup_card(self):
-        now = QPushButton("Back up now"); now.setObjectName("ghost"); now.clicked.connect(self._backup_now)
+        now = QPushButton("Back up now")
+        now.setObjectName("ghost")
+        now.clicked.connect(self._backup_now)
         self._backup_btn = now
-        restore = QPushButton("Restore from file…"); restore.setObjectName("ghost")
+        restore = QPushButton("Restore from file…")
+        restore.setObjectName("ghost")
         restore.clicked.connect(self._restore_db)
         self._restore_btn = restore
-        row = QHBoxLayout(); row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(now); row.addWidget(restore); row.addStretch(1)
-        w = QWidget(); w.setLayout(row)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(now)
+        row.addWidget(restore)
+        row.addStretch(1)
+        w = QWidget()
+        w.setLayout(row)
         return card(
-            muted("Automatic timestamped backups run on every launch (kept in the data "
-                  "folder). You can also back up now or restore from a backup file."),
-            w, title="Backup & restore",
+            muted(
+                "Automatic timestamped backups run on every launch (kept in the data "
+                "folder). You can also back up now or restore from a backup file."
+            ),
+            w,
+            title="Backup & restore",
         )
 
     def _backup_now(self):
@@ -404,7 +497,7 @@ class SettingsPage(QWidget):
         user = self.user["username"]
 
         def work(con):
-            p = db.backup_db("manual")            # makes its own connections; con unused
+            p = db.backup_db("manual")  # makes its own connections; con unused
             if p:
                 db.log_audit(con, user, "backup_created", str(p))
             return p
@@ -415,67 +508,96 @@ class SettingsPage(QWidget):
             else:
                 QMessageBox.warning(self, "Backup", "Could not create a backup.")
 
-        tasks.run_in_background(self, work, done, clicked=self._backup_btn,
-                                lock=(self._restore_btn,), busy_text="Backing up…")
+        tasks.run_in_background(
+            self,
+            work,
+            done,
+            clicked=self._backup_btn,
+            lock=(self._restore_btn,),
+            busy_text="Backing up…",
+        )
 
     def _restore_db(self):
         if not can(self.user["role"], "manage_backups"):
-            QMessageBox.warning(self, "Restore", "You don't have permission to restore the database.")
+            QMessageBox.warning(
+                self, "Restore", "You don't have permission to restore the database."
+            )
             return
         bdir = str(db.data_dir() / "backups")
-        path, _ = QFileDialog.getOpenFileName(self, "Restore from backup", bdir, "SQLite (*.sqlite)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Restore from backup", bdir, "SQLite (*.sqlite)"
+        )
         if not path:
             return
-        if QMessageBox.question(
-            self, "Restore",
-            "This REPLACES the current database with the selected backup (a safety copy of "
-            "the current data is kept). You must close and reopen LabDesk afterwards. Continue?",
-        ) != QMessageBox.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Restore",
+                "This REPLACES the current database with the selected backup (a safety copy of "
+                "the current data is kept). You must close and reopen LabDesk afterwards. Continue?",
+            )
+            != QMessageBox.Yes
+        ):
             return
+
         def done(work_ok, result):
             if work_ok and result:
                 db.log_audit(self.con, self.user["username"], "db_restored", path)
-                QMessageBox.information(self, "Restore",
-                                       "Database restored. Please close and reopen LabDesk now.")
+                QMessageBox.information(
+                    self, "Restore", "Database restored. Please close and reopen LabDesk now."
+                )
             else:
                 QMessageBox.warning(self, "Restore", "Restore failed (file unreadable?).")
 
-        tasks.run_in_background(self, lambda con: db.restore_db(path), done,
-                                clicked=self._restore_btn, lock=(self._backup_btn,),
-                                busy_text="Restoring…")
+        tasks.run_in_background(
+            self,
+            lambda con: db.restore_db(path),
+            done,
+            clicked=self._restore_btn,
+            lock=(self._backup_btn,),
+            busy_text="Restoring…",
+        )
 
     def _reset_user_pw(self):
         if not can(self.user["role"], "manage_users"):
             return  # defence in depth — managing users is admin-only
         import secrets as _secrets
+
         r = self.users_table.currentRow()
         if not (0 <= r < len(self._user_ids)):
             QMessageBox.warning(self, "Reset password", "Select a user first.")
             return
         uid = self._user_ids[r]
         uname = self.con.execute("SELECT username FROM users WHERE id=?", (uid,)).fetchone()[0]
-        temp = "Temp-" + _secrets.token_hex(4)   # 32-bit single-use, e.g. Temp-9af3c1d2
+        temp = "Temp-" + _secrets.token_hex(4)  # 32-bit single-use, e.g. Temp-9af3c1d2
         h, salt = db.hash_password(temp)
         self.con.execute(
             "UPDATE users SET pass_hash=?, salt=?, must_change_password=1, "
-            "failed_attempts=0, locked_until=NULL WHERE id=?", (h, salt, uid))
+            "failed_attempts=0, locked_until=NULL WHERE id=?",
+            (h, salt, uid),
+        )
         self.con.commit()
         db.log_audit(self.con, self.user["username"], "password_reset", uname)
         QMessageBox.information(
-            self, "Reset password",
+            self,
+            "Reset password",
             f"Temporary password for {uname}:\n\n    {temp}\n\n"
-            "They must set a new password at next login.")
+            "They must set a new password at next login.",
+        )
 
     def _security_card(self):
         form = self._form()
         self._add_field(form, ("idle_lock_minutes", "Auto-lock after (minutes)", "0 = off"))
-        self.new_pw = QLineEdit(); self.new_pw.setEchoMode(QLineEdit.Password)
+        self.new_pw = QLineEdit()
+        self.new_pw.setEchoMode(QLineEdit.Password)
         self.new_pw.setPlaceholderText("at least 6 characters")
         form.addRow(self._flbl("New password"), self.new_pw)
-        chpw = QPushButton("Change my password"); chpw.setObjectName("ghost")
+        chpw = QPushButton("Change my password")
+        chpw.setObjectName("ghost")
         chpw.clicked.connect(self.change_pw)
         form.addRow("", chpw)
-        w = QWidget(); w.setLayout(form)
+        w = QWidget()
+        w.setLayout(form)
         return card(w, title="Security")
 
     # ---- behaviour ----
@@ -483,12 +605,13 @@ class SettingsPage(QWidget):
         for key, le in self.inputs.items():
             if key == "whatsapp_api_key":
                 # token is kept in the private secret file, not the DB
-                le.setText(db.get_secret("whatsapp_api_key")
-                           or db.get_setting(self.con, key, ""))
+                le.setText(db.get_secret("whatsapp_api_key") or db.get_setting(self.con, key, ""))
             else:
                 le.setText(db.get_setting(self.con, key, ""))
         self.wa_auto.setChecked(db.get_setting(self.con, "whatsapp_auto", "0") == "1")
-        self.wa_auto_receipt.setChecked(db.get_setting(self.con, "whatsapp_auto_receipt", "0") == "1")
+        self.wa_auto_receipt.setChecked(
+            db.get_setting(self.con, "whatsapp_auto_receipt", "0") == "1"
+        )
         theme = db.get_setting(self.con, "theme", "light")
         ti = self.theme_combo.findData(theme)
         self.theme_combo.blockSignals(True)
@@ -501,7 +624,8 @@ class SettingsPage(QWidget):
 
     def _pick(self, key):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Choose image", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)")
+            self, "Choose image", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
+        )
         if not path:
             return
         # Copy the chosen image into the protected data dir so branding files live
@@ -520,56 +644,72 @@ class SettingsPage(QWidget):
                 QMessageBox.warning(self, "WhatsApp", why)
                 return
             import urllib.parse as _urlparse
+
             scheme = _urlparse.urlparse(wa_url).scheme
             if scheme == "http" and not whatsapp.is_loopback_url(wa_url):
                 # Plain http to anything other than this very computer means the
                 # patient PDF AND the access token travel UNENCRYPTED over the
                 # network where they can be intercepted. Strongly warn.
-                if QMessageBox.question(
-                    self, "WhatsApp — insecure connection",
-                    "This gateway uses plain http:// to a host that is NOT this "
-                    "computer. Patient reports and your access token would be sent "
-                    "UNENCRYPTED over the network and could be intercepted.\n\n"
-                    "Use https:// for any gateway not running on this machine. "
-                    "Save anyway?",
-                ) != QMessageBox.Yes:
+                if (
+                    QMessageBox.question(
+                        self,
+                        "WhatsApp — insecure connection",
+                        "This gateway uses plain http:// to a host that is NOT this "
+                        "computer. Patient reports and your access token would be sent "
+                        "UNENCRYPTED over the network and could be intercepted.\n\n"
+                        "Use https:// for any gateway not running on this machine. "
+                        "Save anyway?",
+                    )
+                    != QMessageBox.Yes
+                ):
                     return
             elif not whatsapp.is_local_url(wa_url):
-                if QMessageBox.question(
-                    self, "WhatsApp",
-                    "The gateway URL is not a local/loopback address. Patient PDFs and "
-                    "your access token would be sent to that host. Save anyway?",
-                ) != QMessageBox.Yes:
+                if (
+                    QMessageBox.question(
+                        self,
+                        "WhatsApp",
+                        "The gateway URL is not a local/loopback address. Patient PDFs and "
+                        "your access token would be sent to that host. Save anyway?",
+                    )
+                    != QMessageBox.Yes
+                ):
                     return
         # Collect every field into one mapping and write it in a SINGLE transaction.
         # Saving key-by-key used to fsync ~30 times and froze the UI for a beat.
         theme = self.theme_combo.currentData() or "light"
         prev_theme = db.get_setting(self.con, "theme", "light")
-        updates = {key: le.text().strip()
-                   for key, le in self.inputs.items() if key != "whatsapp_api_key"}
-        updates["whatsapp_api_key"] = ""   # token lives in the secret file, never the DB
+        updates = {
+            key: le.text().strip() for key, le in self.inputs.items() if key != "whatsapp_api_key"
+        }
+        updates["whatsapp_api_key"] = ""  # token lives in the secret file, never the DB
         updates["whatsapp_auto"] = "1" if self.wa_auto.isChecked() else "0"
         updates["whatsapp_auto_receipt"] = "1" if self.wa_auto_receipt.isChecked() else "0"
         updates["theme"] = theme
         updates["default_printer"] = self.printer_combo.currentData() or ""
-        db.set_settings(self.con, updates)                 # one commit — no freeze
+        db.set_settings(self.con, updates)  # one commit — no freeze
         # WhatsApp token → private 0600 secret file (kept out of the DB)
         db.set_secret("whatsapp_api_key", self.inputs["whatsapp_api_key"].text().strip())
         if theme != prev_theme:
-            self._apply_theme()                            # only restyle when it changed
+            self._apply_theme()  # only restyle when it changed
         db.log_audit(self.con, self.user["username"], "settings_saved", f"theme={theme}")
         QMessageBox.information(self, "Settings", "Saved.")
 
     def _test_whatsapp(self):
         ok, msg = whatsapp.check_status(self.con)
         self.wa_status.setText(("✓ " if ok else "✗ ") + msg)
-        db.log_audit(self.con, self.user["username"], "whatsapp_test",
-                     ("ok" if ok else "failed") + f" — {msg[:80]}")
+        db.log_audit(
+            self.con,
+            self.user["username"],
+            "whatsapp_test",
+            ("ok" if ok else "failed") + f" — {msg[:80]}",
+        )
         (QMessageBox.information if ok else QMessageBox.warning)(self, "WhatsApp", msg)
 
     def _open_wa_login(self):
-        url = (self.inputs["whatsapp_url"].text().strip()
-               or db.get_setting(self.con, "whatsapp_url", "")).rstrip("/")
+        url = (
+            self.inputs["whatsapp_url"].text().strip()
+            or db.get_setting(self.con, "whatsapp_url", "")
+        ).rstrip("/")
         if not url:
             QMessageBox.warning(self, "WhatsApp", "Set the Gateway URL first.")
             return
@@ -593,12 +733,21 @@ class SettingsPage(QWidget):
             else:
                 success, msg = False, (result if isinstance(result, str) else "Failed to send.")
             self.wa_status.setText(("✓ " if success else "✗ ") + msg)
-            db.log_audit(self.con, self.user["username"], "whatsapp_test_message",
-                         ("sent" if success else "failed") + f" — {num}")
+            db.log_audit(
+                self.con,
+                self.user["username"],
+                "whatsapp_test_message",
+                ("sent" if success else "failed") + f" — {num}",
+            )
             (QMessageBox.information if success else QMessageBox.warning)(self, "WhatsApp", msg)
 
-        tasks.run_in_background(self, lambda con: whatsapp.send_text(con, num, text), done,
-                                clicked=self._wa_test_btn, busy_text="Sending…")
+        tasks.run_in_background(
+            self,
+            lambda con: whatsapp.send_text(con, num, text),
+            done,
+            clicked=self._wa_test_btn,
+            busy_text="Sending…",
+        )
 
     def change_pw(self):
         pw = self.new_pw.text()
@@ -606,8 +755,10 @@ class SettingsPage(QWidget):
             QMessageBox.warning(self, "Password", "Password must be at least 6 characters.")
             return
         h, salt = db.hash_password(pw)
-        self.con.execute("UPDATE users SET pass_hash=?, salt=?, must_change_password=0 WHERE id=?",
-                         (h, salt, self.user["id"]))
+        self.con.execute(
+            "UPDATE users SET pass_hash=?, salt=?, must_change_password=0 WHERE id=?",
+            (h, salt, self.user["id"]),
+        )
         self.con.commit()
         db.log_audit(self.con, self.user["username"], "password_changed", "own password")
         self.new_pw.clear()

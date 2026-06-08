@@ -8,6 +8,7 @@ Contract every tests/gen/test_*.py must follow:
     t.make_receipt(...), t.SCN as needed
 This module alone emits ~6,000 cases.
 """
+
 from __future__ import annotations
 
 
@@ -23,8 +24,10 @@ def register(t):
                 change = max(0.0, paid - net)
                 t.check(net <= sub + 1e-9, f"net<=sub sub={sub} disc={disc}")
                 t.check(due >= -1e-9 and change >= -1e-9, f"due/change>=0 sub={sub} paid={paid}")
-                t.check(not (due > 1e-6 and change > 1e-6),
-                        f"never due AND change sub={sub} disc={disc} paid={paid}")
+                t.check(
+                    not (due > 1e-6 and change > 1e-6),
+                    f"never due AND change sub={sub} disc={disc} paid={paid}",
+                )
                 if paid >= net:
                     t.near(change, paid - net, f"overpaid change sub={sub} disc={disc} paid={paid}")
                     t.check(due < 1e-6, f"no due when overpaid sub={sub} paid={paid}")

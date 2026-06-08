@@ -7,6 +7,7 @@ OUT of the SQLite DB so DB copies/backups don't leak tokens. Contract:
 This module covers round-trip, default fallback, overwrite, unicode, extremes,
 and that secrets and settings live in separate stores.
 """
+
 from __future__ import annotations
 
 
@@ -17,15 +18,44 @@ def register(t):
     # ----------------------------------------------------------------------
     t.section("round-trip: many keys / values persist & coerce to str")
     KEYS = [
-        "whatsapp_api_key", "k", "K", "key_1", "key-2", "key.3", "key 4",
-        "UPPER", "lower", "MiXeD", "123numeric", "with_underscore",
-        "dotted.key.name", "slash/key", "a" * 200, "x" * 1000,
+        "whatsapp_api_key",
+        "k",
+        "K",
+        "key_1",
+        "key-2",
+        "key.3",
+        "key 4",
+        "UPPER",
+        "lower",
+        "MiXeD",
+        "123numeric",
+        "with_underscore",
+        "dotted.key.name",
+        "slash/key",
+        "a" * 200,
+        "x" * 1000,
     ]
     VALUES = [
-        "topsecret", "", " ", "  spaces  ", "tab\tinside", "new\nline",
-        "0", "1", "false", "true", "null", "None",
-        "v" * 500, "x" * 4000, "00123", "+923001234567",
-        '{"json":"like"}', "a,b,c", "line1\r\nline2", "trailing ",
+        "topsecret",
+        "",
+        " ",
+        "  spaces  ",
+        "tab\tinside",
+        "new\nline",
+        "0",
+        "1",
+        "false",
+        "true",
+        "null",
+        "None",
+        "v" * 500,
+        "x" * 4000,
+        "00123",
+        "+923001234567",
+        '{"json":"like"}',
+        "a,b,c",
+        "line1\r\nline2",
+        "trailing ",
     ]
     for ki, key in enumerate(KEYS):
         for value in VALUES:
@@ -36,32 +66,60 @@ def register(t):
             # return type is always str
             t.check(isinstance(got, str), f"str type key={key!r}")
             # present key ignores the default argument
-            t.eq(db.get_secret(key, "FALLBACK"), value,
-                 f"present-ignores-default key={key!r} val={value!r}")
+            t.eq(
+                db.get_secret(key, "FALLBACK"),
+                value,
+                f"present-ignores-default key={key!r} val={value!r}",
+            )
 
     # ----------------------------------------------------------------------
     t.section("default fallback: missing keys return the supplied default")
     MISSING = [
-        "definitely_absent_key", "____nope____", "missing-1", "no.such.key",
-        "", " ", "0", "MISSINGUNI_éè", "x" * 300,
+        "definitely_absent_key",
+        "____nope____",
+        "missing-1",
+        "no.such.key",
+        "",
+        " ",
+        "0",
+        "MISSINGUNI_éè",
+        "x" * 300,
     ]
-    DEFAULTS = ["", "d", "default-value", "0", "None", "☃ snow",
-                " padded ", "multi\nline", "x" * 256]
+    DEFAULTS = [
+        "",
+        "d",
+        "default-value",
+        "0",
+        "None",
+        "☃ snow",
+        " padded ",
+        "multi\nline",
+        "x" * 256,
+    ]
     for mk in MISSING:
         # ensure the key is truly absent (overwrite any earlier write? -- these
         # names never collide with KEYS above, so they stay absent)
         for d in DEFAULTS:
             t.eq(db.get_secret(mk, d), d, f"default key={mk!r} default={d!r}")
-            t.check(isinstance(db.get_secret(mk, d), str),
-                    f"default str-type key={mk!r}")
+            t.check(isinstance(db.get_secret(mk, d), str), f"default str-type key={mk!r}")
         # the zero-arg default is the empty string
         t.eq(db.get_secret(mk), "", f"empty-default key={mk!r}")
 
     # ----------------------------------------------------------------------
     t.section("overwrite semantics: last write wins, no accumulation")
     OW_KEY = "overwrite_target_key"
-    SEQ = ["first", "second", "", "third", "third", "éèê",
-           "0", "x" * 2000, "final", " spaced final "]
+    SEQ = [
+        "first",
+        "second",
+        "",
+        "third",
+        "third",
+        "éèê",
+        "0",
+        "x" * 2000,
+        "final",
+        " spaced final ",
+    ]
     for v in SEQ:
         db.set_secret(OW_KEY, v)
         t.eq(db.get_secret(OW_KEY), v, f"overwrite -> {v!r}")
@@ -93,10 +151,21 @@ def register(t):
     # ----------------------------------------------------------------------
     t.section("unicode: keys and values round-trip byte-for-byte")
     UNI = [
-        "café", "über", "naïve", "你好", "こんにちは",
-        "مرحبا", "नमस्ते", "שלום",
-        "emoji_\U0001f600", "\U0001f512key", "mix_ed_é_你_\U0001f680",
-        "zero​width", "combining_é", "€£¥", "☃☄★",
+        "café",
+        "über",
+        "naïve",
+        "你好",
+        "こんにちは",
+        "مرحبا",
+        "नमस्ते",
+        "שלום",
+        "emoji_\U0001f600",
+        "\U0001f512key",
+        "mix_ed_é_你_\U0001f680",
+        "zero​width",
+        "combining_é",
+        "€£¥",
+        "☃☄★",
     ]
     for u in UNI:
         # unicode value under an ascii key
@@ -126,19 +195,19 @@ def register(t):
         only_secret = f"only_secret_{k}"
         db.set_secret(only_secret, "S")
         t.eq(db.get_secret(only_secret), "S", f"only-secret present {k}")
-        t.eq(db.get_setting(con, only_secret, "MISS"), "MISS",
-             f"only-secret absent from settings {k}")
+        t.eq(
+            db.get_setting(con, only_secret, "MISS"),
+            "MISS",
+            f"only-secret absent from settings {k}",
+        )
         only_setting = f"only_setting_{k}"
         db.set_setting(con, only_setting, "T")
         t.eq(db.get_setting(con, only_setting), "T", f"only-setting present {k}")
-        t.eq(db.get_secret(only_setting, "MISS"), "MISS",
-             f"only-setting absent from secrets {k}")
+        t.eq(db.get_secret(only_setting, "MISS"), "MISS", f"only-setting absent from secrets {k}")
 
     # secrets must NOT be persisted inside the sqlite settings table at all
     db.set_secret("secret_not_in_db", "must_not_leak_to_db")
-    row = con.execute(
-        "SELECT value FROM settings WHERE key=?", ("secret_not_in_db",)
-    ).fetchone()
+    row = con.execute("SELECT value FROM settings WHERE key=?", ("secret_not_in_db",)).fetchone()
     t.check(row is None, "secret never written to settings table")
 
     # ----------------------------------------------------------------------
@@ -156,8 +225,18 @@ def register(t):
     t.eq(len(db.get_secret("big_value_key")), 200000, "200k length preserved")
 
     # value that looks like JSON should not be parsed/mangled
-    for jv in ['{"a":1}', "[1,2,3]", "true", "null", "123", "1.5e3",
-               '"quoted"', "{broken json", "}{", "\\escaped"]:
+    for jv in [
+        '{"a":1}',
+        "[1,2,3]",
+        "true",
+        "null",
+        "123",
+        "1.5e3",
+        '"quoted"',
+        "{broken json",
+        "}{",
+        "\\escaped",
+    ]:
         db.set_secret("json_like_key", jv)
         t.eq(db.get_secret("json_like_key"), jv, f"json-like value {jv!r}")
 
@@ -181,5 +260,4 @@ def register(t):
     # default argument with an empty stored value: an explicitly stored "" is a
     # real value, NOT a miss -> the default must be ignored.
     db.set_secret("stored_empty_key", "")
-    t.eq(db.get_secret("stored_empty_key", "DEFAULT"), "",
-         "stored empty value beats default")
+    t.eq(db.get_secret("stored_empty_key", "DEFAULT"), "", "stored empty value beats default")

@@ -8,6 +8,7 @@ _looks_like_labdesk_db gatekeeper directly.
 Contract: one register(t); assertions only via t.check / t.eq / t.near / t.has;
 no network, no live DB (the runner isolates both via LABDESK_DATA_DIR).
 """
+
 from __future__ import annotations
 
 import os
@@ -79,8 +80,18 @@ def register(t):
     # ----------------------------------------------------------------------
     t.section("backup_db: create / shape / perms")
     _clear_backups(t)
-    REASONS = ["auto", "manual", "test", "pre-restore", "x", "weekly_full",
-               "a" * 40, "shutdown", "update", "import"]
+    REASONS = [
+        "auto",
+        "manual",
+        "test",
+        "pre-restore",
+        "x",
+        "weekly_full",
+        "a" * 40,
+        "shutdown",
+        "update",
+        "import",
+    ]
     for reason in REASONS:
         bp = db.backup_db(reason, keep=1000)
         t.check(bp is not None, f"backup returns a path reason={reason!r}")
@@ -88,15 +99,13 @@ def register(t):
             continue
         bp = Path(bp)
         t.check(bp.exists(), f"backup file exists reason={reason!r}")
-        t.check(bp.parent == _backups_dir(t),
-                f"backup lives under backups/ reason={reason!r}")
-        t.check(bp.name.startswith("labdesk-"),
-                f"backup name prefix reason={reason!r}")
-        t.check(bp.name.endswith(f"-{reason}.sqlite"),
-                f"backup name carries reason reason={reason!r}")
+        t.check(bp.parent == _backups_dir(t), f"backup lives under backups/ reason={reason!r}")
+        t.check(bp.name.startswith("labdesk-"), f"backup name prefix reason={reason!r}")
+        t.check(
+            bp.name.endswith(f"-{reason}.sqlite"), f"backup name carries reason reason={reason!r}"
+        )
         t.check(bp.suffix == ".sqlite", f"backup .sqlite suffix reason={reason!r}")
-        t.check(db._looks_like_labdesk_db(bp),
-                f"backup is a valid labdesk DB reason={reason!r}")
+        t.check(db._looks_like_labdesk_db(bp), f"backup is a valid labdesk DB reason={reason!r}")
         # 0600 perms (owner rw only)
         mode = stat.S_IMODE(os.stat(bp).st_mode)
         t.eq(mode, 0o600, f"backup is 0600 reason={reason!r}")
@@ -104,8 +113,9 @@ def register(t):
         dmode = stat.S_IMODE(os.stat(_backups_dir(t)).st_mode)
         t.eq(dmode, 0o700, f"backups dir is 0700 reason={reason!r}")
         # a backup is restorable as a labdesk DB (self-copy → safe over live)
-        t.check(_restore_live(t, bp) is True,
-                f"backup round-trips through restore reason={reason!r}")
+        t.check(
+            _restore_live(t, bp) is True, f"backup round-trips through restore reason={reason!r}"
+        )
 
     # ----------------------------------------------------------------------
     # 2. backup_db content integrity — the copy must contain the same users
@@ -137,15 +147,16 @@ def register(t):
         # the secrets file must NEVER be inside a backup copy
         ro2 = sqlite3.connect(f"file:{bp}?mode=ro", uri=True)
         try:
-            wa = ro2.execute(
-                "SELECT value FROM settings WHERE key='whatsapp_api_key'").fetchone()
+            wa = ro2.execute("SELECT value FROM settings WHERE key='whatsapp_api_key'").fetchone()
         finally:
             ro2.close()
         # the WhatsApp TOKEN must never live in the DB/backups (it belongs only
         # in the 0600 .secrets.json). An empty/absent key row is fine; a non-empty
         # token would be a secret leak.
-        t.check(wa is None or not (wa[0] or "").strip(),
-                f"backup carries no whatsapp token secret i={i}")
+        t.check(
+            wa is None or not (wa[0] or "").strip(),
+            f"backup carries no whatsapp token secret i={i}",
+        )
 
     # ----------------------------------------------------------------------
     # 3. Pruning — keep=N must leave AT MOST N files. Because the filename has
@@ -172,8 +183,11 @@ def register(t):
 
     def _prune(keep):
         """Re-implement backup_db's prune step over the existing files."""
-        for old in sorted(bdir.glob("labdesk-*.sqlite"))[:-keep] if keep > 0 else \
-                sorted(bdir.glob("labdesk-*.sqlite")):
+        for old in (
+            sorted(bdir.glob("labdesk-*.sqlite"))[:-keep]
+            if keep > 0
+            else sorted(bdir.glob("labdesk-*.sqlite"))
+        ):
             try:
                 old.unlink()
             except OSError:
@@ -185,17 +199,26 @@ def register(t):
             _prune(keep)
             remaining = [p.name for p in _list_backups(t)]
             expected_count = min(total, keep) if keep > 0 else 0
-            t.eq(len(remaining), expected_count,
-                 f"prune leaves min(total,keep) total={total} keep={keep}")
+            t.eq(
+                len(remaining),
+                expected_count,
+                f"prune leaves min(total,keep) total={total} keep={keep}",
+            )
             # the survivors must be the NEWEST ones (lexicographically largest)
             expected_survivors = sorted(sorted_names[-keep:]) if keep > 0 else []
-            t.eq(sorted(remaining), expected_survivors,
-                 f"prune keeps the newest total={total} keep={keep}")
+            t.eq(
+                sorted(remaining),
+                expected_survivors,
+                f"prune keeps the newest total={total} keep={keep}",
+            )
             # boundary: never delete more than total, never keep more than total
-            t.check(len(remaining) <= total,
-                    f"never more survivors than seeded total={total} keep={keep}")
-            t.check(len(remaining) <= keep,
-                    f"never more survivors than keep total={total} keep={keep}")
+            t.check(
+                len(remaining) <= total,
+                f"never more survivors than seeded total={total} keep={keep}",
+            )
+            t.check(
+                len(remaining) <= keep, f"never more survivors than keep total={total} keep={keep}"
+            )
 
     # ----------------------------------------------------------------------
     # 4. Real backup_db pruning — repeatedly back up with a small keep and
@@ -212,15 +235,12 @@ def register(t):
         bp = db.backup_db("prunetest", keep=keep)
         t.check(bp is not None, f"real backup created keep={keep}")
         remaining = _list_backups(t)
-        t.check(len(remaining) <= keep,
-                f"real backup_db prunes to <= keep keep={keep}")
+        t.check(len(remaining) <= keep, f"real backup_db prunes to <= keep keep={keep}")
         t.eq(len(remaining), keep, f"real backup_db prunes to exactly keep keep={keep}")
         # the freshly written backup (newest name) must survive the prune
         if bp is not None:
-            t.check(Path(bp).exists(),
-                    f"the new backup survives its own prune keep={keep}")
-            t.check(Path(bp) in remaining,
-                    f"new backup is among survivors keep={keep}")
+            t.check(Path(bp).exists(), f"the new backup survives its own prune keep={keep}")
+            t.check(Path(bp) in remaining, f"new backup is among survivors keep={keep}")
     _clear_backups(t)
 
     # ----------------------------------------------------------------------
@@ -238,10 +258,11 @@ def register(t):
         "/tmp/labdesk-ghost-987654321.sqlite",
     ]
     for path in MISSING:
-        t.check(db.restore_db(path) is False,
-                f"restore rejects missing path={path!r}")
-        t.check(live.exists() and db._looks_like_labdesk_db(live),
-                f"live DB intact after missing-restore path={path!r}")
+        t.check(db.restore_db(path) is False, f"restore rejects missing path={path!r}")
+        t.check(
+            live.exists() and db._looks_like_labdesk_db(live),
+            f"live DB intact after missing-restore path={path!r}",
+        )
 
     t.section("restore_db: reject garbage / foreign files")
     garbage_files = {}
@@ -292,13 +313,13 @@ def register(t):
     garbage_files["directory"] = gdir
 
     for label, p in garbage_files.items():
-        t.check(db.restore_db(str(p)) is False,
-                f"restore rejects garbage [{label}]")
-        t.check(live.exists() and db._looks_like_labdesk_db(live),
-                f"live DB intact after garbage-restore [{label}]")
+        t.check(db.restore_db(str(p)) is False, f"restore rejects garbage [{label}]")
+        t.check(
+            live.exists() and db._looks_like_labdesk_db(live),
+            f"live DB intact after garbage-restore [{label}]",
+        )
         # the gatekeeper must agree
-        t.check(db._looks_like_labdesk_db(p) is False,
-                f"_looks_like_labdesk_db rejects [{label}]")
+        t.check(db._looks_like_labdesk_db(p) is False, f"_looks_like_labdesk_db rejects [{label}]")
 
     # ----------------------------------------------------------------------
     # 6. _looks_like_labdesk_db acceptance — a DB WITH a users table and the
@@ -313,8 +334,7 @@ def register(t):
     oc.execute("CREATE TABLE users(id INTEGER PRIMARY KEY, username TEXT)")
     oc.commit()
     oc.close()
-    t.check(db._looks_like_labdesk_db(ok1) is True,
-            "accepts a minimal DB with a users table")
+    t.check(db._looks_like_labdesk_db(ok1) is True, "accepts a minimal DB with a users table")
     # users table created with extra columns / data
     ok2 = tmp / "users_with_rows.sqlite"
     if ok2.exists():
@@ -331,8 +351,14 @@ def register(t):
     # break later modules. _looks_like acceptance is the invariant under test;
     # actual file replacement is covered with self-copies elsewhere.
     # case sensitivity: sqlite_master name match is exact 'users'
-    for tbl, expect in [("Users", False), ("USERS", False), ("users", True),
-                        ("usersx", False), ("xusers", False), ("my_users", False)]:
+    for tbl, expect in [
+        ("Users", False),
+        ("USERS", False),
+        ("users", True),
+        ("usersx", False),
+        ("xusers", False),
+        ("my_users", False),
+    ]:
         p = tmp / f"case_{tbl}.sqlite"
         if p.exists():
             p.unlink()
@@ -340,8 +366,7 @@ def register(t):
         c.execute(f'CREATE TABLE "{tbl}"(id INTEGER PRIMARY KEY)')
         c.commit()
         c.close()
-        t.eq(db._looks_like_labdesk_db(p), expect,
-             f"_looks_like table-name match tbl={tbl!r}")
+        t.eq(db._looks_like_labdesk_db(p), expect, f"_looks_like table-name match tbl={tbl!r}")
 
     # restore the canonical (real) live backup so subsequent generators see a
     # genuine labdesk DB, not the minimal stub.
@@ -366,8 +391,10 @@ def register(t):
         ok = _restore_live(t, good)
         t.check(ok is True, "restore from a real backup succeeds")
         t.check(pre.exists(), "restore wrote a .pre-restore safety copy")
-        t.check(db._looks_like_labdesk_db(pre) if pre.exists() else False,
-                "the .pre-restore copy is itself a valid labdesk DB")
+        t.check(
+            db._looks_like_labdesk_db(pre) if pre.exists() else False,
+            "the .pre-restore copy is itself a valid labdesk DB",
+        )
         # restoring again still works (idempotent) and refreshes .pre-restore
         t.check(_restore_live(t, good) is True, "restore is repeatable")
     _clear_backups(t)
@@ -384,7 +411,7 @@ def register(t):
         wal.write_bytes(b"stale-wal-frames")
         shm.write_bytes(b"stale-shm")
         t.check(wal.exists() and shm.exists(), "stale sidecars planted")
-        ok = db.restore_db(str(good2))   # check sidecar removal BEFORE any resync
+        ok = db.restore_db(str(good2))  # check sidecar removal BEFORE any resync
         t.check(ok is True, "restore over stale sidecars succeeds")
         t.check(not wal.exists(), "restore removed stale -wal sidecar")
         t.check(not shm.exists(), "restore removed stale -shm sidecar")
@@ -403,7 +430,7 @@ def register(t):
             os.chmod(live, 0o644)
         except OSError:
             pass
-        ok = db.restore_db(str(good3))   # check perms BEFORE resync
+        ok = db.restore_db(str(good3))  # check perms BEFORE resync
         t.check(ok is True, "restore (perms) succeeds")
         mode = stat.S_IMODE(os.stat(live).st_mode)
         t.eq(mode, 0o600, "restored live DB is 0600")
@@ -487,7 +514,7 @@ def register(t):
     #     False for anything that is not a readable SQLite-with-users file.
     # ----------------------------------------------------------------------
     t.section("_looks_like_labdesk_db: robustness on bad paths")
-    for bad in [Path("/no/such.sqlite"), tmp / "ghost.sqlite",
-                Path("/"), tmp]:
-        t.check(db._looks_like_labdesk_db(bad) is False,
-                f"_looks_like rejects bad path {str(bad)!r}")
+    for bad in [Path("/no/such.sqlite"), tmp / "ghost.sqlite", Path("/"), tmp]:
+        t.check(
+            db._looks_like_labdesk_db(bad) is False, f"_looks_like rejects bad path {str(bad)!r}"
+        )

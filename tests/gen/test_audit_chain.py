@@ -17,6 +17,7 @@ NOTE: several cases for non-string junk to log_audit are EXPECTED-PASS only if
 the app upholds its "Never raises" docstring. They currently expose a real bug
 (see returned app_bugs); those assertions are intentionally kept failing.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -34,9 +35,7 @@ def _segment(t, tag, n, *, user="u", action="act", detail="d"):
     before = con.execute("SELECT COALESCE(MAX(id),0) FROM audit_log").fetchone()[0]
     for i in range(n):
         t.db.log_audit(con, f"{user}-{tag}-{i}", f"{action}-{tag}", f"{detail}-{tag}-{i}")
-    rows = con.execute(
-        "SELECT id FROM audit_log WHERE id>? ORDER BY id", (before,)
-    ).fetchall()
+    rows = con.execute("SELECT id FROM audit_log WHERE id>? ORDER BY id", (before,)).fetchall()
     return [r[0] if not hasattr(r, "keys") else r["id"] for r in rows]
 
 
@@ -72,8 +71,10 @@ def register(t):
     for r in rows:
         if r["hash"] is not None:
             t.eq(len(r["hash"]), 64, f"row {r['id']} hash len 64")
-            t.check(all(c in "0123456789abcdef" for c in r["hash"]),
-                    f"row {r['id']} hash is lowercase hex")
+            t.check(
+                all(c in "0123456789abcdef" for c in r["hash"]),
+                f"row {r['id']} hash is lowercase hex",
+            )
     # the chain links: every row's hash feeds the next row's recomputation —
     # so no two adjacent rows can carry the same hash unless they collide (won't).
     hashes = [r["hash"] for r in rows if r["hash"] is not None]
@@ -92,10 +93,19 @@ def register(t):
         return dict(at=r["at"], username=r["username"], action=r["action"], detail=r["detail"])
 
     # pick a spread of positions: first chained row, several middles, last row
-    positions = sorted(set([
-        ids[0], ids[1], ids[len(ids) // 4], ids[len(ids) // 2],
-        ids[3 * len(ids) // 4], ids[-2], ids[-1],
-    ]))
+    positions = sorted(
+        set(
+            [
+                ids[0],
+                ids[1],
+                ids[len(ids) // 4],
+                ids[len(ids) // 2],
+                ids[3 * len(ids) // 4],
+                ids[-2],
+                ids[-1],
+            ]
+        )
+    )
     for target in positions:
         for field in ("username", "action", "detail"):
             saved = _orig(target)
@@ -109,9 +119,7 @@ def register(t):
             # the FIRST broken row is the tampered one itself
             t.eq(bad, target, f"tamper {field}@{target} reports the tampered row")
             # restore
-            con.execute(
-                f"UPDATE audit_log SET {field}=? WHERE id=?", (saved[field], target)
-            )
+            con.execute(f"UPDATE audit_log SET {field}=? WHERE id=?", (saved[field], target))
             con.commit()
             ok2, bad2 = t.db.verify_audit_chain(con)
             t.check(ok2, f"restore {field}@{target} re-verifies clean")
@@ -123,9 +131,7 @@ def register(t):
     # ------------------------------------------------------------------
     t.section("hash-column tamper detection")
     for target in positions:
-        saved = con.execute(
-            "SELECT hash FROM audit_log WHERE id=?", (target,)
-        ).fetchone()["hash"]
+        saved = con.execute("SELECT hash FROM audit_log WHERE id=?", (target,)).fetchone()["hash"]
         con.execute("UPDATE audit_log SET hash=? WHERE id=?", ("deadbeef" * 8, target))
         con.commit()
         ok, bad = t.db.verify_audit_chain(con)
@@ -139,9 +145,7 @@ def register(t):
 
     # NULLing a hash mid-chain (after chaining started) is a gap/tamper.
     for target in [ids[len(ids) // 3], ids[-3]]:
-        saved = con.execute(
-            "SELECT hash FROM audit_log WHERE id=?", (target,)
-        ).fetchone()["hash"]
+        saved = con.execute("SELECT hash FROM audit_log WHERE id=?", (target,)).fetchone()["hash"]
         con.execute("UPDATE audit_log SET hash=NULL WHERE id=?", (target,))
         con.commit()
         ok, bad = t.db.verify_audit_chain(con)
@@ -158,9 +162,7 @@ def register(t):
     t.section("rechain repairs tamper")
     for field in ("username", "action", "detail"):
         target = ids[len(ids) // 2]
-        con.execute(
-            f"UPDATE audit_log SET {field}=? WHERE id=?", ("BROKEN-" + field, target)
-        )
+        con.execute(f"UPDATE audit_log SET {field}=? WHERE id=?", ("BROKEN-" + field, target))
         con.commit()
         ok, bad = t.db.verify_audit_chain(con)
         t.check(not ok, f"pre-rechain {field} broken")
@@ -201,9 +203,7 @@ def register(t):
     victims = [gap_ids[k] for k in (10, 30, 60, 90, len(gap_ids) - 2)]
     for victim in victims:
         # find the next surviving id after victim across the whole table
-        succ = con.execute(
-            "SELECT MIN(id) FROM audit_log WHERE id>?", (victim,)
-        ).fetchone()[0]
+        succ = con.execute("SELECT MIN(id) FROM audit_log WHERE id>?", (victim,)).fetchone()[0]
         con.execute("DELETE FROM audit_log WHERE id=?", (victim,))
         con.commit()
         ok, bad = t.db.verify_audit_chain(con)
@@ -227,8 +227,13 @@ def register(t):
     # 6) Truncation invariants — user/action capped at 64, detail at 500.
     # ------------------------------------------------------------------
     t.section("field truncation (64 / 64 / 500)")
-    for ulen, alen, dlen in [(63, 63, 499), (64, 64, 500), (65, 80, 501),
-                             (200, 200, 2000), (1000, 1000, 5000)]:
+    for ulen, alen, dlen in [
+        (63, 63, 499),
+        (64, 64, 500),
+        (65, 80, 501),
+        (200, 200, 2000),
+        (1000, 1000, 5000),
+    ]:
         before = con.execute("SELECT COALESCE(MAX(id),0) FROM audit_log").fetchone()[0]
         t.db.log_audit(con, "U" * ulen, "A" * alen, "D" * dlen)
         r = con.execute(
@@ -255,8 +260,8 @@ def register(t):
         ("user", "act", None),
         ("", "act", ""),
         ("u", "a", ""),
-        ("emoji \U0001F600", "act", "detail ☃"),
-        ("with|pipe", "a|b", "x|y|z"),                 # delimiter in the data
+        ("emoji \U0001f600", "act", "detail ☃"),
+        ("with|pipe", "a|b", "x|y|z"),  # delimiter in the data
         ("newline\nhere", "tab\there", "null\x00byte"),
         ("quote'\"q", "back\\slash", "%percent%"),
         ("0", "0", "0"),
@@ -302,9 +307,22 @@ def register(t):
     import datetime as _dt
 
     junk_values = [
-        0, False, [], {}, (), b"",          # falsy -> normalized to "" (pass today)
-        1, 1.5, True, {"k": 1}, ["x"],       # truthy assorted
-        (1, 2), b"bytes", object(), _dt.date(2020, 1, 1), 3.0,
+        0,
+        False,
+        [],
+        {},
+        (),
+        b"",  # falsy -> normalized to "" (pass today)
+        1,
+        1.5,
+        True,
+        {"k": 1},
+        ["x"],  # truthy assorted
+        (1, 2),
+        b"bytes",
+        object(),
+        _dt.date(2020, 1, 1),
+        3.0,
     ]
     for jv in junk_values:
         for slot in range(3):
@@ -315,8 +333,9 @@ def register(t):
                 t.db.log_audit(con, args[0], args[1], args[2])
             except Exception:
                 raised = True
-            t.check(not raised,
-                    f"log_audit must not raise on junk {type(jv).__name__} in slot {slot}")
+            t.check(
+                not raised, f"log_audit must not raise on junk {type(jv).__name__} in slot {slot}"
+            )
 
     # whatever survived above, the chain over the survivors must still verify
     t.db.rechain_audit(con)

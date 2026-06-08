@@ -10,6 +10,7 @@ Contract (see tests/gen/test_billing.py):
   * emit assertions only via t.check / t.eq / t.near / t.has
   * never touch the network or the live DB (runner isolates both)
 """
+
 from __future__ import annotations
 
 
@@ -106,9 +107,9 @@ def register(t):
     SUBS = [0.0, 0.01, 1.0, 999.0, 1000.0, 99999.0, 1234567.0]
     PAIRS = []  # (sub, paid)
     for sub in SUBS:
-        PAIRS.append((sub, 0.0))         # nothing paid
-        PAIRS.append((sub, sub))         # exact
-        PAIRS.append((sub, sub / 2.0))   # underpaid -> due
+        PAIRS.append((sub, 0.0))  # nothing paid
+        PAIRS.append((sub, sub))  # exact
+        PAIRS.append((sub, sub / 2.0))  # underpaid -> due
         PAIRS.append((sub, sub + 500.0))  # overpaid -> change
     PHONES = ["03001234567", "", "12", "+92 300 1234567"]
     SEXES = ["Male", "Female", "Other", ""]
@@ -117,10 +118,17 @@ def register(t):
     for i, (sub, paid) in enumerate(PAIRS):
         phone = PHONES[i % len(PHONES)]
         sex = SEXES[i % len(SEXES)]
-        with_results = (i % 2 == 0)
+        with_results = i % 2 == 0
         status = "reported" if with_results else "pending"
-        rid = t.make_receipt(phone, sub=sub, paid=paid, with_results=with_results,
-                             status=status, sex=sex, age=(i * 7) % 110)
+        rid = t.make_receipt(
+            phone,
+            sub=sub,
+            paid=paid,
+            with_results=with_results,
+            status=status,
+            sex=sex,
+            age=(i * 7) % 110,
+        )
         receipts.append((rid, sub, paid))
 
     for rid, sub, paid in receipts:
@@ -134,7 +142,9 @@ def register(t):
             t.check(False, f"build_receipt rid={rid} raised {e!r}")
         if not raised:
             t.check(isinstance(out, (bytes, bytearray)), f"build_receipt rid={rid} -> bytes")
-            t.check(out is not None and len(out) > 200, f"build_receipt rid={rid} non-trivial bytes")
+            t.check(
+                out is not None and len(out) > 200, f"build_receipt rid={rid} non-trivial bytes"
+            )
             t.has(out[:8].decode("latin-1"), "%PDF", f"build_receipt rid={rid} PDF magic")
 
         # build_report -> bytes
@@ -178,8 +188,9 @@ def register(t):
     raised = False
     try:
         pages = R.render_pages(con, receipts[0][0], "totally-unknown-kind")
-        t.check(isinstance(pages, list) and len(pages) >= 1,
-                "render_pages unknown kind -> report list")
+        t.check(
+            isinstance(pages, list) and len(pages) >= 1, "render_pages unknown kind -> report list"
+        )
     except Exception as e:
         t.check(False, f"render_pages unknown kind raised {e!r}")
 
@@ -209,22 +220,41 @@ def register(t):
         """INSERT INTO receipts(lab_no,patient_id,patient_name,age,age_desc,sex,telephone,
                                 dr_name,specimen,subtotal,net_amount,paid,due,status,mr_no)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        ("LAB_RENDEREDGE_EMPTY", None, "Empty Patient", 0, "Years", "Male", "",
-         "Dr. None", "", 0.0, 0.0, 0.0, 0.0, "pending", None),
+        (
+            "LAB_RENDEREDGE_EMPTY",
+            None,
+            "Empty Patient",
+            0,
+            "Years",
+            "Male",
+            "",
+            "Dr. None",
+            "",
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            "pending",
+            None,
+        ),
     ).lastrowid
     con.commit()
     raised = False
     try:
         out = R.build_report(con, empty_rid)
-        t.check(isinstance(out, (bytes, bytearray)) and len(out) > 200,
-                "build_report empty receipt -> bytes")
+        t.check(
+            isinstance(out, (bytes, bytearray)) and len(out) > 200,
+            "build_report empty receipt -> bytes",
+        )
         t.has(out[:8].decode("latin-1"), "%PDF", "build_report empty receipt PDF magic")
     except Exception as e:
         t.check(False, f"build_report empty receipt raised {e!r}")
     raised = False
     try:
         out = R.build_receipt(con, empty_rid)
-        t.check(isinstance(out, (bytes, bytearray)) and len(out) > 200,
-                "build_receipt empty receipt -> bytes")
+        t.check(
+            isinstance(out, (bytes, bytearray)) and len(out) > 200,
+            "build_receipt empty receipt -> bytes",
+        )
     except Exception as e:
         t.check(False, f"build_receipt empty receipt raised {e!r}")

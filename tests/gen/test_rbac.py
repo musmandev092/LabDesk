@@ -7,6 +7,7 @@ Contract (see tests/gen/test_billing.py):
   * expose exactly one ``register(t)``
   * emit assertions only through t.check / t.eq / t.near / t.has
 """
+
 from __future__ import annotations
 
 
@@ -14,20 +15,51 @@ def register(t):
     r = t.roles
 
     # ---- ground-truth, derived straight from the module's own tables -------
-    ROLES = r.ROLES                 # key -> (level, label, desc)
-    PAGES = r.PAGE_MIN_LEVEL        # page label -> min level
-    CAPS = r.CAP_MIN_LEVEL          # capability -> min level
+    ROLES = r.ROLES  # key -> (level, label, desc)
+    PAGES = r.PAGE_MIN_LEVEL  # page label -> min level
+    CAPS = r.CAP_MIN_LEVEL  # capability -> min level
 
     # known roles ordered by ascending privilege
     known = sorted(ROLES.keys(), key=lambda k: ROLES[k][0])
 
     # a pool of "roles" including bogus / degenerate ones (all should be lvl 0)
-    bogus = ["", "guest", "ADMIN", "Receptionist", "root", "superuser",
-             "none", "0", "user", "Admin ", " admin", "tech", None, "manager",
-             "Technician", "RECEPTIONIST", "admin\n", "\tadmin", "owner",
-             "supervisor", "lab", "doctor", "nurse", "billing", "viewer",
-             "anonymous", "system", "operator", "staff", "  ", "00admin",
-             "admin1", "re ceptionist", "Lab Technician", "Administrator"]
+    bogus = [
+        "",
+        "guest",
+        "ADMIN",
+        "Receptionist",
+        "root",
+        "superuser",
+        "none",
+        "0",
+        "user",
+        "Admin ",
+        " admin",
+        "tech",
+        None,
+        "manager",
+        "Technician",
+        "RECEPTIONIST",
+        "admin\n",
+        "\tadmin",
+        "owner",
+        "supervisor",
+        "lab",
+        "doctor",
+        "nurse",
+        "billing",
+        "viewer",
+        "anonymous",
+        "system",
+        "operator",
+        "staff",
+        "  ",
+        "00admin",
+        "admin1",
+        "re ceptionist",
+        "Lab Technician",
+        "Administrator",
+    ]
 
     t.section("level(): known roles, exact values & ordering")
     # exact level values for every known role
@@ -38,17 +70,17 @@ def register(t):
     # bogus / unknown roles always map to level 0
     for b in bogus:
         t.eq(r.level(b), 0, f"level(bogus={b!r})==0")
-        t.check(r.level(b) < ROLES[known[0]][0],
-                f"bogus below lowest known role: {b!r}")
+        t.check(r.level(b) < ROLES[known[0]][0], f"bogus below lowest known role: {b!r}")
 
     t.section("level(): strict ascending hierarchy")
     # the documented strict hierarchy: each higher key has a strictly higher level
-    for lo, hi in zip(known, known[1:]):
-        t.check(r.level(lo) < r.level(hi),
-                f"strict order {lo}<{hi}: {r.level(lo)}<{r.level(hi)}")
+    for lo, hi in zip(known, known[1:], strict=False):
+        t.check(r.level(lo) < r.level(hi), f"strict order {lo}<{hi}: {r.level(lo)}<{r.level(hi)}")
     # documented concrete ordering: receptionist < technician < admin
-    t.check(r.level("receptionist") < r.level("technician") < r.level("admin"),
-            "receptionist<technician<admin")
+    t.check(
+        r.level("receptionist") < r.level("technician") < r.level("admin"),
+        "receptionist<technician<admin",
+    )
     t.eq(r.level("receptionist"), 2, "receptionist level==2")
     t.eq(r.level("technician"), 3, "technician level==3")
     t.eq(r.level("admin"), 5, "admin level==5")
@@ -67,10 +99,26 @@ def register(t):
     # can_view_page matrix: every role x every page (+ unknown pages)
     # ======================================================================
     t.section("can_view_page(): full role x page matrix")
-    unknown_pages = ["Bogus Page", "", "settings", "DASHBOARD", "Reception",
-                     "Random", "xyz", "  Logs  ", "logs", "Account",
-                     "Microbiology ", "Reception/Billing", "Test catalog",
-                     "doctors", "Worklist", "Results", "Trash", "Audit"]
+    unknown_pages = [
+        "Bogus Page",
+        "",
+        "settings",
+        "DASHBOARD",
+        "Reception",
+        "Random",
+        "xyz",
+        "  Logs  ",
+        "logs",
+        "Account",
+        "Microbiology ",
+        "Reception/Billing",
+        "Test catalog",
+        "doctors",
+        "Worklist",
+        "Results",
+        "Trash",
+        "Audit",
+    ]
     for role in all_roles:
         lvl = r.level(role)
         for page, minlvl in PAGES.items():
@@ -90,12 +138,34 @@ def register(t):
     # can() matrix: every role x every capability (+ unknown caps)
     # ======================================================================
     t.section("can(): full role x capability matrix")
-    unknown_caps = ["", "fly", "edit", "DELETE", "manage_user", "discount",
-                    "edit_catalogue", "admin", "superpower", None,
-                    "Edit_catalog", "manage_backup", "apply_discounts",
-                    "editsettings", "create", "remove", "view", "read",
-                    "write", "backup", "restore", "users", "settings",
-                    "edit catalog", " delete", "delete "]
+    unknown_caps = [
+        "",
+        "fly",
+        "edit",
+        "DELETE",
+        "manage_user",
+        "discount",
+        "edit_catalogue",
+        "admin",
+        "superpower",
+        None,
+        "Edit_catalog",
+        "manage_backup",
+        "apply_discounts",
+        "editsettings",
+        "create",
+        "remove",
+        "view",
+        "read",
+        "write",
+        "backup",
+        "restore",
+        "users",
+        "settings",
+        "edit catalog",
+        " delete",
+        "delete ",
+    ]
     for role in all_roles:
         lvl = r.level(role)
         for cap, minlvl in CAPS.items():
@@ -118,8 +188,7 @@ def register(t):
             if r.level(ra) <= r.level(rb):
                 for page in targets:
                     if r.can_view_page(ra, page):
-                        t.check(r.can_view_page(rb, page),
-                                f"mono page {page!r}: {ra}->{rb}")
+                        t.check(r.can_view_page(rb, page), f"mono page {page!r}: {ra}->{rb}")
 
     t.section("monotonicity: capabilities never decrease with level")
     cap_targets = list(CAPS.keys()) + unknown_caps
@@ -128,8 +197,7 @@ def register(t):
             if r.level(ra) <= r.level(rb):
                 for cap in cap_targets:
                     if r.can(ra, cap):
-                        t.check(r.can(rb, cap),
-                                f"mono cap {cap!r}: {ra}->{rb}")
+                        t.check(r.can(rb, cap), f"mono cap {cap!r}: {ra}->{rb}")
 
     # ======================================================================
     # hard negative invariants: lower roles must NEVER do privileged actions.
@@ -138,29 +206,24 @@ def register(t):
     # receptionist (lvl 2) must not have any level>=3 capability or page
     for cap, minlvl in CAPS.items():
         if minlvl >= 3:
-            t.check(not r.can("receptionist", cap),
-                    f"receptionist denied {cap}")
+            t.check(not r.can("receptionist", cap), f"receptionist denied {cap}")
     for page, minlvl in PAGES.items():
         if minlvl >= 3:
-            t.check(not r.can_view_page("receptionist", page),
-                    f"receptionist cannot see {page}")
+            t.check(not r.can_view_page("receptionist", page), f"receptionist cannot see {page}")
     # technician (lvl 3) must not have any level>=4 capability or page
     for cap, minlvl in CAPS.items():
         if minlvl >= 4:
-            t.check(not r.can("technician", cap),
-                    f"technician denied {cap}")
+            t.check(not r.can("technician", cap), f"technician denied {cap}")
     for page, minlvl in PAGES.items():
         if minlvl >= 4:
-            t.check(not r.can_view_page("technician", page),
-                    f"technician cannot see {page}")
+            t.check(not r.can_view_page("technician", page), f"technician cannot see {page}")
     # bogus/unknown roles (lvl 0) must be denied EVERY capability and every
     # page whose min level exceeds 0 (i.e. all of them, min is 1).
     for b in bogus:
         for cap in CAPS:
             t.check(not r.can(b, cap), f"bogus {b!r} denied cap {cap}")
         for page in PAGES:
-            t.check(not r.can_view_page(b, page),
-                    f"bogus {b!r} cannot see {page}")
+            t.check(not r.can_view_page(b, page), f"bogus {b!r} cannot see {page}")
 
     # ======================================================================
     # concrete spot checks of the documented design.
@@ -169,8 +232,7 @@ def register(t):
     # apply_discount = "manager" => technician & admin yes, receptionist no
     t.check(r.can("technician", "apply_discount"), "technician applies discount")
     t.check(r.can("admin", "apply_discount"), "admin applies discount")
-    t.check(not r.can("receptionist", "apply_discount"),
-            "receptionist cannot apply discount")
+    t.check(not r.can("receptionist", "apply_discount"), "receptionist cannot apply discount")
     # editing catalog / settings / delete require lvl 4 -> only admin
     for cap in ("edit_catalog", "edit_settings", "delete"):
         t.check(r.can("admin", cap), f"admin can {cap}")

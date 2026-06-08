@@ -8,22 +8,33 @@ Contract (see tests/gen/test_billing.py):
 
 Target: >= 1200 cases.
 """
+
 from __future__ import annotations
 
 
 # Mirror microbiology.MicrobiologyPage.save() — replace-then-insert a culture row
 # plus its sensitivity children, exactly as the UI does (DELETE-by-item, INSERT,
 # INSERT children).  This lets us exercise the data model without a window.
-def _save_culture(con, item_id, *, specimen="", growth="", organism="",
-                  colony="", gram="", zn="", remarks="", sens=()):
+def _save_culture(
+    con,
+    item_id,
+    *,
+    specimen="",
+    growth="",
+    organism="",
+    colony="",
+    gram="",
+    zn="",
+    remarks="",
+    sens=(),
+):
     con.execute("DELETE FROM cultures WHERE receipt_item_id=?", (item_id,))
     cid = con.execute(
         """INSERT INTO cultures
            (receipt_item_id,specimen,growth,organism,colony_count,gram_stain,
             zn_stain,remarks,reported_at)
            VALUES (?,?,?,?,?,?,?,?,datetime('now','localtime'))""",
-        (item_id, specimen, growth, organism.strip(), colony.strip(),
-         gram, zn, remarks.strip()),
+        (item_id, specimen, growth, organism.strip(), colony.strip(), gram, zn, remarks.strip()),
     ).lastrowid
     for ab, res in sens:
         ab = (ab or "").strip()
@@ -47,8 +58,21 @@ def _make_culture_item(t, test_id, test_name, *, lab="LAB_MICRO"):
         """INSERT INTO receipts(lab_no,patient_id,patient_name,age,age_desc,sex,
                                 telephone,dr_name,subtotal,net_amount,paid,due,status)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (lab, pid, "Micro Patient", 40, "Years", "Male", "03001234567",
-         "Dr. M", 500.0, 500.0, 500.0, 0.0, "pending"),
+        (
+            lab,
+            pid,
+            "Micro Patient",
+            40,
+            "Years",
+            "Male",
+            "03001234567",
+            "Dr. M",
+            500.0,
+            500.0,
+            500.0,
+            0.0,
+            "pending",
+        ),
     ).lastrowid
     item_id = con.execute(
         "INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) VALUES (?,?,?,?)",
@@ -65,9 +89,7 @@ def register(t):
     # 1. is_culture flag invariants on the test catalog
     # ======================================================================
     t.section("is_culture flag invariants (catalog)")
-    tests = con.execute(
-        "SELECT id, name, is_culture, report_head FROM tests"
-    ).fetchall()
+    tests = con.execute("SELECT id, name, is_culture, report_head FROM tests").fetchall()
     t.check(len(tests) > 0, "catalog has tests")
     n_culture = 0
     for r in tests:
@@ -126,14 +148,24 @@ def register(t):
     # the _combo ORDER BY (seq, value) is stable / deterministic: re-querying
     # yields an identical ordered list
     for kind in KINDS:
-        a = [r["value"] for r in con.execute(
-            "SELECT value FROM micro_lists WHERE kind=? ORDER BY seq, value", (kind,))]
-        b = [r["value"] for r in con.execute(
-            "SELECT value FROM micro_lists WHERE kind=? ORDER BY seq, value", (kind,))]
+        a = [
+            r["value"]
+            for r in con.execute(
+                "SELECT value FROM micro_lists WHERE kind=? ORDER BY seq, value", (kind,)
+            )
+        ]
+        b = [
+            r["value"]
+            for r in con.execute(
+                "SELECT value FROM micro_lists WHERE kind=? ORDER BY seq, value", (kind,)
+            )
+        ]
         t.eq(a, b, f"combo ordering deterministic kind={kind}")
     # the antibiotic combo in _add_sens uses ORDER BY value (alphabetical) only
-    ab = [r["value"] for r in con.execute(
-        "SELECT value FROM micro_lists WHERE kind='antibiotic' ORDER BY value")]
+    ab = [
+        r["value"]
+        for r in con.execute("SELECT value FROM micro_lists WHERE kind='antibiotic' ORDER BY value")
+    ]
     t.eq(ab, sorted(ab), "antibiotic combo is alphabetically ordered")
 
     # ======================================================================
@@ -147,8 +179,14 @@ def register(t):
 
     SPECIMENS = ["", "Urine", "Blood", "Sputum", "Pus"]
     GROWTHS = ["", "No Growth", "Growth Present", "Mixed Growth"]
-    ORGANISMS = ["", "E. coli", "Staphylococcus aureus", "Klebsiella pneumoniae",
-                 "   trimmable   ", "Pseudomonas"]
+    ORGANISMS = [
+        "",
+        "E. coli",
+        "Staphylococcus aureus",
+        "Klebsiella pneumoniae",
+        "   trimmable   ",
+        "Pseudomonas",
+    ]
     RESULTS = ["S", "I", "R"]
 
     case = 0
@@ -156,23 +194,36 @@ def register(t):
         rid, item_id = _make_culture_item(t, ct["id"], ct["name"], lab=f"LAB_{ct['id']:05d}")
         # a freshly-created culture item has NO culture row yet -> report says so
         existing0 = con.execute(
-            "SELECT * FROM cultures WHERE receipt_item_id=?", (item_id,)).fetchone()
+            "SELECT * FROM cultures WHERE receipt_item_id=?", (item_id,)
+        ).fetchone()
         t.check(existing0 is None, f"no culture before save item={item_id}")
 
         for si, spec in enumerate(SPECIMENS):
             org = ORGANISMS[(si + ct["id"]) % len(ORGANISMS)]
             growth = GROWTHS[(si + 1) % len(GROWTHS)]
-            sens = [(ab_name, RESULTS[k % 3])
-                    for k, ab_name in enumerate(["Amikacin", "", "Ceftriaxone", "   "])]
+            sens = [
+                (ab_name, RESULTS[k % 3])
+                for k, ab_name in enumerate(["Amikacin", "", "Ceftriaxone", "   "])
+            ]
             cid = _save_culture(
-                con, item_id, specimen=spec, growth=growth, organism=org,
-                colony=">10^5", gram="GPC", zn="Negative", remarks="auto", sens=sens)
-            row = con.execute("SELECT * FROM cultures WHERE receipt_item_id=?",
-                              (item_id,)).fetchone()
+                con,
+                item_id,
+                specimen=spec,
+                growth=growth,
+                organism=org,
+                colony=">10^5",
+                gram="GPC",
+                zn="Negative",
+                remarks="auto",
+                sens=sens,
+            )
+            row = con.execute(
+                "SELECT * FROM cultures WHERE receipt_item_id=?", (item_id,)
+            ).fetchone()
             # exactly ONE culture per item (save DELETEs then INSERTs)
             cnt = con.execute(
-                "SELECT COUNT(*) c FROM cultures WHERE receipt_item_id=?",
-                (item_id,)).fetchone()["c"]
+                "SELECT COUNT(*) c FROM cultures WHERE receipt_item_id=?", (item_id,)
+            ).fetchone()["c"]
             t.eq(cnt, 1, f"one culture per item after save item={item_id} spec={spec!r}")
             t.eq(row["id"], cid, f"latest culture id item={item_id}")
             # organism is stored .strip()'d (save() does .strip())
@@ -183,38 +234,46 @@ def register(t):
             # sensitivity children: blank/whitespace antibiotics are dropped
             kids = con.execute(
                 "SELECT antibiotic, result FROM culture_sensitivity WHERE culture_id=? "
-                "ORDER BY id", (cid,)).fetchall()
+                "ORDER BY id",
+                (cid,),
+            ).fetchall()
             t.eq(len(kids), 2, f"only non-blank antibiotics saved item={item_id} si={si}")
             for kr in kids:
-                t.check(kr["antibiotic"].strip() != "",
-                        f"saved antibiotic non-blank item={item_id}")
-                t.check(kr["result"] in RESULTS,
-                        f"sensitivity result in S/I/R item={item_id} got={kr['result']!r}")
+                t.check(
+                    kr["antibiotic"].strip() != "", f"saved antibiotic non-blank item={item_id}"
+                )
+                t.check(
+                    kr["result"] in RESULTS,
+                    f"sensitivity result in S/I/R item={item_id} got={kr['result']!r}",
+                )
             case += 1
 
         # re-saving REPLACES (no orphan duplicates accumulate, and old sensitivity
         # rows cascade-delete with their parent culture)
         before_cult = con.execute("SELECT COUNT(*) c FROM cultures").fetchone()["c"]
         before_sens = con.execute("SELECT COUNT(*) c FROM culture_sensitivity").fetchone()["c"]
-        old_cid = con.execute("SELECT id FROM cultures WHERE receipt_item_id=?",
-                              (item_id,)).fetchone()["id"]
-        _save_culture(con, item_id, specimen="Re-saved", organism="Final",
-                      sens=[("Meropenem", "S")])
+        old_cid = con.execute(
+            "SELECT id FROM cultures WHERE receipt_item_id=?", (item_id,)
+        ).fetchone()["id"]
+        _save_culture(
+            con, item_id, specimen="Re-saved", organism="Final", sens=[("Meropenem", "S")]
+        )
         after_cult = con.execute("SELECT COUNT(*) c FROM cultures").fetchone()["c"]
         # net cultures unchanged (one deleted, one inserted)
         t.eq(after_cult, before_cult, f"re-save keeps culture count item={item_id}")
         # old culture id is gone; its sensitivity children cascade-deleted
-        gone = con.execute("SELECT COUNT(*) c FROM cultures WHERE id=?",
-                          (old_cid,)).fetchone()["c"]
+        gone = con.execute("SELECT COUNT(*) c FROM cultures WHERE id=?", (old_cid,)).fetchone()["c"]
         t.eq(gone, 0, f"old culture removed on re-save item={item_id}")
         orphan = con.execute(
-            "SELECT COUNT(*) c FROM culture_sensitivity WHERE culture_id=?",
-            (old_cid,)).fetchone()["c"]
+            "SELECT COUNT(*) c FROM culture_sensitivity WHERE culture_id=?", (old_cid,)
+        ).fetchone()["c"]
         t.eq(orphan, 0, f"no orphan sensitivity after re-save item={item_id}")
-        new_cid = con.execute("SELECT id FROM cultures WHERE receipt_item_id=?",
-                            (item_id,)).fetchone()["id"]
-        nk = con.execute("SELECT COUNT(*) c FROM culture_sensitivity WHERE culture_id=?",
-                       (new_cid,)).fetchone()["c"]
+        new_cid = con.execute(
+            "SELECT id FROM cultures WHERE receipt_item_id=?", (item_id,)
+        ).fetchone()["id"]
+        nk = con.execute(
+            "SELECT COUNT(*) c FROM culture_sensitivity WHERE culture_id=?", (new_cid,)
+        ).fetchone()["c"]
         t.eq(nk, 1, f"re-saved sensitivity count item={item_id}")
 
     t.check(case >= 100, f"exercised many culture saves case={case}")
@@ -229,10 +288,18 @@ def register(t):
     # 4a. culture item WITH data -> findings appear, organism shown, sens colours
     ct = culture_tests[0]
     rid, item_id = _make_culture_item(t, ct["id"], ct["name"], lab="LAB_RPT_FULL")
-    _save_culture(con, item_id, specimen="Urine", growth="Growth Present",
-                  organism="E. coli", colony=">100,000 CFU/mL", gram="GNB",
-                  zn="Negative", remarks="significant",
-                  sens=[("Amikacin", "S"), ("Ampicillin", "R"), ("Ciprofloxacin", "I")])
+    _save_culture(
+        con,
+        item_id,
+        specimen="Urine",
+        growth="Growth Present",
+        organism="E. coli",
+        colony=">100,000 CFU/mL",
+        gram="GNB",
+        zn="Negative",
+        remarks="significant",
+        sens=[("Amikacin", "S"), ("Ampicillin", "R"), ("Ciprofloxacin", "I")],
+    )
     if have_cs:
         item = con.execute("SELECT * FROM receipt_items WHERE id=?", (item_id,)).fetchone()
         html = rep._culture_section(con, item)
@@ -260,8 +327,7 @@ def register(t):
 
     # 4c. sensitivity result lowercased / mixed-case is upper-cased in report
     rid3, item_id3 = _make_culture_item(t, ct["id"], ct["name"], lab="LAB_RPT_CASE")
-    _save_culture(con, item_id3, organism="Proteus",
-                  sens=[("Gentamicin", "s"), ("Tazocin", "r")])
+    _save_culture(con, item_id3, organism="Proteus", sens=[("Gentamicin", "s"), ("Tazocin", "r")])
     if have_cs:
         item3 = con.execute("SELECT * FROM receipt_items WHERE id=?", (item_id3,)).fetchone()
         html3 = rep._culture_section(con, item3)
@@ -270,14 +336,25 @@ def register(t):
 
     # 4d. only findings with truthy values are rendered (None/empty skipped)
     rid4, item_id4 = _make_culture_item(t, ct["id"], ct["name"], lab="LAB_RPT_PARTIAL")
-    _save_culture(con, item_id4, specimen="", growth="", organism="Salmonella typhi",
-                  colony="", gram="", zn="", remarks="")
+    _save_culture(
+        con,
+        item_id4,
+        specimen="",
+        growth="",
+        organism="Salmonella typhi",
+        colony="",
+        gram="",
+        zn="",
+        remarks="",
+    )
     if have_cs:
         item4 = con.execute("SELECT * FROM receipt_items WHERE id=?", (item_id4,)).fetchone()
         html4 = rep._culture_section(con, item4)
         t.has(html4, "Salmonella typhi", "partial: organism shown")
-        t.check("Specimen" not in html4 or "Salmonella" in html4,
-                "partial: blank specimen label not forced")
+        t.check(
+            "Specimen" not in html4 or "Salmonella" in html4,
+            "partial: blank specimen label not forced",
+        )
 
     # ======================================================================
     # 5. full build_report_html for a culture-only receipt branches to culture
@@ -289,9 +366,13 @@ def register(t):
         t.check(isinstance(html_full, str) and len(html_full) > 0, "build_report_html returns html")
         t.has(html_full, "E. coli", "full report includes culture organism")
         # the non-culture _report_section markers should not crash; culture branch used
-        t.check("<html" in html_full.lower() or "<!doctype" in html_full.lower() or
-                "<body" in html_full.lower() or "class=" in html_full,
-                "full report is document-shaped")
+        t.check(
+            "<html" in html_full.lower()
+            or "<!doctype" in html_full.lower()
+            or "<body" in html_full.lower()
+            or "class=" in html_full,
+            "full report is document-shaped",
+        )
 
     # ======================================================================
     # 6. organism / sensitivity boundary & garbage inputs
@@ -299,53 +380,69 @@ def register(t):
     t.section("boundary / garbage organism + sensitivity inputs")
     ct2 = culture_tests[1] if len(culture_tests) > 1 else culture_tests[0]
     GARBAGE_ORG = [
-        "", "   ", "\t\n", "X" * 500, "O'Brien strain",
-        "<script>alert(1)</script>", "E. coli & Klebsiella", "组织 培养",
-        "Staph; DROP TABLE cultures;--", "αβγ organism", "  pad both  ",
-        "​", "null", "None", "0",
+        "",
+        "   ",
+        "\t\n",
+        "X" * 500,
+        "O'Brien strain",
+        "<script>alert(1)</script>",
+        "E. coli & Klebsiella",
+        "组织 培养",
+        "Staph; DROP TABLE cultures;--",
+        "αβγ organism",
+        "  pad both  ",
+        "​",
+        "null",
+        "None",
+        "0",
     ]
     for gi, org in enumerate(GARBAGE_ORG):
         rid_g, item_g = _make_culture_item(t, ct2["id"], ct2["name"], lab=f"LAB_G{gi:03d}")
-        cid = _save_culture(con, item_g, organism=org, specimen="Wound",
-                            sens=[("Linezolid", "S")])
+        cid = _save_culture(con, item_g, organism=org, specimen="Wound", sens=[("Linezolid", "S")])
         row = con.execute("SELECT * FROM cultures WHERE id=?", (cid,)).fetchone()
         # stored value equals the python-side .strip() (matches save())
         t.eq(row["organism"], org.strip(), f"garbage organism trimmed gi={gi}")
         # report renders without raising and escapes html-ish organisms
         if have_cs:
-            item_g_row = con.execute("SELECT * FROM receipt_items WHERE id=?",
-                                     (item_g,)).fetchone()
+            item_g_row = con.execute("SELECT * FROM receipt_items WHERE id=?", (item_g,)).fetchone()
             html_g = rep._culture_section(con, item_g_row)
             t.check(isinstance(html_g, str), f"report renders garbage organism gi={gi}")
             if "<script>" in org:
                 # _esc must neutralise raw tags
-                t.check("<script>alert" not in html_g,
-                        f"organism html-escaped gi={gi}")
+                t.check("<script>alert" not in html_g, f"organism html-escaped gi={gi}")
 
     # garbage / out-of-domain sensitivity results: model stores whatever it's
     # given (no DB CHECK), but the report only colours known S/I/R.
     t.section("sensitivity result domain edge cases")
     ct3 = culture_tests[2] if len(culture_tests) > 2 else culture_tests[0]
     rid_s, item_s = _make_culture_item(t, ct3["id"], ct3["name"], lab="LAB_SENS_EDGE")
-    WEIRD = [("DrugA", "S"), ("DrugB", "I"), ("DrugC", "R"),
-             ("DrugD", "s"), ("DrugE", ""), ("DrugF", "X"),
-             ("DrugG", None), ("DrugH", "SR")]
+    WEIRD = [
+        ("DrugA", "S"),
+        ("DrugB", "I"),
+        ("DrugC", "R"),
+        ("DrugD", "s"),
+        ("DrugE", ""),
+        ("DrugF", "X"),
+        ("DrugG", None),
+        ("DrugH", "SR"),
+    ]
     cid_s = _save_culture(con, item_s, organism="Enterococcus", sens=WEIRD)
     kids = con.execute(
         "SELECT antibiotic, result FROM culture_sensitivity WHERE culture_id=? ORDER BY id",
-        (cid_s,)).fetchall()
+        (cid_s,),
+    ).fetchall()
     # all 8 have non-blank antibiotic names -> all saved
     t.eq(len(kids), len(WEIRD), "all non-blank-antibiotic sens rows saved")
     if have_cs:
-        item_s_row = con.execute("SELECT * FROM receipt_items WHERE id=?",
-                                 (item_s,)).fetchone()
+        item_s_row = con.execute("SELECT * FROM receipt_items WHERE id=?", (item_s,)).fetchone()
         html_s = rep._culture_section(con, item_s_row)
         # known results expand; unknown ('X','SR') upper-cased but no full word
         t.has(html_s, "DrugA", "edge: known antibiotic shown")
         t.has(html_s, "Sensitive", "edge: S expanded")
         # 'X' is not a known code -> falls back to body colour, blank full name
-        t.check("X — " in html_s or "X</td>" in html_s or "X" in html_s,
-                "edge: unknown result rendered")
+        t.check(
+            "X — " in html_s or "X</td>" in html_s or "X" in html_s, "edge: unknown result rendered"
+        )
 
     # ======================================================================
     # 7. FK / cascade integrity for the culture data model
@@ -353,18 +450,19 @@ def register(t):
     t.section("FK + cascade integrity")
     # deleting the parent receipt_item cascades cultures (schema ON DELETE CASCADE)
     rid_fk, item_fk = _make_culture_item(t, ct["id"], ct["name"], lab="LAB_FK")
-    cid_fk = _save_culture(con, item_fk, organism="Acinetobacter",
-                           sens=[("Colistin", "S"), ("Imipenem", "R")])
+    cid_fk = _save_culture(
+        con, item_fk, organism="Acinetobacter", sens=[("Colistin", "S"), ("Imipenem", "R")]
+    )
     before = con.execute(
-        "SELECT COUNT(*) c FROM culture_sensitivity WHERE culture_id=?",
-        (cid_fk,)).fetchone()["c"]
+        "SELECT COUNT(*) c FROM culture_sensitivity WHERE culture_id=?", (cid_fk,)
+    ).fetchone()["c"]
     t.eq(before, 2, "fk: two sensitivity rows present")
     # delete the culture directly -> its sensitivity children must cascade
     con.execute("DELETE FROM cultures WHERE id=?", (cid_fk,))
     con.commit()
     after = con.execute(
-        "SELECT COUNT(*) c FROM culture_sensitivity WHERE culture_id=?",
-        (cid_fk,)).fetchone()["c"]
+        "SELECT COUNT(*) c FROM culture_sensitivity WHERE culture_id=?", (cid_fk,)
+    ).fetchone()["c"]
     t.eq(after, 0, "fk: sensitivity cascade-deleted with culture")
 
     # every culture_sensitivity row references an existing culture (no orphans)
@@ -391,42 +489,58 @@ def register(t):
     cul = culture_tests[0]
     pid = con.execute(
         "INSERT INTO patients(name,age,age_desc,sex,telephone) VALUES (?,?,?,?,?)",
-        ("Mixed Order", 25, "Years", "Female", "03007654321")).lastrowid
+        ("Mixed Order", 25, "Years", "Female", "03007654321"),
+    ).lastrowid
     mrid = con.execute(
         """INSERT INTO receipts(lab_no,patient_id,patient_name,subtotal,net_amount,
                                 paid,due,status) VALUES (?,?,?,?,?,?,?,?)""",
-        ("LAB_MIX_UNIQ", pid, "Mixed Order", 800, 800, 800, 0, "pending")).lastrowid
+        ("LAB_MIX_UNIQ", pid, "Mixed Order", 800, 800, 800, 0, "pending"),
+    ).lastrowid
     ci = con.execute(
         "INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) VALUES (?,?,?,?)",
-        (mrid, cul["id"], cul["name"], 500)).lastrowid
+        (mrid, cul["id"], cul["name"], 500),
+    ).lastrowid
     ni = con.execute(
         "INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) VALUES (?,?,?,?)",
-        (mrid, nonc["id"], nonc["name"], 300)).lastrowid
+        (mrid, nonc["id"], nonc["name"], 300),
+    ).lastrowid
     con.commit()
-    micro_items = [r["item_id"] for r in con.execute(
-        """SELECT ri.id AS item_id FROM receipt_items ri
+    micro_items = [
+        r["item_id"]
+        for r in con.execute(
+            """SELECT ri.id AS item_id FROM receipt_items ri
            JOIN receipts r ON r.id=ri.receipt_id JOIN tests t ON t.id=ri.test_id
            WHERE t.is_culture=1 AND COALESCE(r.lab_no,'') LIKE ?""",
-        ("%LAB_MIX_UNIQ%",))]
+            ("%LAB_MIX_UNIQ%",),
+        )
+    ]
     t.check(ci in micro_items, "micro list includes the culture item")
     t.check(ni not in micro_items, "micro list excludes the non-culture item")
     t.eq(len(micro_items), 1, "exactly one culture item from mixed order")
 
     # search filter (patient/lab) behaves like the page's LIKE on both columns
-    by_name = [r["item_id"] for r in con.execute(
-        """SELECT ri.id AS item_id FROM receipt_items ri
+    by_name = [
+        r["item_id"]
+        for r in con.execute(
+            """SELECT ri.id AS item_id FROM receipt_items ri
            JOIN receipts r ON r.id=ri.receipt_id JOIN tests t ON t.id=ri.test_id
            WHERE t.is_culture=1 AND (COALESCE(r.patient_name,'') LIKE ?
                                      OR COALESCE(r.lab_no,'') LIKE ?)""",
-        ("%Mixed Order%", "%Mixed Order%"))]
+            ("%Mixed Order%", "%Mixed Order%"),
+        )
+    ]
     t.check(ci in by_name, "micro search matches by patient name")
     # non-matching search returns nothing for that receipt
-    none_match = [r["item_id"] for r in con.execute(
-        """SELECT ri.id AS item_id FROM receipt_items ri
+    none_match = [
+        r["item_id"]
+        for r in con.execute(
+            """SELECT ri.id AS item_id FROM receipt_items ri
            JOIN receipts r ON r.id=ri.receipt_id JOIN tests t ON t.id=ri.test_id
            WHERE t.is_culture=1 AND (COALESCE(r.patient_name,'') LIKE ?
                                      OR COALESCE(r.lab_no,'') LIKE ?)""",
-        ("%ZZZ_NO_SUCH%", "%ZZZ_NO_SUCH%"))]
+            ("%ZZZ_NO_SUCH%", "%ZZZ_NO_SUCH%"),
+        )
+    ]
     t.check(ci not in none_match, "micro search excludes on no match")
 
     # ======================================================================
@@ -436,19 +550,23 @@ def register(t):
     rid_l, item_l = _make_culture_item(t, ct["id"], ct["name"], lab="LAB_BIG_PANEL")
     big = [(f"Antibiotic{i:02d}", ["S", "I", "R"][i % 3]) for i in range(60)]
     cid_l = _save_culture(con, item_l, organism="Multi-resistant", sens=big)
-    n = con.execute("SELECT COUNT(*) c FROM culture_sensitivity WHERE culture_id=?",
-                    (cid_l,)).fetchone()["c"]
+    n = con.execute(
+        "SELECT COUNT(*) c FROM culture_sensitivity WHERE culture_id=?", (cid_l,)
+    ).fetchone()["c"]
     t.eq(n, 60, "all 60 antibiotics saved")
     # report orders by antibiotic name (ORDER BY antibiotic)
     if have_cs:
-        item_l_row = con.execute("SELECT * FROM receipt_items WHERE id=?",
-                                 (item_l,)).fetchone()
+        item_l_row = con.execute("SELECT * FROM receipt_items WHERE id=?", (item_l,)).fetchone()
         html_l = rep._culture_section(con, item_l_row)
         for i in range(0, 60, 7):
             t.has(html_l, f"Antibiotic{i:02d}", f"big panel shows Antibiotic{i:02d}")
-    db_order = [r["antibiotic"] for r in con.execute(
-        "SELECT antibiotic FROM culture_sensitivity WHERE culture_id=? ORDER BY antibiotic",
-        (cid_l,))]
+    db_order = [
+        r["antibiotic"]
+        for r in con.execute(
+            "SELECT antibiotic FROM culture_sensitivity WHERE culture_id=? ORDER BY antibiotic",
+            (cid_l,),
+        )
+    ]
     t.eq(db_order, sorted(db_order), "report sensitivity rows alpha-ordered")
 
     t.section("microbiology generator complete")

@@ -14,13 +14,14 @@ flags are fully controlled and the expected html is known-correct.
 
 This module emits well over 1,500 cases.
 """
+
 from __future__ import annotations
 
 import itertools
 
 # colours used for inline arrows (mirrors report.py constants)
-ARROW_UP = "↑"     # ↑ High / above range
-ARROW_DOWN = "↓"   # ↓ Low / below range
+ARROW_UP = "↑"  # ↑ High / above range
+ARROW_DOWN = "↓"  # ↓ Low / below range
 
 
 def _builder(t):
@@ -58,8 +59,7 @@ def _builder(t):
             (f"RFP_{n:06d}", patid, sex),
         ).lastrowid
         item = con.execute(
-            "INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) "
-            "VALUES(?,?,?,100)",
+            "INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) " "VALUES(?,?,?,100)",
             (rid, tid, f"RFPART_{n}"),
         ).lastrowid
         hiddens = hiddens or [0] * len(params)
@@ -88,16 +88,16 @@ def register(t):
     # (ref_male, ref_female): different ranges so we can prove the right one
     # is shown and the value flagged against THAT one only.
     RANGES = [
-        ("13-17", "12-15"),     # classic Hb split
-        ("0-4", "0-1"),         # PSA-ish, female narrower
-        ("60-80", "50-70"),     # arbitrary
-        ("4.5-6.5", "3.8-5.8"), # decimals
+        ("13-17", "12-15"),  # classic Hb split
+        ("0-4", "0-1"),  # PSA-ish, female narrower
+        ("60-80", "50-70"),  # arbitrary
+        ("4.5-6.5", "3.8-5.8"),  # decimals
         ("100-200", "90-180"),
-        ("36-46", "38-48"),     # haematocrit-ish, female higher
-        ("4.5-11", "4.0-10"),   # WBC
-        ("0.5-2.0", "0.4-1.5"), # creatinine
-        ("150-450", "140-400"), # platelets
-        ("200-400", "150-350"), # fibrinogen
+        ("36-46", "38-48"),  # haematocrit-ish, female higher
+        ("4.5-11", "4.0-10"),  # WBC
+        ("0.5-2.0", "0.4-1.5"),  # creatinine
+        ("150-450", "140-400"),  # platelets
+        ("200-400", "150-350"),  # fibrinogen
         ("7-9", "6-8"),
         ("20-30", "10-25"),
     ]
@@ -108,7 +108,7 @@ def register(t):
         for sex, (lo, hi, shown, hidden) in [
             ("Male", (mlo, mhi, rm, rf)),
             ("Female", (flo, fhi, rf, rm)),
-            ("male", (mlo, mhi, rm, rf)),      # lowercase still selects male
+            ("male", (mlo, mhi, rm, rf)),  # lowercase still selects male
             ("female", (flo, fhi, rf, rm)),
         ]:
             mid = (lo + hi) / 2
@@ -120,20 +120,19 @@ def register(t):
             t.check(ARROW_DOWN in h, f"below->down {tag} v={below}")
             t.check(ARROW_UP not in h, f"below not up {tag} v={below}")
             t.has(h, shown, f"shows selected range {tag}")
-            t.check(hidden != shown and hidden not in h
-                    or hidden == shown, f"other-sex range hidden {tag}")
+            t.check(
+                hidden != shown and hidden not in h or hidden == shown,
+                f"other-sex range hidden {tag}",
+            )
             # lower bound is Normal (inclusive)
             h = build(sex, [("N", "P", "u", rm, rf)], [str(lo)])
-            t.check(ARROW_DOWN not in h and ARROW_UP not in h,
-                    f"lo-bound normal {tag} v={lo}")
+            t.check(ARROW_DOWN not in h and ARROW_UP not in h, f"lo-bound normal {tag} v={lo}")
             # mid is Normal
             h = build(sex, [("N", "P", "u", rm, rf)], [str(mid)])
-            t.check(ARROW_DOWN not in h and ARROW_UP not in h,
-                    f"mid normal {tag} v={mid}")
+            t.check(ARROW_DOWN not in h and ARROW_UP not in h, f"mid normal {tag} v={mid}")
             # upper bound is Normal (inclusive)
             h = build(sex, [("N", "P", "u", rm, rf)], [str(hi)])
-            t.check(ARROW_DOWN not in h and ARROW_UP not in h,
-                    f"hi-bound normal {tag} v={hi}")
+            t.check(ARROW_DOWN not in h and ARROW_UP not in h, f"hi-bound normal {tag} v={hi}")
             # above range -> high arrow ↑, never low
             h = build(sex, [("N", "P", "u", rm, rf)], [str(above)])
             t.check(ARROW_UP in h, f"above->up {tag} v={above}")
@@ -148,16 +147,18 @@ def register(t):
         if expect_down:
             t.check(ARROW_DOWN in h, f"Hb12.5 {sex} low (below male 13)")
         else:
-            t.check(ARROW_DOWN not in h and ARROW_UP not in h,
-                    f"Hb12.5 {sex} normal (in female 12-15)")
+            t.check(
+                ARROW_DOWN not in h and ARROW_UP not in h, f"Hb12.5 {sex} normal (in female 12-15)"
+            )
     # value 15.5: male(13-17)=normal, female(12-15)=high
     for sex, expect_up in [("Male", False), ("Female", True)]:
         h = build(sex, [("N", "Hb", "g/dL", "13-17", "12-15")], ["15.5"])
         if expect_up:
             t.check(ARROW_UP in h, f"Hb15.5 {sex} high (above female 15)")
         else:
-            t.check(ARROW_UP not in h and ARROW_DOWN not in h,
-                    f"Hb15.5 {sex} normal (in male 13-17)")
+            t.check(
+                ARROW_UP not in h and ARROW_DOWN not in h, f"Hb15.5 {sex} normal (in male 13-17)"
+            )
 
     # =====================================================================
     # 2. Unknown / ambiguous sex: show BOTH ranges, never flag.
@@ -175,44 +176,49 @@ def register(t):
                 t.has(h, "F:", f"ambig shows F: sex={sx!r} {rm}|{rf}")
                 t.has(h, rm, f"ambig shows male range sex={sx!r}")
                 t.has(h, rf, f"ambig shows female range sex={sx!r}")
-                t.check(ARROW_UP not in h and ARROW_DOWN not in h,
-                        f"ambig never flags sex={sx!r} {rm}|{rf} v={v}")
+                t.check(
+                    ARROW_UP not in h and ARROW_DOWN not in h,
+                    f"ambig never flags sex={sx!r} {rm}|{rf} v={v}",
+                )
 
     # When the two ranges are IDENTICAL, even an unknown sex collapses to a
     # single range AND flags normally (no ambiguity to guard against).
     t.section("identical M==F ranges: single range + flags even when sex unknown")
     # (ref, value, expect_up) — 999999 is above the closed/upper-bound ranges
     # (-> high) but a '>40' lower bound is satisfied by it (-> Normal, no arrow).
-    SAME = [("70-100", "999999", True), ("0-5", "999999", True),
-            ("3.5-5.0", "999999", True), ("<=200", "999999", True),
-            (">40", "999999", False), (">40", "1", False),  # 1<40 -> low (no up)
-            ("70-100", "1", False)]                          # 1 below 70 -> low (no up)
+    SAME = [
+        ("70-100", "999999", True),
+        ("0-5", "999999", True),
+        ("3.5-5.0", "999999", True),
+        ("<=200", "999999", True),
+        (">40", "999999", False),
+        (">40", "1", False),  # 1<40 -> low (no up)
+        ("70-100", "1", False),
+    ]  # 1 below 70 -> low (no up)
     for sx in ["", "Other", "Male", "Female", "Unknown"]:
         for ref, val, expect_up in SAME:
             h = build(sx, [("N", "P", "u", ref, ref)], [val])
-            t.check("M:</span>" not in h,
-                    f"same range no M:/F: split sx={sx!r} ref={ref}")
+            t.check("M:</span>" not in h, f"same range no M:/F: split sx={sx!r} ref={ref}")
             if expect_up:
-                t.check(ARROW_UP in h,
-                        f"same range flags high sx={sx!r} ref={ref} v={val}")
+                t.check(ARROW_UP in h, f"same range flags high sx={sx!r} ref={ref} v={val}")
             else:
                 # value satisfies the open lower bound -> Normal, no arrow
-                t.check(ARROW_UP not in h,
-                        f"same range no high sx={sx!r} ref={ref} v={val}")
+                t.check(ARROW_UP not in h, f"same range no high sx={sx!r} ref={ref} v={val}")
 
     # =====================================================================
     # 3. Open-bound ranges (<= / >=) select per sex and flag correctly.
     # =====================================================================
     t.section("open-bound ranges per sex")
     OPEN = [
-        ("<= 200", "<= 150"),   # cholesterol-style upper bound, female lower
+        ("<= 200", "<= 150"),  # cholesterol-style upper bound, female lower
         ("< 40", "< 35"),
-        ("> 40", "> 50"),       # HDL-style lower bound
+        ("> 40", "> 50"),  # HDL-style lower bound
         (">= 13", ">= 12"),
     ]
     for rm, rf in OPEN:
         for sex, ref in [("Male", rm), ("Female", rf)]:
             import re as _re
+
             mlt = _re.match(r"^<\s*=?\s*(-?\d+\.?\d*)", ref.replace("≤", "<="))
             if mlt:
                 bound = float(mlt.group(1))
@@ -222,8 +228,9 @@ def register(t):
                 t.check(ARROW_DOWN not in h, f"open<= above not low {sex} {ref}")
                 # at/below bound -> normal
                 h = build(sex, [("N", "P", "u", rm, rf)], [str(bound - 10)])
-                t.check(ARROW_UP not in h and ARROW_DOWN not in h,
-                        f"open<= below normal {sex} {ref}")
+                t.check(
+                    ARROW_UP not in h and ARROW_DOWN not in h, f"open<= below normal {sex} {ref}"
+                )
             else:
                 mgt = _re.match(r"^>\s*=?\s*(-?\d+\.?\d*)", ref)
                 bound = float(mgt.group(1))
@@ -233,8 +240,9 @@ def register(t):
                 t.check(ARROW_UP not in h, f"open> below not high {sex} {ref}")
                 # above bound -> normal
                 h = build(sex, [("N", "P", "u", rm, rf)], [str(bound + 10)])
-                t.check(ARROW_UP not in h and ARROW_DOWN not in h,
-                        f"open> above normal {sex} {ref}")
+                t.check(
+                    ARROW_UP not in h and ARROW_DOWN not in h, f"open> above normal {sex} {ref}"
+                )
 
     # =====================================================================
     # 4. hidden results excluded from the report.
@@ -251,10 +259,8 @@ def register(t):
         h = build("Male", params, VALS, list(mask))
         for i in range(3):
             if mask[i]:
-                t.check(NAMES[i] not in h,
-                        f"hidden[{mask}] hides {NAMES[i]}")
-                t.check(VALS[i] not in h,
-                        f"hidden[{mask}] hides value {VALS[i]}")
+                t.check(NAMES[i] not in h, f"hidden[{mask}] hides {NAMES[i]}")
+                t.check(VALS[i] not in h, f"hidden[{mask}] hides value {VALS[i]}")
             else:
                 t.has(h, NAMES[i], f"hidden[{mask}] keeps {NAMES[i]}")
                 t.has(h, VALS[i], f"hidden[{mask}] keeps value {VALS[i]}")
@@ -272,11 +278,9 @@ def register(t):
     t.section("hidden out-of-range leaks no arrow")
     for sex in ("Male", "Female"):
         # one visible in-range row + one hidden wildly-out-of-range row
-        params = [("N", "Vis", "u", "1-10", "1-10"),
-                  ("N", "HidHigh", "u", "1-10", "1-10")]
+        params = [("N", "Vis", "u", "1-10", "1-10"), ("N", "HidHigh", "u", "1-10", "1-10")]
         h = build(sex, params, ["5", "99999"], [0, 1])
-        t.check(ARROW_UP not in h,
-                f"hidden high row no up-arrow {sex}")
+        t.check(ARROW_UP not in h, f"hidden high row no up-arrow {sex}")
         t.check("HidHigh" not in h, f"hidden high row name gone {sex}")
         t.has(h, "Vis", f"visible normal row kept {sex}")
 
@@ -285,23 +289,26 @@ def register(t):
     # =====================================================================
     t.section("part_type: H heading vs N result rows")
     for heading in ["COMPLETE BLOOD COUNT", "Lipid Profile", "URINE R/E", "X"]:
-        params = [("H", heading, "", "", ""),
-                  ("N", "Result1", "u", "1-100", "1-100")]
+        params = [("H", heading, "", "", ""), ("N", "Result1", "u", "1-100", "1-100")]
         h = build("Male", params, ["", "50"], [0, 0])
         t.has(h, "subhead", f"H row -> subhead class ({heading})")
         t.has(h, heading, f"heading text shown ({heading})")
         t.has(h, "Result1", f"N result row shown under heading ({heading})")
         # lowercase 'h' part_type still treated as heading (.upper())
-        h2 = build("Male", [("h", heading, "", "", ""),
-                            ("N", "R", "u", "1-100", "1-100")], ["", "50"])
+        h2 = build(
+            "Male", [("h", heading, "", "", ""), ("N", "R", "u", "1-100", "1-100")], ["", "50"]
+        )
         t.has(h2, "subhead", f"lowercase h -> subhead ({heading})")
 
     # A hidden heading row is dropped (hidden checked before part_type).
     t.section("hidden heading row dropped")
     for heading in ["HIDDEN_HEAD_A", "HIDDEN_HEAD_B"]:
-        h = build("Male", [("H", heading, "", "", ""),
-                          ("N", "R", "u", "1-100", "1-100")],
-                  ["", "50"], [1, 0])
+        h = build(
+            "Male",
+            [("H", heading, "", "", ""), ("N", "R", "u", "1-100", "1-100")],
+            ["", "50"],
+            [1, 0],
+        )
         t.check(heading not in h, f"hidden heading {heading} dropped")
         t.has(h, "R", f"sibling result kept when heading hidden ({heading})")
 
@@ -312,8 +319,7 @@ def register(t):
     for ref in ["13-17", "<=200", ">40", "1-1000"]:
         h = build("Male", [("N", "Empty", "u", ref, ref)], [""])
         # empty value renders the em-dash placeholder cell; never an arrow
-        t.check(ARROW_UP not in h and ARROW_DOWN not in h,
-                f"empty value no flag ref={ref}")
+        t.check(ARROW_UP not in h and ARROW_DOWN not in h, f"empty value no flag ref={ref}")
         t.has(h, "—", f"empty value placeholder em-dash ref={ref}")
 
     # =====================================================================
@@ -323,8 +329,10 @@ def register(t):
     for val in ["Positive", "Negative", "Reactive", "Nil", "Trace", "++", "N/A", "see note"]:
         for sex in ("Male", "Female", ""):
             h = build(sex, [("N", "Qual", "u", "13-17", "12-15")], [val])
-            t.check(ARROW_UP not in h and ARROW_DOWN not in h,
-                    f"non-numeric {val!r} no flag sex={sex!r}")
+            t.check(
+                ARROW_UP not in h and ARROW_DOWN not in h,
+                f"non-numeric {val!r} no flag sex={sex!r}",
+            )
             t.has(h, val, f"non-numeric {val!r} value shown sex={sex!r}")
 
     # =====================================================================
@@ -353,8 +361,10 @@ def register(t):
         t.eq(report._flag(n + 0.5, f"> {n}")[0], "Normal", f"_flag > above {n}")
     # garbage / None / unparseable refs -> no flag
     for v in ["abc", None, "", "Positive", "12,000"]:
-        t.check(report._flag(v, "10-20") is None or v == "12,000",
-                f"_flag non-numeric value {v!r} -> None")
+        t.check(
+            report._flag(v, "10-20") is None or v == "12,000",
+            f"_flag non-numeric value {v!r} -> None",
+        )
     # comma-stripped numeric value still parses
     t.eq(report._flag("12,000", "0-5000")[0], "High", "_flag strips comma 12,000")
     # ref with no recognizable numbers -> None
@@ -372,6 +382,7 @@ def register(t):
     # _resolve_ref direct: gender pick + ambiguous guard + fallback.
     t.section("helper _resolve_ref selection")
     import sqlite3 as _sqlite3
+
     con = t.con
 
     def _row(p_male, p_female, ref_text=""):

@@ -8,6 +8,7 @@ large bank of invalid/garbage strings that must normalize/reject correctly.
 Contract: expose exactly register(t); emit assertions only via t.check/t.eq/t.near/t.has.
 This module alone emits well over 6,000 cases.
 """
+
 from __future__ import annotations
 
 
@@ -21,7 +22,7 @@ def _expected_normalize(raw, cc="92"):
     if d.startswith("00"):
         d = d[2:]
     if d.startswith(cc) and len(d) >= len(cc) + 9:
-        d = d[len(cc):]
+        d = d[len(cc) :]
     d = d.lstrip("0")
     return ("0" + d) if d else ""
 
@@ -35,27 +36,35 @@ def register(t):
     # ----------------------------------------------------------------------
     t.section("operator 300-349 x subscribers x every formatting variant")
     operators = [f"3{a}{b}" for a in range(0, 5) for b in range(0, 10)]  # 300..349 (50)
-    subs = ["1234567", "0000001", "9999999", "1122334", "7654321",
-            "0001000", "5000005", "8675309"]                            # 8
+    subs = [
+        "1234567",
+        "0000001",
+        "9999999",
+        "1122334",
+        "7654321",
+        "0001000",
+        "5000005",
+        "8675309",
+    ]  # 8
     for op in operators:
         for sub in subs:
-            canon = "0" + op + sub          # 03XXXXXXXXX  (11 digits)
-            national = op + sub             # 3XXXXXXXXX   (10 digits)
-            wanum = "92" + national         # 923XXXXXXXXX (12 digits)
+            canon = "0" + op + sub  # 03XXXXXXXXX  (11 digits)
+            national = op + sub  # 3XXXXXXXXX   (10 digits)
+            wanum = "92" + national  # 923XXXXXXXXX (12 digits)
             variants = [
-                canon,                          # 03001234567
-                "+92" + national,               # +923001234567
-                "0092" + national,              # 0092...
-                "92" + national,                # 92...
-                national,                       # bare national (10 digits)
-                f"0{op}-{sub}",                 # dashed
-                f"0{op} {sub}",                 # spaced
-                f" +92 {op} {sub} ",            # messy with +92 and outer spaces
-                f"\t0{op}\n{sub}\r",            # tabs/newlines as separators
-                f"(0{op}) {sub}",               # parenthesised area-ish
-                f"+92-{op}-{sub}",              # +92 dashed
-                f"0092 {op} {sub}",             # 0092 spaced
-                f"92.{op}.{sub}",               # dotted with cc
+                canon,  # 03001234567
+                "+92" + national,  # +923001234567
+                "0092" + national,  # 0092...
+                "92" + national,  # 92...
+                national,  # bare national (10 digits)
+                f"0{op}-{sub}",  # dashed
+                f"0{op} {sub}",  # spaced
+                f" +92 {op} {sub} ",  # messy with +92 and outer spaces
+                f"\t0{op}\n{sub}\r",  # tabs/newlines as separators
+                f"(0{op}) {sub}",  # parenthesised area-ish
+                f"+92-{op}-{sub}",  # +92 dashed
+                f"0092 {op} {sub}",  # 0092 spaced
+                f"92.{op}.{sub}",  # dotted with cc
             ]
             for v in variants:
                 t.eq(nz(v), canon, f"normalize({v!r})")
@@ -70,27 +79,85 @@ def register(t):
     # ----------------------------------------------------------------------
     t.section("garbage + malformed phones rejected by wa_number (cc=92)")
     garbage = [
-        "", "   ", "\t\n", "abc", "phone", "n/a", "null", "None", "-", "--",
-        "()-", "....", "++", "+", "9-2", "0300abc", "call me", "0xFF",
-        "0", "00", "000", "0000", "0000000", "0000000000",
-        "1", "12", "123", "1234", "12345", "123456", "1234567",
-        "92", "920", "9200", "0092", "+92", "+920",
-        "300", "0300", "03001234", "0300123456",            # too short
-        "030012345678", "0300123456789", "0300123456789012",  # too long
-        "923001234",                                          # 92 + short national
-        "92300123456789",                                     # 92 + too-long national
-        "421234567", "0421234567", "+92421234567",            # landline (op '42')
-        "2001234567", "0200123456", "1001234567",             # national not starting with 3
-        "0350123456", "0299123456",                           # out-of-range / wrong prefix shape
-        "🙂📞", "phone:0300", "300x123",
+        "",
+        "   ",
+        "\t\n",
+        "abc",
+        "phone",
+        "n/a",
+        "null",
+        "None",
+        "-",
+        "--",
+        "()-",
+        "....",
+        "++",
+        "+",
+        "9-2",
+        "0300abc",
+        "call me",
+        "0xFF",
+        "0",
+        "00",
+        "000",
+        "0000",
+        "0000000",
+        "0000000000",
+        "1",
+        "12",
+        "123",
+        "1234",
+        "12345",
+        "123456",
+        "1234567",
+        "92",
+        "920",
+        "9200",
+        "0092",
+        "+92",
+        "+920",
+        "300",
+        "0300",
+        "03001234",
+        "0300123456",  # too short
+        "030012345678",
+        "0300123456789",
+        "0300123456789012",  # too long
+        "923001234",  # 92 + short national
+        "92300123456789",  # 92 + too-long national
+        "421234567",
+        "0421234567",
+        "+92421234567",  # landline (op '42')
+        "2001234567",
+        "0200123456",
+        "1001234567",  # national not starting with 3
+        "0350123456",
+        "0299123456",  # out-of-range / wrong prefix shape
+        "🙂📞",
+        "phone:0300",
+        "300x123",
     ]
     for bad in garbage:
         t.check(wa(bad, "92") is None, f"wa_number rejects {bad!r}")
 
     # garbage that contains NO digits → normalize must return "" exactly
     t.section("digit-free input normalizes to empty string")
-    nodigits = ["", "   ", "abc", "phone", "+-+-", "()", "...", "\t\n\r",
-                "hello world", "N/A", "----", "++++", "  +  ", "no number here"]
+    nodigits = [
+        "",
+        "   ",
+        "abc",
+        "phone",
+        "+-+-",
+        "()",
+        "...",
+        "\t\n\r",
+        "hello world",
+        "N/A",
+        "----",
+        "++++",
+        "  +  ",
+        "no number here",
+    ]
     for s in nodigits:
         t.eq(nz(s), "", f"normalize empty for {s!r}")
         t.check(wa(s, "92") is None, f"wa_number None for digit-free {s!r}")
@@ -110,8 +177,10 @@ def register(t):
             if out:
                 t.check(out.startswith("0"), f"norm starts with 0 ({raw!r})")
                 t.check(not out.startswith("00"), f"norm no double-zero ({raw!r})")
-                t.check(out[1:] == out[1:].lstrip("0") or out == "0",
-                        f"norm core has no leading zero ({raw!r})")
+                t.check(
+                    out[1:] == out[1:].lstrip("0") or out == "0",
+                    f"norm core has no leading zero ({raw!r})",
+                )
             w = wa(raw, "92")
             if w is not None:
                 # only a clean 10-digit national starting with 3 is accepted
@@ -120,8 +189,10 @@ def register(t):
                 t.eq(w, "92" + national, f"wa value ({raw!r})")
             else:
                 # rejected => national is NOT a clean 10-digit 3-prefixed number
-                t.check(not (len(national) == 10 and national.startswith("3")),
-                        f"wa rejected only when malformed ({raw!r})")
+                t.check(
+                    not (len(national) == 10 and national.startswith("3")),
+                    f"wa rejected only when malformed ({raw!r})",
+                )
 
     # ----------------------------------------------------------------------
     # 4) Equivalence: every formatting variant of one number maps identically
@@ -133,10 +204,19 @@ def register(t):
         canon = "0" + national
         wanum = "92" + national
         forms = [
-            canon, national, "+92" + national, "0092" + national, "92" + national,
-            "  " + canon + "  ", "+92 " + national, "0092-" + national,
-            f"0{op}-{sub}", f"0{op} {sub}", f"+92-{op}-{sub}",
-            f"00 92 {national}", f"  92 {op} {sub} ",
+            canon,
+            national,
+            "+92" + national,
+            "0092" + national,
+            "92" + national,
+            "  " + canon + "  ",
+            "+92 " + national,
+            "0092-" + national,
+            f"0{op}-{sub}",
+            f"0{op} {sub}",
+            f"+92-{op}-{sub}",
+            f"00 92 {national}",
+            f"  92 {op} {sub} ",
         ]
         norms = {nz(f) for f in forms}
         t.eq(len(norms), 1, f"all variants of {national} agree on normalize")
@@ -150,18 +230,35 @@ def register(t):
     # ----------------------------------------------------------------------
     t.section("normalize matches re-derived spec over dense corpus")
     corpus = []
-    for op in operators[::3]:                     # subsample operators
+    for op in operators[::3]:  # subsample operators
         for sub in ["1234567", "0007000", "9090909"]:
             national = op + sub
             corpus += [
-                "0" + national, national, "+92" + national, "0092" + national,
-                "92" + national, "  0" + national, "+92-" + national,
+                "0" + national,
+                national,
+                "+92" + national,
+                "0092" + national,
+                "92" + national,
+                "  0" + national,
+                "+92-" + national,
                 "00 0 " + national,
             ]
     # plus pure structural oddities
-    corpus += ["00", "000", "0092", "92", "920", "9200000000000", "0000003001234567",
-               "0030000300", "12345", "9923001234567", "0092092",
-               "00922", "0092 0 300 1234567"]
+    corpus += [
+        "00",
+        "000",
+        "0092",
+        "92",
+        "920",
+        "9200000000000",
+        "0000003001234567",
+        "0030000300",
+        "12345",
+        "9923001234567",
+        "0092092",
+        "00922",
+        "0092 0 300 1234567",
+    ]
     for raw in corpus:
         t.eq(nz(raw), _expected_normalize(raw, "92"), f"normalize spec match {raw!r}")
 
@@ -172,8 +269,8 @@ def register(t):
     for cc in ["1", "44", "971", "880"]:
         # national lengths 0..15, build from a leading 7 (generic mobile-ish)
         for ln in range(0, 16):
-            national = ("7" + "1234567890123456"[:ln - 1]) if ln >= 1 else ""
-            raw = national                       # bare national, no leading 0
+            national = ("7" + "1234567890123456"[: ln - 1]) if ln >= 1 else ""
+            raw = national  # bare national, no leading 0
             local = nz(raw, cc)
             w = wa(raw, cc)
             if not local:
@@ -196,7 +293,7 @@ def register(t):
     t.section("cc-strip threshold boundaries")
     # "92" + national where national is exactly 9 vs 10 digits
     # len("92"+9digits)=11 == cc+9 -> strip cc -> 9-digit local (no leading 0 added beyond one)
-    nine = "923456789"          # "92"+"3456789" actually 9 digits total
+    nine = "923456789"  # "92"+"3456789" actually 9 digits total
     # build precisely: cc='92', need total len 11 to trigger strip
     eleven = "92" + "300123456"  # 11 digits: strips -> "300123456" -> "0300123456" (10 long)
     twelve = "92" + "3001234567"  # 12 digits: strips -> national -> canon valid
@@ -204,6 +301,6 @@ def register(t):
     t.eq(nz(twelve, "92"), "03001234567", "strip at len==cc+10 valid mobile")
     t.check(wa(twelve, "92") == "923001234567", "valid mobile via 92 prefix")
     # a 10-digit string starting with 92 is BELOW threshold -> cc NOT stripped
-    ten92 = "9234567890"        # len 10 < 11, treated as national-ish, lstrip none
+    ten92 = "9234567890"  # len 10 < 11, treated as national-ish, lstrip none
     t.eq(nz(ten92, "92"), "09234567890", "below-threshold 92 prefix not stripped")
     t.check(wa(ten92, "92") is None, "below-threshold 92 not a valid mobile")

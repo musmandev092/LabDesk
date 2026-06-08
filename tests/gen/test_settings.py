@@ -11,6 +11,7 @@ placeholders like "{bogus}" pass through unchanged.
 
 This module emits well over 2,000 cases.
 """
+
 from __future__ import annotations
 
 
@@ -26,12 +27,40 @@ def register(t):
 
     # A large pool of values covering empties, unicode, garbage, extremes.
     VALUES = [
-        "", " ", "0", "1", "v1", "v2", "Rs.", "PKR", "₨", "$",
-        "hello world", "  leading+trailing  ", "line1\nline2", "tab\there",
-        "ünïcødé", "漢字テスト", "العربية", "emoji 🧪🔬", "{lab}", "{lab.__class__}",
-        "'; DROP TABLE settings;--", '"quoted"', "back\\slash", "null\x00byte"[:4],
-        "-1", "99999999", "3.14159", "True", "False", "None",
-        "x" * 500, "<html>&amp;</html>", "%s %d {0}", "café",
+        "",
+        " ",
+        "0",
+        "1",
+        "v1",
+        "v2",
+        "Rs.",
+        "PKR",
+        "₨",
+        "$",
+        "hello world",
+        "  leading+trailing  ",
+        "line1\nline2",
+        "tab\there",
+        "ünïcødé",
+        "漢字テスト",
+        "العربية",
+        "emoji 🧪🔬",
+        "{lab}",
+        "{lab.__class__}",
+        "'; DROP TABLE settings;--",
+        '"quoted"',
+        "back\\slash",
+        "null\x00byte"[:4],
+        "-1",
+        "99999999",
+        "3.14159",
+        "True",
+        "False",
+        "None",
+        "x" * 500,
+        "<html>&amp;</html>",
+        "%s %d {0}",
+        "café",
     ]
 
     # Round-trip + idempotent re-write + update to a different value.
@@ -43,8 +72,11 @@ def register(t):
         db.set_setting(con, key, v)
         t.eq(db.get_setting(con, key), v, f"idempotent re-set key={key!r}")
         # default is ignored when the key exists (even if value is empty string)
-        t.eq(db.get_setting(con, key, "DEFAULT_SHOULD_NOT_SHOW"), v,
-             f"existing key ignores default key={key!r}")
+        t.eq(
+            db.get_setting(con, key, "DEFAULT_SHOULD_NOT_SHOW"),
+            v,
+            f"existing key ignores default key={key!r}",
+        )
 
     # Update semantics: last write wins, across every pair of distinct values.
     for i, v1 in enumerate(VALUES):
@@ -58,8 +90,17 @@ def register(t):
     # 2) default fallback for missing keys
     # =====================================================================
     t.section("default fallback for missing keys")
-    MISSING = ["totally_missing_key", "", "  ", "no.such.key", "MixedCaseKey",
-               "key with spaces", "키없음", "{tpl}", "x" * 200]
+    MISSING = [
+        "totally_missing_key",
+        "",
+        "  ",
+        "no.such.key",
+        "MixedCaseKey",
+        "key with spaces",
+        "키없음",
+        "{tpl}",
+        "x" * 200,
+    ]
     DEFAULTS = ["", "fallback", "Rs.", "0", "₨", "ünïcødé", "multi\nline"]
     for mk in MISSING:
         for d in DEFAULTS:
@@ -85,13 +126,30 @@ def register(t):
     # 4) currency() — default Rs., reflects setting, matches get_setting
     # =====================================================================
     t.section("currency() default + override")
-    CUR_VALUES = ["Rs.", "PKR", "₨", "$", "€", "£", "USD", "", "Rs", "  Rs.  ",
-                  "Rupees", "د.إ", "৳", "x" * 50]
+    CUR_VALUES = [
+        "Rs.",
+        "PKR",
+        "₨",
+        "$",
+        "€",
+        "£",
+        "USD",
+        "",
+        "Rs",
+        "  Rs.  ",
+        "Rupees",
+        "د.إ",
+        "৳",
+        "x" * 50,
+    ]
     for c in CUR_VALUES:
         db.set_setting(con, "currency", c)
         t.eq(db.currency(con), c, f"currency override -> {c!r}")
-        t.eq(db.currency(con), db.get_setting(con, "currency", "Rs."),
-             f"currency matches get_setting {c!r}")
+        t.eq(
+            db.currency(con),
+            db.get_setting(con, "currency", "Rs."),
+            f"currency matches get_setting {c!r}",
+        )
     # When the currency row holds NULL, currency() falls back to Rs.
     con.execute("UPDATE settings SET value=NULL WHERE key='currency'")
     con.commit()
@@ -130,16 +188,25 @@ def register(t):
     FALLBACKS = ["FB", "", "Your laboratory report", "Lab — Report 1 for Joe", "₨ caption"]
     for fb in FALLBACKS:
         # unknown key -> never set -> blank template -> fallback
-        t.eq(wa._caption(con, "gen_no_such_caption_key", fb, lab="L", lab_no="N", name="X"),
-             fb, f"blank template -> fallback {fb!r}")
+        t.eq(
+            wa._caption(con, "gen_no_such_caption_key", fb, lab="L", lab_no="N", name="X"),
+            fb,
+            f"blank template -> fallback {fb!r}",
+        )
         # explicitly-blank stored template -> fallback
         db.set_setting(con, "whatsapp_report_caption", "")
-        t.eq(wa._caption(con, "whatsapp_report_caption", fb, lab="L"),
-             fb, f"empty stored template -> fallback {fb!r}")
+        t.eq(
+            wa._caption(con, "whatsapp_report_caption", fb, lab="L"),
+            fb,
+            f"empty stored template -> fallback {fb!r}",
+        )
         # whitespace-only template -> stripped to blank -> fallback
         db.set_setting(con, "whatsapp_report_caption", "   ")
-        t.eq(wa._caption(con, "whatsapp_report_caption", fb, lab="L"),
-             fb, f"whitespace template -> fallback {fb!r}")
+        t.eq(
+            wa._caption(con, "whatsapp_report_caption", fb, lab="L"),
+            fb,
+            f"whitespace template -> fallback {fb!r}",
+        )
     db.set_setting(con, "whatsapp_report_caption", "")
 
     # =====================================================================
@@ -154,14 +221,15 @@ def register(t):
             for nm in NAMES:
                 db.set_setting(con, "whatsapp_report_caption", "{lab}/{lab_no}/{name}")
                 want = f"{lab}/{no}/{nm}"
-                got = wa._caption(con, "whatsapp_report_caption", "FB",
-                                  lab=lab, lab_no=no, name=nm)
+                got = wa._caption(con, "whatsapp_report_caption", "FB", lab=lab, lab_no=no, name=nm)
                 t.eq(got, want, f"render lab={lab!r} no={no!r} nm={nm!r}")
                 # order-independent: a different ordering still substitutes each token
                 db.set_setting(con, "whatsapp_report_caption", "{name}|{lab}|{lab_no}")
-                t.eq(wa._caption(con, "whatsapp_report_caption", "FB",
-                                 lab=lab, lab_no=no, name=nm),
-                     f"{nm}|{lab}|{no}", f"reordered render lab={lab!r}")
+                t.eq(
+                    wa._caption(con, "whatsapp_report_caption", "FB", lab=lab, lab_no=no, name=nm),
+                    f"{nm}|{lab}|{no}",
+                    f"reordered render lab={lab!r}",
+                )
     db.set_setting(con, "whatsapp_report_caption", "")
 
     # =====================================================================
@@ -182,51 +250,63 @@ def register(t):
         "{lab[0]}",
         "{name.__dict__}",
         "{lab_no.__init__.__globals__}",
-        "{{lab}}",                      # literal braces, not a placeholder
-        "{ lab }",                      # spaces -> not the exact token {lab}
-        "{LAB}",                        # wrong case -> not substituted
-        "{lab_no_extra}",               # superstring -> only {lab_no} token matches
-        "%(lab)s",                      # printf-style -> untouched
-        "${lab}",                       # shell-style -> only {lab} part substituted
+        "{{lab}}",  # literal braces, not a placeholder
+        "{ lab }",  # spaces -> not the exact token {lab}
+        "{LAB}",  # wrong case -> not substituted
+        "{lab_no_extra}",  # superstring -> only {lab_no} token matches
+        "%(lab)s",  # printf-style -> untouched
+        "${lab}",  # shell-style -> only {lab} part substituted
     ]
     for inj in INJECTIONS:
         db.set_setting(con, "whatsapp_report_caption", inj)
-        got = wa._caption(con, "whatsapp_report_caption", "FB",
-                          lab="LABVAL", lab_no="NOVAL", name="NAMEVAL")
+        got = wa._caption(
+            con, "whatsapp_report_caption", "FB", lab="LABVAL", lab_no="NOVAL", name="NAMEVAL"
+        )
         # The known whole tokens {lab}, {lab_no}, {name} are the ONLY things
         # replaced; everything else (dotted attrs, format specs) stays literal.
-        expected = (inj.replace("{lab}", "LABVAL")
-                       .replace("{lab_no}", "NOVAL")
-                       .replace("{name}", "NAMEVAL"))
+        expected = (
+            inj.replace("{lab}", "LABVAL").replace("{lab_no}", "NOVAL").replace("{name}", "NAMEVAL")
+        )
         t.eq(got, expected, f"injection literal-safe {inj!r}")
         # Hard invariants: no python internals ever leak into the output.
         t.check("<class" not in got, f"no <class leak {inj!r}")
         t.check("object at 0x" not in got, f"no repr/addr leak {inj!r}")
-        t.check("__subclasses__" not in got or "__subclasses__" in inj,
-                f"no method-object leak {inj!r}")
-        t.check("globals" not in got.lower() or "globals" in inj.lower(),
-                f"no globals leak {inj!r}")
+        t.check(
+            "__subclasses__" not in got or "__subclasses__" in inj, f"no method-object leak {inj!r}"
+        )
+        t.check(
+            "globals" not in got.lower() or "globals" in inj.lower(), f"no globals leak {inj!r}"
+        )
     db.set_setting(con, "whatsapp_report_caption", "")
 
     # Specific, named guarantee from the brief: {lab.__class__} sanitized.
     db.set_setting(con, "whatsapp_report_caption", "{lab.__class__}")
-    t.eq(wa._caption(con, "whatsapp_report_caption", "FB", lab="L"),
-         "{lab.__class__}", "{lab.__class__} kept literal (no .format)")
+    t.eq(
+        wa._caption(con, "whatsapp_report_caption", "FB", lab="L"),
+        "{lab.__class__}",
+        "{lab.__class__} kept literal (no .format)",
+    )
     db.set_setting(con, "whatsapp_report_caption", "")
 
     # =====================================================================
     # 9) Unknown placeholder passes through unchanged (no KeyError/crash)
     # =====================================================================
     t.section("unknown placeholder passes through")
-    UNKNOWN = ["{bogus}", "{x}{y}{z}", "prefix {unknown} suffix", "{labx}",
-               "{nam}", "{lab_n}", "no placeholders at all", "{lab_no_}"]
+    UNKNOWN = [
+        "{bogus}",
+        "{x}{y}{z}",
+        "prefix {unknown} suffix",
+        "{labx}",
+        "{nam}",
+        "{lab_n}",
+        "no placeholders at all",
+        "{lab_no_}",
+    ]
     for u in UNKNOWN:
         db.set_setting(con, "whatsapp_report_caption", u)
         # only the exact known tokens substitute; these contain none, so unchanged
-        got = wa._caption(con, "whatsapp_report_caption", "FB",
-                          lab="LV", lab_no="NV", name="NM")
-        want = (u.replace("{lab}", "LV").replace("{lab_no}", "NV")
-                 .replace("{name}", "NM"))
+        got = wa._caption(con, "whatsapp_report_caption", "FB", lab="LV", lab_no="NV", name="NM")
+        want = u.replace("{lab}", "LV").replace("{lab_no}", "NV").replace("{name}", "NM")
         t.eq(got, want, f"unknown placeholder passthrough {u!r}")
     db.set_setting(con, "whatsapp_report_caption", "")
 
@@ -237,8 +317,11 @@ def register(t):
     for lab in LABS[:4]:
         for nm in NAMES[:4]:
             db.set_setting(con, "whatsapp_receipt_caption", "{lab} bill for {name}")
-            t.eq(wa._caption(con, "whatsapp_receipt_caption", "FB", lab=lab, name=nm),
-                 f"{lab} bill for {nm}", f"receipt caption lab={lab!r} nm={nm!r}")
+            t.eq(
+                wa._caption(con, "whatsapp_receipt_caption", "FB", lab=lab, name=nm),
+                f"{lab} bill for {nm}",
+                f"receipt caption lab={lab!r} nm={nm!r}",
+            )
     db.set_setting(con, "whatsapp_receipt_caption", "")
 
     # =====================================================================
@@ -247,13 +330,37 @@ def register(t):
     t.section("whatsapp_timeout clamping in _cfg")
     # (value-string, expected-clamped-int)
     TIMEOUTS = [
-        ("0", 5), ("1", 5), ("4", 5), ("5", 5), ("6", 6), ("39", 39), ("40", 40),
-        ("41", 41), ("119", 119), ("120", 120), ("121", 120), ("9999", 120),
-        ("-5", 5), ("-100", 5), ("100", 100), ("60", 60), ("30", 30),
-        ("3.9", 5), ("5.9", 5), ("40.0", 40), ("119.9", 119),
+        ("0", 5),
+        ("1", 5),
+        ("4", 5),
+        ("5", 5),
+        ("6", 6),
+        ("39", 39),
+        ("40", 40),
+        ("41", 41),
+        ("119", 119),
+        ("120", 120),
+        ("121", 120),
+        ("9999", 120),
+        ("-5", 5),
+        ("-100", 5),
+        ("100", 100),
+        ("60", 60),
+        ("30", 30),
+        ("3.9", 5),
+        ("5.9", 5),
+        ("40.0", 40),
+        ("119.9", 119),
         # garbage / empty -> default 40 ; "1e3" is a valid float (1000) -> clamp 120
-        ("", 40), ("abc", 40), ("  ", 40), ("4o", 40), ("1e3", 120),
-        ("nan", 40), ("0x10", 40), ("40 ", 40), (" 30", 30),
+        ("", 40),
+        ("abc", 40),
+        ("  ", 40),
+        ("4o", 40),
+        ("1e3", 120),
+        ("nan", 40),
+        ("0x10", 40),
+        ("40 ", 40),
+        (" 30", 30),
     ]
     for val, want in TIMEOUTS:
         db.set_setting(con, "whatsapp_timeout", val)
@@ -316,8 +423,7 @@ def register(t):
         for ki, k in enumerate(KEYS):
             db.set_setting(con, k, f"{gv}#{ki}")
         for ki, k in enumerate(KEYS):
-            t.eq(db.get_setting(con, k), f"{gv}#{ki}",
-                 f"bulk key {k} val-round {vi}")
+            t.eq(db.get_setting(con, k), f"{gv}#{ki}", f"bulk key {k} val-round {vi}")
 
     # =====================================================================
     # 14) get_setting type guarantee: always returns the stored str exactly

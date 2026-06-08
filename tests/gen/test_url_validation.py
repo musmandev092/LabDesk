@@ -10,15 +10,16 @@ app's guard logic regresses (e.g. starts treating a public host as local).
 Contract: expose exactly register(t); assert only via t.check/t.eq/t.near/t.has.
 This module emits well over 3,000 cases.
 """
+
 from __future__ import annotations
 
 import ipaddress
 import urllib.parse
 
-
 # --- reference (oracle) implementations: the INTENDED behavior --------------
 # These mirror the source's documented intent. We compute expected values from
 # these independently of the app code, then assert the app agrees.
+
 
 def _host(url):
     try:
@@ -53,7 +54,7 @@ def exp_local(url):
     try:
         host = (urllib.parse.urlparse(url or "").hostname or "").lower()
     except ValueError:
-        return False        # malformed host → treat as non-local (warn before sending)
+        return False  # malformed host → treat as non-local (warn before sending)
     if host in ("localhost", "127.0.0.1", "::1", ""):
         return True
     try:
@@ -87,10 +88,34 @@ def register(t):
     # 1. Scheme sweep — only http/https are valid gateways.
     # =====================================================================
     t.section("scheme sweep")
-    schemes = ["http", "https", "HTTP", "HTTPS", "HtTp", "ftp", "ftps", "ws",
-               "wss", "file", "gopher", "ldap", "dict", "data", "javascript",
-               "ssh", "tftp", "smb", "mailto", "tel", "", "htp", "httpss",
-               "xhttp", "h", "ht tp"]
+    schemes = [
+        "http",
+        "https",
+        "HTTP",
+        "HTTPS",
+        "HtTp",
+        "ftp",
+        "ftps",
+        "ws",
+        "wss",
+        "file",
+        "gopher",
+        "ldap",
+        "dict",
+        "data",
+        "javascript",
+        "ssh",
+        "tftp",
+        "smb",
+        "mailto",
+        "tel",
+        "",
+        "htp",
+        "httpss",
+        "xhttp",
+        "h",
+        "ht tp",
+    ]
     hosts = ["localhost", "127.0.0.1", "8.8.8.8", "evil.example.com"]
     for sc in schemes:
         for h in hosts:
@@ -123,7 +148,7 @@ def register(t):
                 # validate: always valid (has host, http scheme)
                 t.check(w.validate_url(url)[0], f"valid 127 {host}")
                 # loopback-url: ONLY exact 127.0.0.1
-                exp_lb = (host == "127.0.0.1")
+                exp_lb = host == "127.0.0.1"
                 t.eq(w.is_loopback_url(url), exp_lb, f"strict loopback {host}")
                 # local: entire 127/8 is loopback => local
                 t.check(w.is_local_url(url), f"127/8 is local {host}")
@@ -156,13 +181,20 @@ def register(t):
     # =====================================================================
     t.section("just-outside private boundaries (off-by-one)")
     public_boundaries = [
-        "9.255.255.255", "11.0.0.0",          # around 10/8
-        "192.167.255.255", "192.169.0.0",     # around 192.168/16
-        "192.167.0.1", "192.169.1.1",
-        "172.15.255.255", "172.32.0.0",       # around 172.16/12
-        "172.15.0.1", "172.32.0.1",
-        "126.255.255.255", "128.0.0.0",       # around 127/8
-        "169.253.255.255", "169.255.0.0",     # around 169.254/16 (link-local)
+        "9.255.255.255",
+        "11.0.0.0",  # around 10/8
+        "192.167.255.255",
+        "192.169.0.0",  # around 192.168/16
+        "192.167.0.1",
+        "192.169.1.1",
+        "172.15.255.255",
+        "172.32.0.0",  # around 172.16/12
+        "172.15.0.1",
+        "172.32.0.1",
+        "126.255.255.255",
+        "128.0.0.0",  # around 127/8
+        "169.253.255.255",
+        "169.255.0.0",  # around 169.254/16 (link-local)
     ]
     for host in public_boundaries:
         url = f"http://{host}:8080"
@@ -188,12 +220,25 @@ def register(t):
     # =====================================================================
     t.section("public hosts non-local")
     public_hosts = [
-        "8.8.8.8", "1.1.1.1", "208.67.222.222", "93.184.216.34",
-        "evil.example.com", "attacker.internal", "google.com", "example.org",
-        "169.254.0.0.evil.com", "localhost.evil.com", "127.0.0.1.evil.com",
-        "metadata.google.internal", "169-254-169-254.example.com",
-        "0x7f000001", "2130706433", "017700000001",
-        "registry.npmjs.org", "s3.amazonaws.com", "169.254.169.254.nip.io",
+        "8.8.8.8",
+        "1.1.1.1",
+        "208.67.222.222",
+        "93.184.216.34",
+        "evil.example.com",
+        "attacker.internal",
+        "google.com",
+        "example.org",
+        "169.254.0.0.evil.com",
+        "localhost.evil.com",
+        "127.0.0.1.evil.com",
+        "metadata.google.internal",
+        "169-254-169-254.example.com",
+        "0x7f000001",
+        "2130706433",
+        "017700000001",
+        "registry.npmjs.org",
+        "s3.amazonaws.com",
+        "169.254.169.254.nip.io",
     ]
     for host in public_hosts:
         for scheme in ["http", "https"]:
@@ -214,10 +259,18 @@ def register(t):
     # =====================================================================
     t.section("localhost and ::1 variants")
     loop_urls = [
-        "http://localhost", "https://localhost", "http://localhost:8080",
-        "http://localhost:1", "http://localhost:65535", "HTTP://LOCALHOST",
-        "http://LocalHost:8080", "http://127.0.0.1", "https://127.0.0.1:443",
-        "http://[::1]", "http://[::1]:8080", "https://[::1]:9000",
+        "http://localhost",
+        "https://localhost",
+        "http://localhost:8080",
+        "http://localhost:1",
+        "http://localhost:65535",
+        "HTTP://LOCALHOST",
+        "http://LocalHost:8080",
+        "http://127.0.0.1",
+        "https://127.0.0.1:443",
+        "http://[::1]",
+        "http://[::1]:8080",
+        "https://[::1]:9000",
     ]
     for url in loop_urls:
         t.check(w.validate_url(url)[0], f"valid loop url {url}")
@@ -238,16 +291,22 @@ def register(t):
     # =====================================================================
     t.section("IPv6 sweep")
     ipv6_hosts = [
-        "::1",                       # loopback -> local + (strict) loopback
-        "::",                        # unspecified -> private per ipaddress -> local
-        "fc00::1", "fcff::1", "fd00::1", "fdff:ffff::1",   # ULA -> private
-        "fe80::1", "fe80::abcd", "febf::1",                # link-local -> private
-        "2001:db8::1", "2001:db8:dead:beef::1",            # documentation -> private
-        "2001:4860:4860::8888",      # google DNS -> global, NON-local
-        "2606:4700:4700::1111",      # cloudflare -> global, NON-local
-        "::ffff:127.0.0.1",          # v4-mapped loopback -> is_private True
-        "::ffff:8.8.8.8",            # v4-mapped public -> non-local
-        "64:ff9b::8.8.8.8",          # NAT64 of public -> non-local
+        "::1",  # loopback -> local + (strict) loopback
+        "::",  # unspecified -> private per ipaddress -> local
+        "fc00::1",
+        "fcff::1",
+        "fd00::1",
+        "fdff:ffff::1",  # ULA -> private
+        "fe80::1",
+        "fe80::abcd",
+        "febf::1",  # link-local -> private
+        "2001:db8::1",
+        "2001:db8:dead:beef::1",  # documentation -> private
+        "2001:4860:4860::8888",  # google DNS -> global, NON-local
+        "2606:4700:4700::1111",  # cloudflare -> global, NON-local
+        "::ffff:127.0.0.1",  # v4-mapped loopback -> is_private True
+        "::ffff:8.8.8.8",  # v4-mapped public -> non-local
+        "64:ff9b::8.8.8.8",  # NAT64 of public -> non-local
     ]
     for host in ipv6_hosts:
         url = f"http://[{host}]:8080"
@@ -262,11 +321,25 @@ def register(t):
     # 9. Port sweep — ports never change validity/local classification.
     # =====================================================================
     t.section("port sweep")
-    ports = ["", ":0", ":1", ":80", ":443", ":8080", ":65535", ":65536",
-             ":99999", ":abc", ":-1", ":  "]
+    ports = [
+        "",
+        ":0",
+        ":1",
+        ":80",
+        ":443",
+        ":8080",
+        ":65535",
+        ":65536",
+        ":99999",
+        ":abc",
+        ":-1",
+        ":  ",
+    ]
     for host, is_local, is_loop in [
-        ("localhost", True, True), ("127.0.0.1", True, True),
-        ("192.168.1.1", True, False), ("8.8.8.8", False, False),
+        ("localhost", True, True),
+        ("127.0.0.1", True, True),
+        ("192.168.1.1", True, False),
+        ("8.8.8.8", False, False),
         ("evil.example.com", False, False),
     ]:
         for port in ports:
@@ -276,29 +349,48 @@ def register(t):
             # (no try/except), which is itself a defect we surface via _safe.
             t.eq(_safe(w.is_local_url, url), exp_local(url), f"port local {host}{port}")
             t.eq(_safe(w.is_loopback_url, url), exp_loopback(url), f"port loop {host}{port}")
-            t.eq(_safe(lambda u: w.validate_url(u)[0], url), exp_validate(url),
-                 f"port valid {host}{port}")
+            t.eq(
+                _safe(lambda u: w.validate_url(u)[0], url),
+                exp_validate(url),
+                f"port valid {host}{port}",
+            )
 
     # =====================================================================
     # 10. Credentials in URL — userinfo must NOT confuse host extraction.
     #     The host after '@' decides locality, not the userinfo before it.
     # =====================================================================
     t.section("credentials-in-url")
-    creds = ["user:pass", "user", "admin:secret", "127.0.0.1", "localhost",
-             "evil.com", "a:b:c", "user%40name:pw", ""]
+    creds = [
+        "user:pass",
+        "user",
+        "admin:secret",
+        "127.0.0.1",
+        "localhost",
+        "evil.com",
+        "a:b:c",
+        "user%40name:pw",
+        "",
+    ]
     for cred in creds:
-        for host, exp_loc in [("127.0.0.1", True), ("localhost", True),
-                              ("192.168.0.1", True), ("8.8.8.8", False),
-                              ("evil.example.com", False)]:
+        for host, exp_loc in [
+            ("127.0.0.1", True),
+            ("localhost", True),
+            ("192.168.0.1", True),
+            ("8.8.8.8", False),
+            ("evil.example.com", False),
+        ]:
             pre = (cred + "@") if cred else ""
             url = f"http://{pre}{host}:8080"
             t.eq(w.is_local_url(url), exp_local(url), f"cred local {cred}@{host}")
             t.eq(w.is_loopback_url(url), exp_loopback(url), f"cred loop {cred}@{host}")
             t.check(w.is_local_url(url) == exp_loc, f"cred locality {cred}@{host}")
     # classic SSRF trick: localhost in userinfo, public host after @ -> NON-local
-    for url in ["http://localhost@evil.com", "http://127.0.0.1@8.8.8.8",
-                "http://localhost:pw@evil.example.com",
-                "http://127.0.0.1:8080@attacker.com"]:
+    for url in [
+        "http://localhost@evil.com",
+        "http://127.0.0.1@8.8.8.8",
+        "http://localhost:pw@evil.example.com",
+        "http://127.0.0.1:8080@attacker.com",
+    ]:
         t.check(not w.is_local_url(url), f"userinfo-spoof not local {url}")
         t.check(not w.is_loopback_url(url), f"userinfo-spoof not loopback {url}")
 
@@ -308,24 +400,61 @@ def register(t):
     # =====================================================================
     t.section("malformed / garbage")
     garbage = [
-        "", "   ", "\t", "\n", "notaurl", "://nohost", "http", "http:",
-        "http:/", "http://", "http:///", "http:///path", "://", "//host",
-        "//localhost:8080", "host:8080", "localhost:8080", "ftp://x",
-        "javascript:alert(1)", "data:text/html,x", "file:///etc/passwd",
-        "http:// space", "http://ho st/x", "  http://localhost  ",
-        "HTTP://", "x" * 500, "http://" + "a" * 300, "http://#frag",
-        "http://?q=1", "\x00http://localhost", "http://localhost\x00",
-        "http://[", "http://[::", "http://]", "http://[gggg::1]",
-        "http://1.2.3", "http://1.2.3.4.5", "http://256.0.0.1",
-        "http://...", "http://.", "http://-", "http://_",
+        "",
+        "   ",
+        "\t",
+        "\n",
+        "notaurl",
+        "://nohost",
+        "http",
+        "http:",
+        "http:/",
+        "http://",
+        "http:///",
+        "http:///path",
+        "://",
+        "//host",
+        "//localhost:8080",
+        "host:8080",
+        "localhost:8080",
+        "ftp://x",
+        "javascript:alert(1)",
+        "data:text/html,x",
+        "file:///etc/passwd",
+        "http:// space",
+        "http://ho st/x",
+        "  http://localhost  ",
+        "HTTP://",
+        "x" * 500,
+        "http://" + "a" * 300,
+        "http://#frag",
+        "http://?q=1",
+        "\x00http://localhost",
+        "http://localhost\x00",
+        "http://[",
+        "http://[::",
+        "http://]",
+        "http://[gggg::1]",
+        "http://1.2.3",
+        "http://1.2.3.4.5",
+        "http://256.0.0.1",
+        "http://...",
+        "http://.",
+        "http://-",
+        "http://_",
     ]
     for url in garbage:
         # never crash + agree with oracle
         v = _safe(w.validate_url, url)
-        t.check(isinstance(v, tuple) and len(v) == 2 and v[0] != "CRASH",
-                f"validate_url no-crash + tuple {url!r}")
-        t.eq(_safe(lambda u: w.validate_url(u)[0], url), exp_validate(url),
-             f"garbage validate {url!r}")
+        t.check(
+            isinstance(v, tuple) and len(v) == 2 and v[0] != "CRASH",
+            f"validate_url no-crash + tuple {url!r}",
+        )
+        t.eq(
+            _safe(lambda u: w.validate_url(u)[0], url),
+            exp_validate(url),
+            f"garbage validate {url!r}",
+        )
         t.eq(_safe(w.is_local_url, url), exp_local(url), f"garbage local {url!r}")
         t.eq(_safe(w.is_loopback_url, url), exp_loopback(url), f"garbage loopback {url!r}")
         # garbage (no http scheme / no host) must be rejected
@@ -339,15 +468,26 @@ def register(t):
     # WITHOUT a guard, so a malformed bracket/IPv6 host raises ValueError and
     # crashes the classifier. These assertions stay RED until the app guards it.
     t.section("malformed-host must not crash classifiers (BUG)")
-    crashers = ["http://[", "http://[::", "http://]", "http://[gggg::1]",
-                "http://[12345::]", "https://[::g]", "http://[:::1]"]
+    crashers = [
+        "http://[",
+        "http://[::",
+        "http://]",
+        "http://[gggg::1]",
+        "http://[12345::]",
+        "https://[::g]",
+        "http://[:::1]",
+    ]
     for url in crashers:
         rl = _safe(w.is_loopback_url, url)
         ll = _safe(w.is_local_url, url)
-        t.check(not (isinstance(rl, tuple) and rl and rl[0] == "CRASH"),
-                f"is_loopback_url must not crash {url!r}")
-        t.check(not (isinstance(ll, tuple) and ll and ll[0] == "CRASH"),
-                f"is_local_url must not crash {url!r}")
+        t.check(
+            not (isinstance(rl, tuple) and rl and rl[0] == "CRASH"),
+            f"is_loopback_url must not crash {url!r}",
+        )
+        t.check(
+            not (isinstance(ll, tuple) and ll and ll[0] == "CRASH"),
+            f"is_local_url must not crash {url!r}",
+        )
 
     # None handling: validate False, is_local True (empty host short-circuit),
     # is_loopback False — pin exactly.
@@ -369,8 +509,10 @@ def register(t):
             t.eq(w.is_local_url(url), exp_local(url), f"ws local {url!r}")
             t.eq(w.is_loopback_url(url), exp_loopback(url), f"ws loopback {url!r}")
     # validate_url strips, so padded valid url is accepted
-    t.check(w.validate_url("  http://localhost:8080  ")[0],
-            "padded valid url accepted (validate strips)")
+    t.check(
+        w.validate_url("  http://localhost:8080  ")[0],
+        "padded valid url accepted (validate strips)",
+    )
 
     # =====================================================================
     # 13. Case-insensitivity of host classification.
@@ -385,11 +527,24 @@ def register(t):
     # 14. Path/query/fragment do not affect host classification.
     # =====================================================================
     t.section("path/query/fragment ignored")
-    tails = ["", "/", "/session/status", "/a/b/c", "?x=1", "#f",
-             "/p?q=1#f", "/@evil.com", "/x@8.8.8.8"]
-    for host, loc, lb in [("127.0.0.1", True, True), ("localhost", True, True),
-                          ("10.0.0.1", True, False), ("8.8.8.8", False, False),
-                          ("evil.example.com", False, False)]:
+    tails = [
+        "",
+        "/",
+        "/session/status",
+        "/a/b/c",
+        "?x=1",
+        "#f",
+        "/p?q=1#f",
+        "/@evil.com",
+        "/x@8.8.8.8",
+    ]
+    for host, loc, lb in [
+        ("127.0.0.1", True, True),
+        ("localhost", True, True),
+        ("10.0.0.1", True, False),
+        ("8.8.8.8", False, False),
+        ("evil.example.com", False, False),
+    ]:
         for tail in tails:
             url = f"http://{host}:8080{tail}"
             t.check(w.is_local_url(url) == loc, f"tail local {host}{tail}")
@@ -401,13 +556,23 @@ def register(t):
     #     host x scheme matrix — the bulk of the case count.
     # =====================================================================
     t.section("broad scheme x host matrix")
-    matrix_hosts = (
-        priv_hosts[:30]
-        + ["127.0.0.1", "127.0.0.2", "127.255.255.254", "localhost",
-           "8.8.8.8", "1.1.1.1", "evil.example.com", "example.com",
-           "192.168.1.1", "10.0.0.1", "172.16.0.1", "169.254.1.1",
-           "128.0.0.1", "11.0.0.1", "172.32.0.1"]
-    )
+    matrix_hosts = priv_hosts[:30] + [
+        "127.0.0.1",
+        "127.0.0.2",
+        "127.255.255.254",
+        "localhost",
+        "8.8.8.8",
+        "1.1.1.1",
+        "evil.example.com",
+        "example.com",
+        "192.168.1.1",
+        "10.0.0.1",
+        "172.16.0.1",
+        "169.254.1.1",
+        "128.0.0.1",
+        "11.0.0.1",
+        "172.32.0.1",
+    ]
     matrix_schemes = ["http", "https", "ftp", "ws", "", "HTTP"]
     matrix_ports = ["", ":8080", ":443", ":1"]
     for host in matrix_hosts:

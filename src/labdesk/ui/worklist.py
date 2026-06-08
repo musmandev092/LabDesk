@@ -1,20 +1,34 @@
 """Worklist / Results: pick a receipt, enter results per parameter, print report."""
+
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QEvent, QDate
-from PySide6.QtGui import QShortcut, QKeySequence
+from PySide6.QtCore import QDate, QEvent, Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTableWidget, QTableWidgetItem,
-    QLineEdit, QComboBox, QPushButton, QHeaderView, QLabel, QScrollArea,
-    QGridLayout, QMessageBox, QCheckBox, QPlainTextEdit, QDateEdit,
+    QCheckBox,
+    QComboBox,
+    QDateEdit,
+    QGridLayout,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
-from PySide6.QtWidgets import QSizePolicy
-
-from .widgets import h2, muted, card, page_header, selected_id, status_badge
-from . import wa, tasks
 from .. import db, report
 from ..roles import can
+from . import tasks, wa
+from .widgets import card, h2, muted, page_header, selected_id, status_badge
 
 
 def resolve_ref(param_row, sex: str) -> str:
@@ -31,11 +45,11 @@ class WorklistPage(QWidget):
         super().__init__()
         self.con = con
         self.user = user
-        self._ids = []   # parallel to worklist table rows; filled by refresh
+        self._ids = []  # parallel to worklist table rows; filled by refresh
         self.current_receipt = None
-        self._editors = {}   # (item_id, parameter_id) -> QLineEdit
-        self._show = {}      # (item_id, parameter_id) -> QCheckBox (ticked = print this row)
-        self._remarks = {}   # item_id -> QPlainTextEdit (per-test remarks)
+        self._editors = {}  # (item_id, parameter_id) -> QLineEdit
+        self._show = {}  # (item_id, parameter_id) -> QCheckBox (ticked = print this row)
+        self._remarks = {}  # item_id -> QPlainTextEdit (per-test remarks)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -44,27 +58,36 @@ class WorklistPage(QWidget):
         root.addWidget(header)
 
         top = QHBoxLayout()
-        self.search = QLineEdit(); self.search.setPlaceholderText("Search patient / lab no…")
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search patient / lab no…")
         self.search.setMinimumHeight(40)
         self.search.textChanged.connect(tasks.debounce(self, self.refresh_list))
         self.status_filter = QComboBox()
         self.status_filter.setMinimumHeight(40)
-        for value, label in [("All", "All"), ("pending", "Pending"),
-                             ("in_progress", "In Progress"), ("reported", "Reported"),
-                             ("delivered", "Delivered")]:
+        for value, label in [
+            ("All", "All"),
+            ("pending", "Pending"),
+            ("in_progress", "In Progress"),
+            ("reported", "Reported"),
+            ("delivered", "Delivered"),
+        ]:
             self.status_filter.addItem(label, value)
         self.status_filter.setCurrentIndex(1)  # Pending
         self.status_filter.currentIndexChanged.connect(self.refresh_list)
         # optional calendar date-range filter (on received date)
-        self.use_dates = QCheckBox("By date"); self.use_dates.toggled.connect(self._dates_toggled)
+        self.use_dates = QCheckBox("By date")
+        self.use_dates.toggled.connect(self._dates_toggled)
         self.date_from = self._date_edit()
         self.date_to = self._date_edit()
         self.date_from.dateChanged.connect(self.refresh_list)
         self.date_to.dateChanged.connect(self.refresh_list)
         top.addWidget(self.search, 1)
-        top.addWidget(QLabel("Status:")); top.addWidget(self.status_filter)
+        top.addWidget(QLabel("Status:"))
+        top.addWidget(self.status_filter)
         top.addWidget(self.use_dates)
-        top.addWidget(self.date_from); top.addWidget(QLabel("→")); top.addWidget(self.date_to)
+        top.addWidget(self.date_from)
+        top.addWidget(QLabel("→"))
+        top.addWidget(self.date_to)
         root.addLayout(top)
 
         split = QSplitter()
@@ -74,7 +97,7 @@ class WorklistPage(QWidget):
         self.table.setHorizontalHeaderLabels(["Lab No", "Patient", "Date", "Status"])
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        hh.setSectionResizeMode(1, QHeaderView.Stretch)          # Patient grows
+        hh.setSectionResizeMode(1, QHeaderView.Stretch)  # Patient grows
         hh.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Date readable
         hh.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
@@ -85,12 +108,14 @@ class WorklistPage(QWidget):
         split.addWidget(self.table)
 
         # right: result entry
-        right = QWidget(); rl = QVBoxLayout(right)
+        right = QWidget()
+        rl = QVBoxLayout(right)
         self.header = h2("Select a receipt")
         rl.addWidget(self.header)
         self.empty_hint = muted("← Select a patient from the list to enter results.")
         rl.addWidget(self.empty_hint)
-        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.entry_host = QWidget()
         self.entry_layout = QVBoxLayout(self.entry_host)
@@ -99,7 +124,8 @@ class WorklistPage(QWidget):
         rl.addWidget(self.scroll, 1)
 
         btns = QHBoxLayout()
-        self.save_btn = QPushButton("Save results"); self.save_btn.clicked.connect(self.save_results)
+        self.save_btn = QPushButton("Save results")
+        self.save_btn.clicked.connect(self.save_results)
         self.save_btn.setEnabled(False)
         btns.addStretch(1)
         btns.addWidget(self.save_btn)
@@ -108,7 +134,8 @@ class WorklistPage(QWidget):
         # WhatsApp delivery of the report all live on the Receipts / Reports page.
         self.report_hint = muted(
             "Print, save as PDF or send the report on WhatsApp from the "
-            "Receipts / Reports page (once results are saved).")
+            "Receipts / Reports page (once results are saved)."
+        )
         self.report_hint.setWordWrap(True)
         rl.addWidget(self.report_hint)
         split.addWidget(right)
@@ -147,9 +174,12 @@ class WorklistPage(QWidget):
             it = self.entry_layout.takeAt(0)
             w = it.widget()
             if w is not None:
-                w.setParent(None); w.deleteLater()
+                w.setParent(None)
+                w.deleteLater()
         self.entry_layout.addStretch(1)
-        self._editors = {}; self._show = {}; self._remarks = {}
+        self._editors = {}
+        self._show = {}
+        self._remarks = {}
         self.save_btn.setEnabled(False)
 
     # ---------------------------------------------------------------
@@ -177,8 +207,10 @@ class WorklistPage(QWidget):
         d2 = self.date_to.date()
         if d1 > d2:
             d1, d2 = d2, d1
-        return ("received_at >= ? AND received_at < ?",
-                [d1.toString("yyyy-MM-dd"), d2.addDays(1).toString("yyyy-MM-dd")])
+        return (
+            "received_at >= ? AND received_at < ?",
+            [d1.toString("yyyy-MM-dd"), d2.addDays(1).toString("yyyy-MM-dd")],
+        )
 
     def on_show(self):
         self.refresh_list()
@@ -186,20 +218,25 @@ class WorklistPage(QWidget):
     def refresh_list(self):
         q = f"%{self.search.text().strip()}%"
         st = self.status_filter.currentData() or "All"
-        sql = (f"SELECT * FROM receipts WHERE {db.NOT_VOIDED} "
-               "AND (COALESCE(patient_name,'') LIKE ? OR COALESCE(lab_no,'') LIKE ?)")
+        sql = (
+            f"SELECT * FROM receipts WHERE {db.NOT_VOIDED} "
+            "AND (COALESCE(patient_name,'') LIKE ? OR COALESCE(lab_no,'') LIKE ?)"
+        )
         args = [q, q]
         if st != "All":
-            sql += " AND status=?"; args.append(st)
+            sql += " AND status=?"
+            args.append(st)
         dc, dargs = self._date_clause()
         if dc:
-            sql += f" AND {dc}"; args += dargs
+            sql += f" AND {dc}"
+            args += dargs
         sql += " ORDER BY id DESC LIMIT 500"
         rows = self.con.execute(sql, args).fetchall()
         self.table.setRowCount(0)
         self._ids = []
         for r in rows:
-            i = self.table.rowCount(); self.table.insertRow(i)
+            i = self.table.rowCount()
+            self.table.insertRow(i)
             self._ids.append(r["id"])
             self.table.setItem(i, 0, QTableWidgetItem(r["lab_no"] or ""))
             self.table.setItem(i, 1, QTableWidgetItem(r["patient_name"] or ""))
@@ -216,7 +253,9 @@ class WorklistPage(QWidget):
             return
         self.current_receipt = rid
         r = self.con.execute("SELECT * FROM receipts WHERE id=?", (rid,)).fetchone()
-        self.header.setText(f"{r['lab_no']} — {r['patient_name']} ({r['sex']}, {r['age']} {r['age_desc']})")
+        self.header.setText(
+            f"{r['lab_no']} — {r['patient_name']} ({r['sex']}, {r['age']} {r['age_desc']})"
+        )
         self.empty_hint.hide()
         sex = r["sex"]
 
@@ -228,11 +267,14 @@ class WorklistPage(QWidget):
             if w is not None:
                 w.setParent(None)
                 w.deleteLater()
-        self._editors = {}; self._show = {}; self._remarks = {}
+        self._editors = {}
+        self._show = {}
+        self._remarks = {}
 
         items = self.con.execute(
             "SELECT ri.*, t.is_culture FROM receipt_items ri JOIN tests t ON t.id=ri.test_id "
-            "WHERE ri.receipt_id=? ORDER BY ri.id", (rid,)
+            "WHERE ri.receipt_id=? ORDER BY ri.id",
+            (rid,),
         ).fetchall()
         for it in items:
             if it["is_culture"]:
@@ -268,13 +310,15 @@ class WorklistPage(QWidget):
     def _culture_note(self, item):
         lbl = muted(
             f"“{item['test_name']}” is a culture & sensitivity test — "
-            "enter its findings on the Microbiology screen.")
+            "enter its findings on the Microbiology screen."
+        )
         lbl.setWordWrap(True)
         return card(lbl, title=item["test_name"])
 
     def _make_check(self):
         """A ticked 'show on report' checkbox for a parameter row."""
-        cb = QCheckBox(); cb.setChecked(True)
+        cb = QCheckBox()
+        cb.setChecked(True)
         cb.setToolTip("Tick to print this line on the report; untick to hide it.")
         return cb
 
@@ -292,14 +336,16 @@ class WorklistPage(QWidget):
             hidden[row["parameter_id"]] = row["hidden"]
         had_results = bool(existing)  # first entry → everything ticked by default
 
-        grid = QGridLayout(); grid.setSpacing(6)
+        grid = QGridLayout()
+        grid.setSpacing(6)
         if not params:
             # single-line test: one free result box
             cb = self._make_check()
             cb.setChecked(not (had_results and hidden.get(None)))
             grid.addWidget(cb, 0, 0)
             grid.addWidget(QLabel("Result"), 0, 1)
-            le = QLineEdit(); le.setText(existing.get(None, "") or "")
+            le = QLineEdit()
+            le.setText(existing.get(None, "") or "")
             grid.addWidget(le, 0, 2, 1, 3)
             self._editors[(item["id"], None)] = le
             self._show[(item["id"], None)] = cb
@@ -329,7 +375,8 @@ class WorklistPage(QWidget):
                 cb.setChecked(not (had_results and hidden.get(p["id"])))
                 grid.addWidget(cb, row_i, 0, Qt.AlignCenter)
                 grid.addWidget(QLabel(name), row_i, 1)
-                le = QLineEdit(); le.setText(existing.get(p["id"], "") or "")
+                le = QLineEdit()
+                le.setText(existing.get(p["id"], "") or "")
                 le.setMaximumWidth(160)
                 # live out-of-range cue: red (high) / amber (low) as you type
 
@@ -341,6 +388,7 @@ class WorklistPage(QWidget):
                         le.setStyleSheet("color:#d97706; font-weight:700;")
                     else:
                         le.setStyleSheet("")
+
                 le.textChanged.connect(_flagit)
                 _flagit(le.text())
                 grid.addWidget(le, row_i, 2)
@@ -349,20 +397,26 @@ class WorklistPage(QWidget):
                 self._editors[(item["id"], p["id"])] = le
                 self._show[(item["id"], p["id"])] = cb
                 row_i += 1
-        grid_host = QWidget(); grid_host.setLayout(grid)
+        grid_host = QWidget()
+        grid_host.setLayout(grid)
 
         # per-test remarks (printed under the results table)
         rk = item.keys()
         existing_rem = (item["remarks"] if "remarks" in rk else "") or ""
-        rem = QPlainTextEdit(); rem.setPlainText(existing_rem)
+        rem = QPlainTextEdit()
+        rem.setPlainText(existing_rem)
         rem.setPlaceholderText("Remarks (optional) — printed under this test's results")
         rem.setFixedHeight(60)
         self._remarks[item["id"]] = rem
         rem_lbl = muted("Remarks")
 
-        host = QWidget(); hl = QVBoxLayout(host)
-        hl.setContentsMargins(0, 0, 0, 0); hl.setSpacing(6)
-        hl.addWidget(grid_host); hl.addWidget(rem_lbl); hl.addWidget(rem)
+        host = QWidget()
+        hl = QVBoxLayout(host)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(6)
+        hl.addWidget(grid_host)
+        hl.addWidget(rem_lbl)
+        hl.addWidget(rem)
         return card(h2(item["test_name"]), host)
 
     # ---------------------------------------------------------------
@@ -370,7 +424,9 @@ class WorklistPage(QWidget):
         if self.current_receipt is None:
             return
         c = self.con
-        r = c.execute("SELECT sex, status FROM receipts WHERE id=?", (self.current_receipt,)).fetchone()
+        r = c.execute(
+            "SELECT sex, status FROM receipts WHERE id=?", (self.current_receipt,)
+        ).fetchone()
         # defence in depth: refuse to write to a locked report even if the button slipped through
         lock = self._results_locked_reason(r["status"])
         if lock:
@@ -403,8 +459,19 @@ class WorklistPage(QWidget):
                        VALUES (?,?,?,?,?,?,?,?,?,?,?)
                        ON CONFLICT(receipt_item_id,parameter_id) DO UPDATE SET
                          value=excluded.value, ref_text=excluded.ref_text, hidden=excluded.hidden""",
-                    (item_id, param_id, p["seq"], p["part_type"], p["group_head"], p["name"],
-                     p["units"], p["superscript"], ref, value, hidden),
+                    (
+                        item_id,
+                        param_id,
+                        p["seq"],
+                        p["part_type"],
+                        p["group_head"],
+                        p["name"],
+                        p["units"],
+                        p["superscript"],
+                        ref,
+                        value,
+                        hidden,
+                    ),
                 )
             # per-test remarks
             for item_id, rem in self._remarks.items():
@@ -425,20 +492,30 @@ class WorklistPage(QWidget):
                 c.rollback()
             except Exception:
                 pass
-            QMessageBox.warning(self, "Save failed",
-                                f"Results were NOT saved — please try again.\n\n{e}")
+            QMessageBox.warning(
+                self, "Save failed", f"Results were NOT saved — please try again.\n\n{e}"
+            )
             return
-        lab_no = c.execute("SELECT lab_no FROM receipts WHERE id=?",
-                           (self.current_receipt,)).fetchone()[0]
+        lab_no = c.execute(
+            "SELECT lab_no FROM receipts WHERE id=?", (self.current_receipt,)
+        ).fetchone()[0]
         db.log_audit(c, self.user["username"], "results_saved", f"{lab_no or self.current_receipt}")
         QMessageBox.information(self, "Results", "Results saved.")
         # optional auto-send on WhatsApp — runs in the background, reports when done
         if db.get_setting(c, "whatsapp_auto", "0") == "1":
             rid = self.current_receipt
-            wa.send_async(self, c, "report", rid,
-                          on_done=lambda ok, m: db.log_audit(
-                              self.con, self.user["username"], "whatsapp_report",
-                              ("sent" if ok else "failed") + f" (auto) — {lab_no or rid}"))
+            wa.send_async(
+                self,
+                c,
+                "report",
+                rid,
+                on_done=lambda ok, m: db.log_audit(
+                    self.con,
+                    self.user["username"],
+                    "whatsapp_report",
+                    ("sent" if ok else "failed") + f" (auto) — {lab_no or rid}",
+                ),
+            )
         self.refresh_list()
 
     def _snapshot_static_lines(self, sex):
@@ -461,6 +538,16 @@ class WorklistPage(QWidget):
                            (receipt_item_id,parameter_id,seq,part_type,group_head,name,
                             units,superscript,ref_text,value)
                            VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                        (it["id"], p["id"], p["seq"], p["part_type"], p["group_head"],
-                         p["name"], p["units"], p["superscript"], ref, None),
+                        (
+                            it["id"],
+                            p["id"],
+                            p["seq"],
+                            p["part_type"],
+                            p["group_head"],
+                            p["name"],
+                            p["units"],
+                            p["superscript"],
+                            ref,
+                            None,
+                        ),
                     )

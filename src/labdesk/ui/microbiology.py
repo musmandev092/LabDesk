@@ -1,19 +1,30 @@
 """Microbiology: culture & sensitivity reporting."""
+
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QEvent
-from PySide6.QtGui import QShortcut, QKeySequence
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QTableWidget, QTableWidgetItem,
-    QLineEdit, QComboBox, QPushButton, QHeaderView, QLabel, QFormLayout,
-    QPlainTextEdit, QMessageBox,
+    QComboBox,
+    QFormLayout,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QSizePolicy,
+    QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
-from PySide6.QtWidgets import QSizePolicy
-
-from .widgets import h2, card, page_header
-from . import tasks
 from .. import db
+from . import tasks
+from .widgets import card, h2, page_header
 
 
 class MicrobiologyPage(QWidget):
@@ -26,14 +37,17 @@ class MicrobiologyPage(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(12)
         header, _ = page_header(
-            "Microbiology", "Culture & sensitivity — select an order, enter findings")
+            "Microbiology", "Culture & sensitivity — select an order, enter findings"
+        )
         root.addWidget(header)
 
         split = QSplitter()
         split.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         # left: culture orders
-        left = QWidget(); ll = QVBoxLayout(left)
-        self.search = QLineEdit(); self.search.setPlaceholderText("Search patient / lab no…")
+        left = QWidget()
+        ll = QVBoxLayout(left)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search patient / lab no…")
         self.search.textChanged.connect(tasks.debounce(self, self.refresh_list))
         ll.addWidget(self.search)
         self.table = QTableWidget(0, 3)
@@ -51,7 +65,8 @@ class MicrobiologyPage(QWidget):
         split.addWidget(left)
 
         # right: culture form
-        right = QWidget(); rl = QVBoxLayout(right)
+        right = QWidget()
+        rl = QVBoxLayout(right)
         self.header = h2("Select a culture order")
         rl.addWidget(self.header)
 
@@ -62,7 +77,8 @@ class MicrobiologyPage(QWidget):
         self.colony = QLineEdit()
         self.gram = self._combo("gram")
         self.zn = self._combo("zn")
-        self.remarks = QPlainTextEdit(); self.remarks.setMaximumHeight(70)
+        self.remarks = QPlainTextEdit()
+        self.remarks.setMaximumHeight(70)
         form.addRow("Specimen", self.specimen)
         form.addRow("Growth", self.growth)
         form.addRow("Organism", self.organism)
@@ -70,22 +86,26 @@ class MicrobiologyPage(QWidget):
         form.addRow("Gram stain", self.gram)
         form.addRow("ZN stain", self.zn)
         form.addRow("Remarks", self.remarks)
-        fw = QWidget(); fw.setLayout(form)
+        fw = QWidget()
+        fw.setLayout(form)
         rl.addWidget(card(h2("Findings"), fw))
 
         # sensitivity
         sens_head = QHBoxLayout()
         sens_head.addWidget(QLabel("Antibiotic sensitivity"))
-        add_ab = QPushButton("+ Add antibiotic"); add_ab.setObjectName("ghost")
+        add_ab = QPushButton("+ Add antibiotic")
+        add_ab.setObjectName("ghost")
         add_ab.clicked.connect(self.add_sens_row)
-        sens_head.addStretch(1); sens_head.addWidget(add_ab)
+        sens_head.addStretch(1)
+        sens_head.addWidget(add_ab)
         rl.addLayout(sens_head)
         self.sens = QTableWidget(0, 2)
         self.sens.setHorizontalHeaderLabels(["Antibiotic", "S / I / R"])
         self.sens.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         rl.addWidget(self.sens)
 
-        save = QPushButton("Save culture report"); save.clicked.connect(self.save)
+        save = QPushButton("Save culture report")
+        save.clicked.connect(self.save)
         rl.addWidget(save)
         split.addWidget(right)
         split.setSizes([500, 700])
@@ -106,7 +126,8 @@ class MicrobiologyPage(QWidget):
         # block signals so clearSelection() doesn't re-fire load_item (which would
         # re-set current_item to the old row while currentRow() is still set).
         self.table.blockSignals(True)
-        self.table.clearSelection(); self.table.setCurrentCell(-1, -1)
+        self.table.clearSelection()
+        self.table.setCurrentCell(-1, -1)
         self.table.blockSignals(False)
         self.current_item = None
         self.header.setText("Select a culture order")
@@ -118,7 +139,9 @@ class MicrobiologyPage(QWidget):
         self.sens.setRowCount(0)
 
     def _combo(self, kind):
-        cb = QComboBox(); cb.setEditable(True); cb.addItem("")
+        cb = QComboBox()
+        cb.setEditable(True)
+        cb.addItem("")
         for r in self.con.execute(
             "SELECT value FROM micro_lists WHERE kind=? GROUP BY value ORDER BY MIN(seq), value",
             (kind,),
@@ -144,7 +167,8 @@ class MicrobiologyPage(QWidget):
         self.table.setRowCount(0)
         self._items = []
         for r in rows:
-            i = self.table.rowCount(); self.table.insertRow(i)
+            i = self.table.rowCount()
+            self.table.insertRow(i)
             self._items.append(r["item_id"])
             self.table.setItem(i, 0, QTableWidgetItem(r["lab_no"] or ""))
             self.table.setItem(i, 1, QTableWidgetItem(r["patient_name"] or ""))
@@ -170,7 +194,9 @@ class MicrobiologyPage(QWidget):
         # previously-selected culture's values
         for w in (self.specimen, self.growth, self.gram, self.zn):
             w.setCurrentIndex(0)
-        self.organism.clear(); self.colony.clear(); self.remarks.clear()
+        self.organism.clear()
+        self.colony.clear()
+        self.remarks.clear()
         if existing:
             self.specimen.setCurrentText(existing["specimen"] or "")
             self.growth.setCurrentText(existing["growth"] or "")
@@ -185,14 +211,18 @@ class MicrobiologyPage(QWidget):
                 self._add_sens(s["antibiotic"], s["result"])
 
     def _add_sens(self, antibiotic="", result="S"):
-        i = self.sens.rowCount(); self.sens.insertRow(i)
-        ab = QComboBox(); ab.setEditable(True)
+        i = self.sens.rowCount()
+        self.sens.insertRow(i)
+        ab = QComboBox()
+        ab.setEditable(True)
         for r in self.con.execute(
             "SELECT value FROM micro_lists WHERE kind='antibiotic' GROUP BY value ORDER BY value"
         ):
             ab.addItem(r["value"])
         ab.setCurrentText(antibiotic)
-        res = QComboBox(); res.addItems(["S", "I", "R"]); res.setCurrentText(result or "S")
+        res = QComboBox()
+        res.addItems(["S", "I", "R"])
+        res.setCurrentText(result or "S")
         self.sens.setCellWidget(i, 0, ab)
         self.sens.setCellWidget(i, 1, res)
 
@@ -211,10 +241,16 @@ class MicrobiologyPage(QWidget):
                    (receipt_item_id,specimen,growth,organism,colony_count,gram_stain,
                     zn_stain,remarks,reported_at)
                    VALUES (?,?,?,?,?,?,?,?,datetime('now','localtime'))""",
-                (self.current_item, self.specimen.currentText(), self.growth.currentText(),
-                 self.organism.text().strip(), self.colony.text().strip(),
-                 self.gram.currentText(), self.zn.currentText(),
-                 self.remarks.toPlainText().strip()),
+                (
+                    self.current_item,
+                    self.specimen.currentText(),
+                    self.growth.currentText(),
+                    self.organism.text().strip(),
+                    self.colony.text().strip(),
+                    self.gram.currentText(),
+                    self.zn.currentText(),
+                    self.remarks.toPlainText().strip(),
+                ),
             ).lastrowid
             for i in range(self.sens.rowCount()):
                 ab = self.sens.cellWidget(i, 0).currentText().strip()
@@ -226,7 +262,8 @@ class MicrobiologyPage(QWidget):
                     )
             c.execute(
                 "UPDATE receipt_items SET reported=1, reported_at=datetime('now','localtime') WHERE id=?",
-                (self.current_item,))
+                (self.current_item,),
+            )
             # also stamp the receipt's reporting date on first finalisation, so the
             # report's "Reporting Date" is filled for culture-only receipts too
             # (kept stable across reprints — only set while still pending).
@@ -235,19 +272,22 @@ class MicrobiologyPage(QWidget):
                 "reported_at=datetime('now','localtime') "
                 "WHERE id=(SELECT receipt_id FROM receipt_items WHERE id=?) "
                 "AND status IN ('pending','in_progress')",
-                (self.current_item,))
+                (self.current_item,),
+            )
             c.commit()
         except Exception as e:
             try:
                 c.rollback()
             except Exception:
                 pass
-            QMessageBox.warning(self, "Save failed",
-                                f"The culture report was NOT saved — please try again.\n\n{e}")
+            QMessageBox.warning(
+                self, "Save failed", f"The culture report was NOT saved — please try again.\n\n{e}"
+            )
             return
         info = c.execute(
             "SELECT r.lab_no, ri.test_name FROM receipt_items ri "
-            "JOIN receipts r ON r.id=ri.receipt_id WHERE ri.id=?", (self.current_item,)
+            "JOIN receipts r ON r.id=ri.receipt_id WHERE ri.id=?",
+            (self.current_item,),
         ).fetchone()
         detail = f"{info['lab_no']} — {info['test_name']}" if info else f"item {self.current_item}"
         db.log_audit(c, self.user["username"], "culture_saved", detail)

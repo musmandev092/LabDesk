@@ -15,6 +15,7 @@ Run everything:     QT_QPA_PLATFORM=offscreen .venv/bin/python tests/run_gen.py
 Run one module:     RUN_ONLY=test_billing .venv/bin/python tests/run_gen.py
 Machine summary:    written to $GEN_SUMMARY (default /tmp/gen_summary.json)
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -37,8 +38,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "src"))
 
-from labdesk import db, whatsapp, report, render, roles          # noqa: E402
-from labdesk.constants import normalize_phone                    # noqa: E402
+from labdesk import db, render, report, roles, whatsapp  # noqa: E402
+from labdesk.constants import normalize_phone  # noqa: E402
 
 # ============================================================================
 # Fake WhatsApp gateway — patched over urllib so nothing leaves the machine.
@@ -74,9 +75,9 @@ def fake_urlopen(req, timeout=None):
     if mode == "no_internet":
         raise urllib.error.URLError(socket.gaierror(-2, "Name or service not known"))
     if mode == "timeout_wrapped":
-        raise urllib.error.URLError(socket.timeout("timed out"))
+        raise urllib.error.URLError(TimeoutError("timed out"))
     if mode == "timeout_raw":
-        raise socket.timeout("timed out")
+        raise TimeoutError("timed out")
     if mode == "refused_raw":
         raise ConnectionRefusedError(111, "Connection refused")
     if mode == "unauthorized":
@@ -90,11 +91,12 @@ def fake_urlopen(req, timeout=None):
     if url.endswith("/session/status"):
         data = SCN.get("status", {"connected": True, "loggedIn": True})
         return _Resp(200, json.dumps({"success": True, "data": data}))
-    return _Resp(SCN.get("send_status", 200),
-                 SCN.get("send_body", '{"success":true,"data":{"Id":"X"}}'))
+    return _Resp(
+        SCN.get("send_status", 200), SCN.get("send_body", '{"success":true,"data":{"Id":"X"}}')
+    )
 
 
-urllib.request.urlopen = fake_urlopen   # global patch — no real network, ever
+urllib.request.urlopen = fake_urlopen  # global patch — no real network, ever
 
 
 # ============================================================================
@@ -118,8 +120,8 @@ class Harness:
         # counters ----------------------------------------------------------
         self.passed = 0
         self.failed = 0
-        self.fails: list[str] = []          # capped sample of failure names
-        self._cur = "?"                      # current module stem
+        self.fails: list[str] = []  # capped sample of failure names
+        self._cur = "?"  # current module stem
 
     # --- assertion primitives ---------------------------------------------
     def check(self, cond, name):
@@ -143,8 +145,17 @@ class Harness:
         print(f"  …[{self._cur}] {title}")
 
     # --- shared receipt factory (mirrors tests/test_all.py) ---------------
-    def make_receipt(self, phone="03001234567", *, sub=1000.0, paid=1000.0,
-                     with_results=True, status="reported", sex="Male", age=30):
+    def make_receipt(
+        self,
+        phone="03001234567",
+        *,
+        sub=1000.0,
+        paid=1000.0,
+        with_results=True,
+        status="reported",
+        sex="Male",
+        age=30,
+    ):
         con = self.con
         pid = con.execute(
             "INSERT INTO patients(name,age,age_desc,sex,telephone,mr_no) VALUES (?,?,?,?,?,?)",
@@ -159,8 +170,23 @@ class Harness:
             """INSERT INTO receipts(lab_no,patient_id,patient_name,age,age_desc,sex,telephone,
                                     dr_name,specimen,subtotal,net_amount,paid,due,status,mr_no)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (f"LAB_GEN_{pid:05d}", pid, "Test Patient", age, "Years", sex, phone,
-             "Dr. Test", "3cc EDTA", sub, sub, paid, due, status, None),
+            (
+                f"LAB_GEN_{pid:05d}",
+                pid,
+                "Test Patient",
+                age,
+                "Years",
+                sex,
+                phone,
+                "Dr. Test",
+                "3cc EDTA",
+                sub,
+                sub,
+                paid,
+                due,
+                status,
+                None,
+            ),
         ).lastrowid
         item_id = con.execute(
             "INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) VALUES (?,?,?,?)",
@@ -175,8 +201,16 @@ class Harness:
                     """INSERT INTO results(receipt_item_id,parameter_id,seq,part_type,name,units,
                                            ref_text,value,hidden)
                        VALUES (?,?,?,?,?,?,?,?,0)""",
-                    (item_id, p["id"], p["seq"], p["part_type"] or "N", p["name"],
-                     p["units"], p["ref_male"], "1"),
+                    (
+                        item_id,
+                        p["id"],
+                        p["seq"],
+                        p["part_type"] or "N",
+                        p["name"],
+                        p["units"],
+                        p["ref_male"],
+                        "1",
+                    ),
                 )
         con.commit()
         return rid
@@ -243,10 +277,18 @@ def main():
             print("   ✗", f)
 
     summary_path = os.environ.get("GEN_SUMMARY", "/tmp/gen_summary.json")
-    Path(summary_path).write_text(json.dumps({
-        "total": total, "passed": t.passed, "failed": t.failed,
-        "modules": per_module, "fails": t.fails[:400],
-    }, indent=2))
+    Path(summary_path).write_text(
+        json.dumps(
+            {
+                "total": total,
+                "passed": t.passed,
+                "failed": t.failed,
+                "modules": per_module,
+                "fails": t.fails[:400],
+            },
+            indent=2,
+        )
+    )
     return 1 if t.failed else 0
 
 

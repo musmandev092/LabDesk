@@ -4,16 +4,18 @@ The threading machinery lives in ui/tasks.py; this module adds the WhatsApp
 specifics: instant no-network pre-flight checks (so the user gets immediate
 feedback instead of a frozen wait) and the result message box.
 """
+
 from __future__ import annotations
 
 from PySide6.QtWidgets import QMessageBox
 
-from . import tasks
 from .. import whatsapp
+from . import tasks
 
 
-def send_async(parent, con, kind: str, receipt_id: int, *,
-               clicked=None, lock_buttons=(), on_done=None) -> bool:
+def send_async(
+    parent, con, kind: str, receipt_id: int, *, clicked=None, lock_buttons=(), on_done=None
+) -> bool:
     """Send a 'receipt' or 'report' PDF to the patient on a background thread.
 
     Returns True if the send was started, False if a pre-flight check rejected it.

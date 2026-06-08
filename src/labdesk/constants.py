@@ -10,11 +10,11 @@ def normalize_phone(raw: str, cc: str = "92") -> str:
     d = "".join(c for c in (raw or "") if c.isdigit())
     if not d:
         return ""
-    if d.startswith("00"):                       # 0092… → 92…
+    if d.startswith("00"):  # 0092… → 92…
         d = d[2:]
     if d.startswith(cc) and len(d) >= len(cc) + 9:  # 92XXXXXXXXXX → national
-        d = d[len(cc):]
-    d = d.lstrip("0")                            # drop any leading zero(s)
+        d = d[len(cc) :]
+    d = d.lstrip("0")  # drop any leading zero(s)
     return ("0" + d) if d else ""
 
 

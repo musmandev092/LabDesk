@@ -1,14 +1,25 @@
 """Doctors: referring-doctor directory with add/edit/delete."""
+
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QPushButton, QDialog, QFormLayout, QLineEdit, QMessageBox, QHeaderView, QLabel,
+    QDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
-from .widgets import page_header
 from .. import db
 from ..roles import can
+from .widgets import page_header
 
 
 class DoctorDialog(QDialog):
@@ -18,7 +29,8 @@ class DoctorDialog(QDialog):
         self.setWindowTitle(title)
         self.setMinimumWidth(380)
         form = QFormLayout(self)
-        heading = QLabel(title); heading.setObjectName("h2")
+        heading = QLabel(title)
+        heading.setObjectName("h2")
         form.addRow(heading)
         self.name = QLineEdit()
         self.hospital = QLineEdit()
@@ -37,10 +49,14 @@ class DoctorDialog(QDialog):
             self.tel.setText(data["tel"] or "")
             self.mobile.setText(data["mobile"] or "")
         btns = QHBoxLayout()
-        ok = QPushButton("Save"); ok.clicked.connect(self.accept)
-        cancel = QPushButton("Cancel"); cancel.setObjectName("ghost")
+        ok = QPushButton("Save")
+        ok.clicked.connect(self.accept)
+        cancel = QPushButton("Cancel")
+        cancel.setObjectName("ghost")
         cancel.clicked.connect(self.reject)
-        btns.addStretch(1); btns.addWidget(cancel); btns.addWidget(ok)
+        btns.addStretch(1)
+        btns.addWidget(cancel)
+        btns.addWidget(ok)
         form.addRow(btns)
 
     def values(self):
@@ -58,19 +74,26 @@ class DoctorsPage(QWidget):
         super().__init__()
         self.con = con
         self.user = user
-        self._ids = []   # parallel to doctors table rows; filled by refresh
+        self._ids = []  # parallel to doctors table rows; filled by refresh
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(12)
 
-        add = QPushButton("+ Add doctor"); add.clicked.connect(self.add)
-        self.edit_btn = QPushButton("Edit"); self.edit_btn.setObjectName("ghost"); self.edit_btn.clicked.connect(self.edit)
-        self.del_btn = QPushButton("Delete"); self.del_btn.setObjectName("danger"); self.del_btn.clicked.connect(self.delete)
-        self.edit_btn.setEnabled(False); self.del_btn.setEnabled(False)
+        add = QPushButton("+ Add doctor")
+        add.clicked.connect(self.add)
+        self.edit_btn = QPushButton("Edit")
+        self.edit_btn.setObjectName("ghost")
+        self.edit_btn.clicked.connect(self.edit)
+        self.del_btn = QPushButton("Delete")
+        self.del_btn.setObjectName("danger")
+        self.del_btn.clicked.connect(self.delete)
+        self.edit_btn.setEnabled(False)
+        self.del_btn.setEnabled(False)
         header, _ = page_header("Referring Doctors", "", add, self.edit_btn, self.del_btn)
         lay.addWidget(header)
 
-        self.search = QLineEdit(); self.search.setPlaceholderText("Search doctors…")
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search doctors…")
         self.search.setMinimumHeight(40)
         self.search.textChanged.connect(self.refresh)
         lay.addWidget(self.search)
@@ -106,7 +129,8 @@ class DoctorsPage(QWidget):
         q = f"%{self.search.text().strip()}%"
         rows = self.con.execute(
             "SELECT * FROM doctors WHERE active=1 AND (name LIKE ? OR hospital LIKE ?)"
-            " ORDER BY name", (q, q),
+            " ORDER BY name",
+            (q, q),
         ).fetchall()
         self.table.setRowCount(0)
         self._ids = []
@@ -165,6 +189,10 @@ class DoctorsPage(QWidget):
             row = self.con.execute("SELECT name FROM doctors WHERE id=?", (did,)).fetchone()
             self.con.execute("UPDATE doctors SET active=0 WHERE id=?", (did,))
             self.con.commit()
-            db.log_audit(self.con, self.user["username"], "doctor_deleted",
-                         (row["name"] if row else str(did)))
+            db.log_audit(
+                self.con,
+                self.user["username"],
+                "doctor_deleted",
+                (row["name"] if row else str(did)),
+            )
             self.refresh()

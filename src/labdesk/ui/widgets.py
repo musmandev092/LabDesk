@@ -1,11 +1,19 @@
 """Small reusable UI helpers."""
+
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QPoint, QRect, QSize
+from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QApplication, QFrame, QLabel, QLayout, QVBoxLayout, QHBoxLayout, QWidget,
-    QSizePolicy, QTableWidgetItem,
+    QApplication,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLayout,
+    QSizePolicy,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
 from .style import PRIMARY
@@ -17,6 +25,7 @@ class FlowLayout(QLayout):
     single child, so a long button toolbar can shrink to one-button width and
     wrap instead of forcing the whole window wider than the screen.
     """
+
     def __init__(self, parent=None, *, margin=0, hspacing=8, vspacing=6):
         super().__init__(parent)
         self._items = []
@@ -24,35 +33,35 @@ class FlowLayout(QLayout):
         self._vspace = vspacing
         self.setContentsMargins(margin, margin, margin, margin)
 
-    def addItem(self, item):            # noqa: N802 (Qt override)
+    def addItem(self, item):  # noqa: N802 (Qt override)
         self._items.append(item)
 
     def count(self):
         return len(self._items)
 
-    def itemAt(self, index):            # noqa: N802
+    def itemAt(self, index):  # noqa: N802
         return self._items[index] if 0 <= index < len(self._items) else None
 
-    def takeAt(self, index):            # noqa: N802
+    def takeAt(self, index):  # noqa: N802
         return self._items.pop(index) if 0 <= index < len(self._items) else None
 
-    def expandingDirections(self):      # noqa: N802
+    def expandingDirections(self):  # noqa: N802
         return Qt.Orientation(0)
 
-    def hasHeightForWidth(self):        # noqa: N802
+    def hasHeightForWidth(self):  # noqa: N802
         return True
 
-    def heightForWidth(self, width):    # noqa: N802
+    def heightForWidth(self, width):  # noqa: N802
         return self._do_layout(QRect(0, 0, width, 0), test_only=True)
 
-    def setGeometry(self, rect):        # noqa: N802
+    def setGeometry(self, rect):  # noqa: N802
         super().setGeometry(rect)
         self._do_layout(rect, test_only=False)
 
-    def sizeHint(self):                 # noqa: N802
+    def sizeHint(self):  # noqa: N802
         return self.minimumSize()
 
-    def minimumSize(self):              # noqa: N802
+    def minimumSize(self):  # noqa: N802
         size = QSize()
         for item in self._items:
             size = size.expandedTo(item.minimumSize())
@@ -90,7 +99,7 @@ def fit_to_screen(widget, w: int, h: int, *, margin: float = 0.94) -> None:
     the layout/window-manager (per the native-layout rule).
     """
     screen = widget.screen() or QApplication.primaryScreen()
-    if screen is None:                      # headless / offscreen — nothing to clamp to
+    if screen is None:  # headless / offscreen — nothing to clamp to
         widget.resize(w, h)
         return
     avail = screen.availableGeometry()
@@ -112,9 +121,14 @@ def max_width_center(inner, max_w: int):
     lay.addStretch(1)
     return wrap
 
+
 # status → (display colour) for receipt/worklist tables (single source of truth)
-STATUS_COLORS = {"pending": "#b9770e", "in_progress": "#0e7c86",
-                 "reported": "#1f9d55", "delivered": "#6b7280"}
+STATUS_COLORS = {
+    "pending": "#b9770e",
+    "in_progress": "#0e7c86",
+    "reported": "#1f9d55",
+    "delivered": "#6b7280",
+}
 
 
 def _fixed_v(w: QWidget) -> QWidget:
@@ -124,19 +138,27 @@ def _fixed_v(w: QWidget) -> QWidget:
 
 
 def h1(text: str) -> QLabel:
-    lbl = QLabel(text); lbl.setObjectName("h1"); return _fixed_v(lbl)
+    lbl = QLabel(text)
+    lbl.setObjectName("h1")
+    return _fixed_v(lbl)
 
 
 def h2(text: str) -> QLabel:
-    lbl = QLabel(text); lbl.setObjectName("h2"); return _fixed_v(lbl)
+    lbl = QLabel(text)
+    lbl.setObjectName("h2")
+    return _fixed_v(lbl)
 
 
 def muted(text: str) -> QLabel:
-    lbl = QLabel(text); lbl.setObjectName("muted"); return _fixed_v(lbl)
+    lbl = QLabel(text)
+    lbl.setObjectName("muted")
+    return _fixed_v(lbl)
 
 
 def field_label(text: str) -> QLabel:
-    lbl = QLabel(text); lbl.setObjectName("fieldlbl"); return _fixed_v(lbl)
+    lbl = QLabel(text)
+    lbl.setObjectName("fieldlbl")
+    return _fixed_v(lbl)
 
 
 def page_header(title: str, subtitle: str = "", *actions: QWidget) -> tuple[QWidget, QLabel]:
@@ -185,13 +207,15 @@ def stat_card(title: str, value: str, color: str = PRIMARY, on_click=None) -> QF
     lay = QVBoxLayout(f)
     lay.setContentsMargins(20, 18, 20, 18)
     lay.setSpacing(4)
-    t = QLabel(title); t.setObjectName("muted")
+    t = QLabel(title)
+    t.setObjectName("muted")
     v = QLabel(value)
     v.setStyleSheet(f"font-size: 30px; font-weight: 800; color: {color};")
     lay.addWidget(t)
     lay.addWidget(v)
     if on_click is not None:
-        hint = QLabel("Open →"); hint.setStyleSheet(f"color:{color};font-weight:700;font-size:12px;")
+        hint = QLabel("Open →")
+        hint.setStyleSheet(f"color:{color};font-weight:700;font-size:12px;")
         lay.addWidget(hint)
         f.setCursor(Qt.PointingHandCursor)
         # highlight the border on hover only — a fixed light fill washes out in dark mode
@@ -211,7 +235,7 @@ def like_term(text: str) -> str:
 
 
 def money(value: float, currency: str = "Rs.") -> str:
-    value = value or 0.0          # normalise -0.0 / None so we never print "-0"
+    value = value or 0.0  # normalise -0.0 / None so we never print "-0"
     if value < 0:
         return f"- {currency} {abs(value):,.0f}"
     return f"{currency} {value:,.0f}"
@@ -245,5 +269,7 @@ def status_badge(status: str, voided: bool = False) -> QTableWidgetItem:
     col = "#c0392b" if voided else STATUS_COLORS.get(status or "")
     if col:
         it.setForeground(QColor(col))
-        fnt = it.font(); fnt.setBold(True); it.setFont(fnt)
+        fnt = it.font()
+        fnt.setBold(True)
+        it.setFont(fnt)
     return it

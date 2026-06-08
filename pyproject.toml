@@ -14,3 +14,38 @@ labdesk = "labdesk.app:run_cli"
 [build-system]
 requires = ["uv_build>=0.11.18,<0.12.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pre-commit>=4.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+# Pragmatic professional set: pycodestyle, pyflakes, isort, pyupgrade,
+# bugbear, flake8-simplify, and mccabe complexity.
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C901"]
+# Qt event handlers are intentionally loosely typed; long signal/slot lines
+# and a few framework idioms are tolerated. Complexity (C901) is tracked, not
+# yet enforced — it is addressed in the decomposition phase.
+mccabe.max-complexity = 15
+
+[tool.ruff.lint.per-file-ignores]
+# Tests deliberately use a compact, repetitive assertion style.
+"tests/**" = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+# Qt is treated as untyped for now (PySide6 enum/flag access generates ~100s of
+# false positives). The UI layer is typed incrementally; tighten over time by
+# installing pyside6 in the type-check env and resolving the enum accesses.
+ignore_missing_imports = true
+check_untyped_defs = false
+warn_unused_ignores = false
+files = ["src/labdesk"]

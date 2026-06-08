@@ -3,12 +3,23 @@
 Shown once, when settings.configured != "1". Makes the product fully white-label:
 nothing is hardcoded to a particular lab.
 """
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLineEdit, QPushButton,
-    QLabel, QFileDialog, QMessageBox, QWidget, QScrollArea, QFrame,
+    QDialog,
+    QFileDialog,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
 from .. import db
@@ -42,16 +53,20 @@ class SetupWizard(QDialog):
         title.setObjectName("authTitle")
         title.setAlignment(Qt.AlignCenter)
         root.addWidget(title)
-        sub = QLabel("This information appears on screens and on every printed report.\n"
-                     "You can change it later in Settings.")
+        sub = QLabel(
+            "This information appears on screens and on every printed report.\n"
+            "You can change it later in Settings."
+        )
         sub.setObjectName("muted")
         sub.setAlignment(Qt.AlignCenter)
         root.addWidget(sub)
         root.addSpacing(10)
 
         # scrollable form inside a card
-        scroll = QScrollArea(); scroll.setWidgetResizable(True)
-        host = QFrame(); host.setObjectName("authCard")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        host = QFrame()
+        host.setObjectName("authCard")
         grid = QGridLayout(host)
         grid.setContentsMargins(26, 24, 26, 24)
         grid.setSpacing(12)
@@ -63,7 +78,8 @@ class SetupWizard(QDialog):
         def add(key, label, placeholder="", required=False):
             nonlocal r
             grid.addWidget(field_label(label + (" *" if required else "")), r, 0)
-            le = QLineEdit(); le.setPlaceholderText(placeholder)
+            le = QLineEdit()
+            le.setPlaceholderText(placeholder)
             self.fields[key] = le
             grid.addWidget(le, r, 1)
             r += 1
@@ -78,38 +94,56 @@ class SetupWizard(QDialog):
         add("phc_reg_no", "PHC registration no.", "Punjab Healthcare Commission reg. no.")
         add("lab_reg_no", "Lab registration no.", "Lab / pharmacy registration no.")
         add("currency", "Currency symbol", "Rs.")
-        add("lab_no_prefix", "Receipt no. prefix",
-            "e.g. LAB → receipts numbered LAB-00001, LAB-00002 …")
+        add(
+            "lab_no_prefix",
+            "Receipt no. prefix",
+            "e.g. LAB → receipts numbered LAB-00001, LAB-00002 …",
+        )
         self.fields["currency"].setText("Rs.")
         self.fields["lab_no_prefix"].setText("LAB")
 
         # logo
         grid.addWidget(field_label("Logo (optional)"), r, 0)
         logo_row = QHBoxLayout()
-        self.logo = QLineEdit(); self.logo.setReadOnly(True)
+        self.logo = QLineEdit()
+        self.logo.setReadOnly(True)
         self.logo.setPlaceholderText("No logo selected")
-        pick = QPushButton("Choose…"); pick.setObjectName("ghost"); pick.clicked.connect(self._pick_logo)
-        logo_row.addWidget(self.logo); logo_row.addWidget(pick)
-        lw = QWidget(); lw.setLayout(logo_row)
-        grid.addWidget(lw, r, 1); r += 1
+        pick = QPushButton("Choose…")
+        pick.setObjectName("ghost")
+        pick.clicked.connect(self._pick_logo)
+        logo_row.addWidget(self.logo)
+        logo_row.addWidget(pick)
+        lw = QWidget()
+        lw.setLayout(logo_row)
+        grid.addWidget(lw, r, 1)
+        r += 1
 
         # admin account
         sep = QLabel("Administrator account")
         sep.setStyleSheet("font-weight:700; margin-top:8px;")
-        grid.addWidget(sep, r, 0, 1, 2); r += 1
+        grid.addWidget(sep, r, 0, 1, 2)
+        r += 1
         grid.addWidget(field_label("Administrator name *"), r, 0)
-        self.admin_name = QLineEdit(); self.admin_name.setPlaceholderText("e.g. Dr. Imran Ali")
-        grid.addWidget(self.admin_name, r, 1); r += 1
+        self.admin_name = QLineEdit()
+        self.admin_name.setPlaceholderText("e.g. Dr. Imran Ali")
+        grid.addWidget(self.admin_name, r, 1)
+        r += 1
         grid.addWidget(field_label("Login username *"), r, 0)
-        self.admin_user = QLineEdit(); self.admin_user.setText("admin")
-        grid.addWidget(self.admin_user, r, 1); r += 1
+        self.admin_user = QLineEdit()
+        self.admin_user.setText("admin")
+        grid.addWidget(self.admin_user, r, 1)
+        r += 1
         grid.addWidget(field_label("New password *"), r, 0)
-        self.pw = QLineEdit(); self.pw.setEchoMode(QLineEdit.Password)
+        self.pw = QLineEdit()
+        self.pw.setEchoMode(QLineEdit.Password)
         self.pw.setPlaceholderText("Set an admin password")
-        grid.addWidget(self.pw, r, 1); r += 1
+        grid.addWidget(self.pw, r, 1)
+        r += 1
         grid.addWidget(field_label("Confirm password *"), r, 0)
-        self.pw2 = QLineEdit(); self.pw2.setEchoMode(QLineEdit.Password)
-        grid.addWidget(self.pw2, r, 1); r += 1
+        self.pw2 = QLineEdit()
+        self.pw2.setEchoMode(QLineEdit.Password)
+        grid.addWidget(self.pw2, r, 1)
+        r += 1
 
         scroll.setWidget(host)
         root.addWidget(scroll, 1)
@@ -124,7 +158,8 @@ class SetupWizard(QDialog):
 
     def _pick_logo(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Choose logo", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)")
+            self, "Choose logo", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
+        )
         if path:
             self.logo.setText(path)
 
@@ -161,6 +196,5 @@ class SetupWizard(QDialog):
             (username, admin_name, h, salt),
         )
         c.commit()
-        db.log_audit(c, username, "setup_completed",
-                     f"first-run setup by {admin_name or username}")
+        db.log_audit(c, username, "setup_completed", f"first-run setup by {admin_name or username}")
         self.accept()

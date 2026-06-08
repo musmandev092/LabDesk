@@ -10,6 +10,7 @@ Safety guarantees:
 
 Run:  QT_QPA_PLATFORM=offscreen .venv/bin/python tests/test_all.py
 """
+
 from __future__ import annotations
 
 import io
@@ -29,8 +30,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from labdesk import db, whatsapp, report                      # noqa: E402
-from labdesk.constants import normalize_phone                 # noqa: E402
+from labdesk import db, report, whatsapp  # noqa: E402
+from labdesk.constants import normalize_phone  # noqa: E402
 
 # ---- tiny assertion framework ----------------------------------------------
 PASS = 0
@@ -93,9 +94,9 @@ def fake_urlopen(req, timeout=None):
     if mode == "no_internet":
         raise urllib.error.URLError(socket.gaierror(-2, "Name or service not known"))
     if mode == "timeout_wrapped":
-        raise urllib.error.URLError(socket.timeout("timed out"))
+        raise urllib.error.URLError(TimeoutError("timed out"))
     if mode == "timeout_raw":
-        raise socket.timeout("timed out")
+        raise TimeoutError("timed out")
     if mode == "refused_raw":
         raise ConnectionRefusedError(111, "Connection refused")
     if mode == "unauthorized":
@@ -111,11 +112,12 @@ def fake_urlopen(req, timeout=None):
         data = SCN.get("status", {"connected": True, "loggedIn": True})
         return _Resp(200, json.dumps({"success": True, "data": data}))
     # POST /chat/send/document
-    return _Resp(SCN.get("send_status", 200),
-                 SCN.get("send_body", '{"success":true,"data":{"Id":"X"}}'))
+    return _Resp(
+        SCN.get("send_status", 200), SCN.get("send_body", '{"success":true,"data":{"Id":"X"}}')
+    )
 
 
-urllib.request.urlopen = fake_urlopen   # global patch — no real network, ever
+urllib.request.urlopen = fake_urlopen  # global patch — no real network, ever
 
 
 # ============================================================================
@@ -139,8 +141,23 @@ def _make_receipt(phone, *, sub=1000.0, paid=1000.0, with_results=True, status="
         """INSERT INTO receipts(lab_no,patient_id,patient_name,age,age_desc,sex,telephone,
                                 dr_name,specimen,subtotal,net_amount,paid,due,status,mr_no)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (f"LAB_TEST_{pid:04d}", pid, "Test Patient", 30, "Years", "Male", phone,
-         "Dr. Test", "3cc EDTA", sub, sub, paid, due, status, None),
+        (
+            f"LAB_TEST_{pid:04d}",
+            pid,
+            "Test Patient",
+            30,
+            "Years",
+            "Male",
+            phone,
+            "Dr. Test",
+            "3cc EDTA",
+            sub,
+            sub,
+            paid,
+            due,
+            status,
+            None,
+        ),
     ).lastrowid
     item_id = con.execute(
         "INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) VALUES (?,?,?,?)",
@@ -155,15 +172,23 @@ def _make_receipt(phone, *, sub=1000.0, paid=1000.0, with_results=True, status="
                 """INSERT INTO results(receipt_item_id,parameter_id,seq,part_type,name,units,
                                        ref_text,value,hidden)
                    VALUES (?,?,?,?,?,?,?,?,0)""",
-                (item_id, p["id"], p["seq"], p["part_type"] or "N", p["name"], p["units"],
-                 p["ref_male"], "1"),
+                (
+                    item_id,
+                    p["id"],
+                    p["seq"],
+                    p["part_type"] or "N",
+                    p["name"],
+                    p["units"],
+                    p["ref_male"],
+                    "1",
+                ),
             )
     con.commit()
     return rid
 
 
-R_VALID = _make_receipt("03001234567")               # good phone, has results
-R_NOPHONE = _make_receipt("", with_results=False)     # no phone at all
+R_VALID = _make_receipt("03001234567")  # good phone, has results
+R_NOPHONE = _make_receipt("", with_results=False)  # no phone at all
 R_BADPHONE = _make_receipt("12", with_results=False)  # too short to be valid
 
 # a tiny dummy PDF so send_pdf never invokes WeasyPrint in the network matrix
@@ -176,29 +201,47 @@ _DUMMY.write_bytes(b"%PDF-1.4\n% dummy\n")
 # ============================================================================
 section("phone normalization + wa_number")
 _OPERATORS = [f"3{a}{b}" for a in range(0, 5) for b in range(0, 10)]  # 300..349 (50)
-_SUBS = ["1234567", "0000001", "9999999", "1122334", "7654321"]       # 5
+_SUBS = ["1234567", "0000001", "9999999", "1122334", "7654321"]  # 5
 for op in _OPERATORS:
     for sub in _SUBS:
-        canon = "0" + op + sub                 # 03XX XXXXXXX (11 digits)
-        national = op + sub                    # 3XX XXXXXXX (10 digits)
+        canon = "0" + op + sub  # 03XX XXXXXXX (11 digits)
+        national = op + sub  # 3XX XXXXXXX (10 digits)
         wa = "92" + national
         variants = [
-            canon,                              # 03001234567
-            "+92" + national,                   # +923001234567
-            "0092" + national,                  # 0092...
-            "92" + national,                    # 92...
-            national,                           # bare national
-            f"0{op}-{sub}",                     # dashed
-            f"0{op} {sub}",                     # spaced
-            f" +92 {op} {sub} ",                # messy with +92
+            canon,  # 03001234567
+            "+92" + national,  # +923001234567
+            "0092" + national,  # 0092...
+            "92" + national,  # 92...
+            national,  # bare national
+            f"0{op}-{sub}",  # dashed
+            f"0{op} {sub}",  # spaced
+            f" +92 {op} {sub} ",  # messy with +92
         ]
         for v in variants:
             eq(normalize_phone(v), canon, f"normalize({v!r})")
             eq(whatsapp.wa_number(v, "92"), wa, f"wa_number({v!r})")
 
 # invalid / garbage phones → wa_number must reject (None)
-for bad in ["", "   ", "abc", "12", "12345", "0", "00", "++", "9-2", "phone", "0300abc",
-            "1", "92", "920", "+", "()-", "....", "0000000"]:
+for bad in [
+    "",
+    "   ",
+    "abc",
+    "12",
+    "12345",
+    "0",
+    "00",
+    "++",
+    "9-2",
+    "phone",
+    "0300abc",
+    "1",
+    "92",
+    "920",
+    "+",
+    "()-",
+    "....",
+    "0000000",
+]:
     check(whatsapp.wa_number(bad, "92") is None, f"wa_number rejects {bad!r}")
 
 
@@ -206,7 +249,7 @@ for bad in ["", "   ", "abc", "12", "12345", "0", "00", "++", "9-2", "phone", "0
 # 2) Reference-range abnormal flags  (~500 cases)
 # ============================================================================
 section("reference-range flags (high/low/normal)")
-for lo in range(1, 60):                         # 59 ranges
+for lo in range(1, 60):  # 59 ranges
     hi = lo + 10
     ref = f"{lo} - {hi}"
     eq(report._flag(lo - 3, ref)[0], "Low", f"flag {lo-3} in {ref}")
@@ -231,9 +274,12 @@ for v in ["positive", "Trace", "Nil", "", None, "++", "seen"]:
 section("amount in words")
 eq(report._amount_in_words(0), "Zero Rupees Only", "words(0)")
 for exact, want in [
-    (1, "One Rupees Only"), (21, "Twenty One Rupees Only"),
-    (100, "One Hundred Rupees Only"), (1500, "One Thousand Five Hundred Rupees Only"),
-    (100000, "One Lakh Rupees Only"), (1000000, "Ten Lakh Rupees Only"),
+    (1, "One Rupees Only"),
+    (21, "Twenty One Rupees Only"),
+    (100, "One Hundred Rupees Only"),
+    (1500, "One Thousand Five Hundred Rupees Only"),
+    (100000, "One Lakh Rupees Only"),
+    (1000000, "Ten Lakh Rupees Only"),
     (10000000, "One Crore Rupees Only"),
 ]:
     eq(report._amount_in_words(exact), want, f"words({exact})")
@@ -254,11 +300,15 @@ for sub in [0, 100, 250, 800, 1250, 5000, 99999]:
             change = max(0.0, paid - net)
             check(net <= sub + 1e-9, f"net<=sub sub={sub} disc={disc}")
             check(due >= 0 and change >= 0, f"due/change >=0 sub={sub}")
-            check(not (due > 1e-9 and change > 1e-9),
-                  f"never due AND change sub={sub} disc={disc} paid={paid}")
+            check(
+                not (due > 1e-9 and change > 1e-9),
+                f"never due AND change sub={sub} disc={disc} paid={paid}",
+            )
             if paid >= net:
-                check(abs(change - (paid - net)) < 1e-9 and due < 1e-9,
-                      f"overpaid change sub={sub} disc={disc} paid={paid}")
+                check(
+                    abs(change - (paid - net)) < 1e-9 and due < 1e-9,
+                    f"overpaid change sub={sub} disc={disc} paid={paid}",
+                )
 
 
 # ============================================================================
@@ -266,8 +316,12 @@ for sub in [0, 100, 250, 800, 1250, 5000, 99999]:
 # ============================================================================
 section("WhatsApp pre-flight (config/recipient)")
 # config_ready across url/token presence
-for url, tok, ok_expect in [("", "", False), ("http://x", "", False),
-                            ("", "t", False), ("http://x", "t", True)]:
+for url, tok, ok_expect in [
+    ("", "", False),
+    ("http://x", "", False),
+    ("", "t", False),
+    ("http://x", "t", True),
+]:
     db.set_setting(con, "whatsapp_url", url)
     db.set_setting(con, "whatsapp_api_key", tok)
     ok, msg = whatsapp.config_ready(con)
@@ -277,11 +331,15 @@ for url, tok, ok_expect in [("", "", False), ("http://x", "", False),
 # recipient_ready
 db.set_setting(con, "whatsapp_url", "http://localhost:8080")
 db.set_setting(con, "whatsapp_api_key", "tok")
-ok, _ = whatsapp.recipient_ready(con, R_VALID); check(ok, "recipient_ready valid phone")
-ok, m = whatsapp.recipient_ready(con, R_NOPHONE); check(not ok, "recipient_ready no phone")
+ok, _ = whatsapp.recipient_ready(con, R_VALID)
+check(ok, "recipient_ready valid phone")
+ok, m = whatsapp.recipient_ready(con, R_NOPHONE)
+check(not ok, "recipient_ready no phone")
 has(m, "no valid", "recipient_ready no-phone message")
-ok, _ = whatsapp.recipient_ready(con, R_BADPHONE); check(not ok, "recipient_ready bad phone")
-ok, m = whatsapp.recipient_ready(con, 999999); check(not ok, "recipient_ready missing receipt")
+ok, _ = whatsapp.recipient_ready(con, R_BADPHONE)
+check(not ok, "recipient_ready bad phone")
+ok, m = whatsapp.recipient_ready(con, 999999)
+check(not ok, "recipient_ready missing receipt")
 has(m, "not found", "recipient_ready missing message")
 
 
@@ -292,19 +350,30 @@ section("WhatsApp check_status across gateway states")
 db.set_setting(con, "whatsapp_url", "http://localhost:8080")
 db.set_setting(con, "whatsapp_api_key", "tok")
 
-SCN.clear(); SCN["mode"] = "ok"; SCN["status"] = {"connected": True, "loggedIn": True}
-ok, m = whatsapp.check_status(con); check(ok, "status: logged in -> ok"); has(m, "ready", "status ready msg")
+SCN.clear()
+SCN["mode"] = "ok"
+SCN["status"] = {"connected": True, "loggedIn": True}
+ok, m = whatsapp.check_status(con)
+check(ok, "status: logged in -> ok")
+has(m, "ready", "status ready msg")
 
 SCN["status"] = {"connected": True, "loggedIn": False}
-ok, m = whatsapp.check_status(con); check(not ok, "status: connected not linked")
+ok, m = whatsapp.check_status(con)
+check(not ok, "status: connected not linked")
 has(m, "scan", "status not-linked mentions scan")
 
 SCN["status"] = {"connected": False, "loggedIn": False}
-ok, m = whatsapp.check_status(con); check(not ok, "status: not connected")
+ok, m = whatsapp.check_status(con)
+check(not ok, "status: not connected")
 
-for mode, needle in [("down", "could not reach"), ("no_internet", "host not found"),
-                     ("timeout_wrapped", "timed out"), ("timeout_raw", "timed out"),
-                     ("unauthorized", "token"), ("forbidden", "token")]:
+for mode, needle in [
+    ("down", "could not reach"),
+    ("no_internet", "host not found"),
+    ("timeout_wrapped", "timed out"),
+    ("timeout_raw", "timed out"),
+    ("unauthorized", "token"),
+    ("forbidden", "token"),
+]:
     SCN["mode"] = mode
     ok, m = whatsapp.check_status(con)
     check(not ok, f"status {mode} -> not ok")
@@ -313,10 +382,13 @@ SCN["mode"] = "ok"
 
 # missing config short-circuits before any network
 db.set_setting(con, "whatsapp_url", "")
-ok, m = whatsapp.check_status(con); check(not ok, "status: no url"); has(m, "url", "status no-url msg")
+ok, m = whatsapp.check_status(con)
+check(not ok, "status: no url")
+has(m, "url", "status no-url msg")
 db.set_setting(con, "whatsapp_url", "http://localhost:8080")
 db.set_setting(con, "whatsapp_api_key", "")
-ok, m = whatsapp.check_status(con); check(not ok, "status: no token")
+ok, m = whatsapp.check_status(con)
+check(not ok, "status: no token")
 db.set_setting(con, "whatsapp_api_key", "tok")
 
 
@@ -337,26 +409,36 @@ CASES = [
     (dict(mode="forbidden"), False, "token"),
     (dict(mode="notfound"), False, "error (http 404)"),
     (dict(mode="server_error_session"), False, "isn't linked"),
-    (dict(mode="ok", send_status=200, send_body='{"success":false,"error":"x"}'),
-     False, "could not send"),
-    (dict(mode="ok", send_status=200, send_body='{"error":"user not logged in"}'),
-     False, "isn't linked"),
-    (dict(mode="ok", send_status=500, send_body='{"error":"boom"}'),
-     False, "could not send"),
+    (
+        dict(mode="ok", send_status=200, send_body='{"success":false,"error":"x"}'),
+        False,
+        "could not send",
+    ),
+    (
+        dict(mode="ok", send_status=200, send_body='{"error":"user not logged in"}'),
+        False,
+        "isn't linked",
+    ),
+    (dict(mode="ok", send_status=500, send_body='{"error":"boom"}'), False, "could not send"),
 ]
 for scn, ok_expect, needle in CASES:
-    SCN.clear(); SCN.update(scn)
+    SCN.clear()
+    SCN.update(scn)
     ok, m = whatsapp.send_pdf(con, NUM, str(_DUMMY), "caption")
     eq(ok, ok_expect, f"send_pdf {scn.get('mode')} body={scn.get('send_body')!r}")
     has(m, needle, f"send_pdf {scn.get('mode')} message")
-SCN.clear(); SCN["mode"] = "ok"
+SCN.clear()
+SCN["mode"] = "ok"
 
 # send_pdf guards: bad phone, missing file, not configured
-ok, m = whatsapp.send_pdf(con, "12", str(_DUMMY), ""); check(not ok, "send_pdf bad phone")
-ok, m = whatsapp.send_pdf(con, NUM, str(Path(_TMP) / "nope.pdf"), ""); check(not ok, "send_pdf missing file")
+ok, m = whatsapp.send_pdf(con, "12", str(_DUMMY), "")
+check(not ok, "send_pdf bad phone")
+ok, m = whatsapp.send_pdf(con, NUM, str(Path(_TMP) / "nope.pdf"), "")
+check(not ok, "send_pdf missing file")
 has(m, "could not be created", "send_pdf missing-file message")
 db.set_setting(con, "whatsapp_url", "")
-ok, m = whatsapp.send_pdf(con, NUM, str(_DUMMY), ""); check(not ok, "send_pdf not configured")
+ok, m = whatsapp.send_pdf(con, NUM, str(_DUMMY), "")
+check(not ok, "send_pdf not configured")
 db.set_setting(con, "whatsapp_url", "http://localhost:8080")
 
 
@@ -364,17 +446,24 @@ db.set_setting(con, "whatsapp_url", "http://localhost:8080")
 # 8) send_report / send_receipt end-to-end (real PDF build)  (~12 cases)
 # ============================================================================
 section("send_report / send_receipt (builds real PDF)")
-SCN.clear(); SCN["mode"] = "ok"
-ok, m = whatsapp.send_report(con, R_VALID); check(ok, "send_report ok"); has(m, "sent to", "send_report msg")
-ok, m = whatsapp.send_receipt(con, R_VALID); check(ok, "send_receipt ok")
+SCN.clear()
+SCN["mode"] = "ok"
+ok, m = whatsapp.send_report(con, R_VALID)
+check(ok, "send_report ok")
+has(m, "sent to", "send_report msg")
+ok, m = whatsapp.send_receipt(con, R_VALID)
+check(ok, "send_receipt ok")
 # gateway down during a real send
 SCN["mode"] = "down"
-ok, m = whatsapp.send_report(con, R_VALID); check(not ok, "send_report gateway down")
+ok, m = whatsapp.send_report(con, R_VALID)
+check(not ok, "send_report gateway down")
 has(m, "could not reach", "send_report down msg")
 SCN["mode"] = "ok"
 # no phone / missing receipt
-ok, m = whatsapp.send_report(con, R_NOPHONE); check(not ok, "send_report no phone")
-ok, m = whatsapp.send_receipt(con, 999999); check(not ok, "send_receipt missing receipt")
+ok, m = whatsapp.send_report(con, R_NOPHONE)
+check(not ok, "send_report no phone")
+ok, m = whatsapp.send_receipt(con, 999999)
+check(not ok, "send_receipt missing receipt")
 has(m, "not found", "send_receipt missing msg")
 
 
@@ -383,11 +472,11 @@ has(m, "not found", "send_receipt missing msg")
 # ============================================================================
 section("PDF generation (report + receipt variants)")
 variants = [
-    _make_receipt("03007654321", sub=500, paid=500),                 # exact
-    _make_receipt("03007654322", sub=1250, paid=2000),               # overpaid (change)
-    _make_receipt("03007654323", sub=800, paid=300),                 # underpaid (due)
+    _make_receipt("03007654321", sub=500, paid=500),  # exact
+    _make_receipt("03007654322", sub=1250, paid=2000),  # overpaid (change)
+    _make_receipt("03007654323", sub=800, paid=300),  # underpaid (due)
     _make_receipt("03007654324", sub=0, paid=0, with_results=False),  # empty/zero
-    _make_receipt("", sub=999, paid=999),                            # no phone
+    _make_receipt("", sub=999, paid=999),  # no phone
 ]
 for rid in [R_VALID] + variants:
     rb = report.build_report_bytes(con, rid)
@@ -404,8 +493,10 @@ check(tb[:4] == b"%PDF", "test-page PDF builds")
 section("DB / settings / catalog")
 check(con.execute("SELECT COUNT(*) FROM tests").fetchone()[0] > 100, "catalog has tests")
 check(con.execute("SELECT COUNT(*) FROM test_parameters").fetchone()[0] > 100, "catalog has params")
-db.set_setting(con, "k_roundtrip", "v1"); eq(db.get_setting(con, "k_roundtrip"), "v1", "setting roundtrip")
-db.set_setting(con, "k_roundtrip", "v2"); eq(db.get_setting(con, "k_roundtrip"), "v2", "setting update")
+db.set_setting(con, "k_roundtrip", "v1")
+eq(db.get_setting(con, "k_roundtrip"), "v1", "setting roundtrip")
+db.set_setting(con, "k_roundtrip", "v2")
+eq(db.get_setting(con, "k_roundtrip"), "v2", "setting update")
 eq(db.get_setting(con, "missing_key", "def"), "def", "setting default")
 # hidden results excluded from report; column present
 cols = [r[1] for r in con.execute("PRAGMA table_info(results)")]
@@ -418,23 +509,53 @@ check(db.verify_user(con, "admin", "wrong") is None, "wrong password rejected")
 check(db.verify_user(con, "ghost", "x") is None, "unknown user rejected")
 # audit log
 db.log_audit(con, "tester", "login", "unit test entry")
-n = con.execute("SELECT COUNT(*) FROM audit_log WHERE username='tester' AND action='login'").fetchone()[0]
+n = con.execute(
+    "SELECT COUNT(*) FROM audit_log WHERE username='tester' AND action='login'"
+).fetchone()[0]
 check(n >= 1, "log_audit writes a row")
 db.log_audit(con, None, None, None)  # must tolerate junk and never raise
 check(True, "log_audit tolerates None args")
 # every action the app emits must have a friendly label on the Logs page
-from labdesk.ui.logs import ACTION_LABELS                       # noqa: E402
+from labdesk.ui.logs import ACTION_LABELS  # noqa: E402
+
 EXPECTED_ACTIONS = {
-    "login", "login_failed", "logout", "setup_completed", "patient_created",
-    "patient_updated", "receipt_created", "discount_approved",
-    "discount_approval_failed", "results_saved",
-    "culture_saved", "due_received", "expense_added", "expense_updated",
-    "expense_deleted", "previewed_receipt", "previewed_report", "printed_receipt",
-    "printed_report", "exported_pdf", "whatsapp_report", "whatsapp_receipt",
-    "whatsapp_test", "whatsapp_test_message", "printer_test", "user_created",
-    "user_enabled", "user_disabled", "password_changed", "settings_saved",
-    "doctor_created", "doctor_updated", "doctor_deleted", "test_created",
-    "test_updated", "test_deleted", "logs_cleared",
+    "login",
+    "login_failed",
+    "logout",
+    "setup_completed",
+    "patient_created",
+    "patient_updated",
+    "receipt_created",
+    "discount_approved",
+    "discount_approval_failed",
+    "results_saved",
+    "culture_saved",
+    "due_received",
+    "expense_added",
+    "expense_updated",
+    "expense_deleted",
+    "previewed_receipt",
+    "previewed_report",
+    "printed_receipt",
+    "printed_report",
+    "exported_pdf",
+    "whatsapp_report",
+    "whatsapp_receipt",
+    "whatsapp_test",
+    "whatsapp_test_message",
+    "printer_test",
+    "user_created",
+    "user_enabled",
+    "user_disabled",
+    "password_changed",
+    "settings_saved",
+    "doctor_created",
+    "doctor_updated",
+    "doctor_deleted",
+    "test_created",
+    "test_updated",
+    "test_deleted",
+    "logs_cleared",
 }
 for _a in sorted(EXPECTED_ACTIONS):
     check(_a in ACTION_LABELS, f"Logs page has a label for action '{_a}'")
@@ -444,8 +565,9 @@ for _a in sorted(EXPECTED_ACTIONS):
 # 10b) Security hardening: hashing, lockout, secrets, audit chain, URL, phone
 # ============================================================================
 section("security: hashing / lockout / secrets / audit-chain / url / phone")
-import hashlib as _hl                                            # noqa: E402
-from labdesk import whatsapp as _wa                              # noqa: E402
+import hashlib as _hl  # noqa: E402
+
+from labdesk import whatsapp as _wa  # noqa: E402
 
 # scrypt password hashing (slow KDF, not bare sha256)
 _h, _ = db.hash_password("s3cret-pw")
@@ -457,8 +579,11 @@ check(db._verify_password("wrong", _h, "") is False, "scrypt verify rejects wron
 _lsalt = "abc123"
 _legacy = _hl.sha256((_lsalt + "oldpw").encode()).hexdigest()
 check(db._verify_password("oldpw", _legacy, _lsalt) is True, "legacy sha256 still verifies")
-con.execute("INSERT INTO users(username,pass_hash,salt,full_name,role,active) "
-            "VALUES ('legacyuser',?,?,?,'technician',1)", (_legacy, _lsalt, "Legacy"))
+con.execute(
+    "INSERT INTO users(username,pass_hash,salt,full_name,role,active) "
+    "VALUES ('legacyuser',?,?,?,'technician',1)",
+    (_legacy, _lsalt, "Legacy"),
+)
 con.commit()
 check(db.verify_user(con, "legacyuser", "oldpw") is not None, "legacy user logs in")
 _nh = con.execute("SELECT pass_hash FROM users WHERE username='legacyuser'").fetchone()[0]
@@ -485,10 +610,12 @@ ok_chain, _bad = db.verify_audit_chain(con)
 check(ok_chain, "audit chain intact before tampering")
 _row = con.execute("SELECT id FROM audit_log WHERE hash IS NOT NULL LIMIT 1").fetchone()
 if _row:
-    con.execute("UPDATE audit_log SET detail='TAMPERED' WHERE id=?", (_row[0],)); con.commit()
+    con.execute("UPDATE audit_log SET detail='TAMPERED' WHERE id=?", (_row[0],))
+    con.commit()
     ok2, _b2 = db.verify_audit_chain(con)
     check(not ok2, "audit chain detects tampering")
-    con.execute("UPDATE audit_log SET detail='unit test entry' WHERE id=?", (_row[0],)); con.commit()
+    con.execute("UPDATE audit_log SET detail='unit test entry' WHERE id=?", (_row[0],))
+    con.commit()
 
 # gateway URL validation + locality
 check(_wa.validate_url("http://localhost:8080")[0], "valid http URL accepted")
@@ -509,7 +636,9 @@ check(_cap == "{lab.__class__}", "format-string injection blocked (template kept
 db.set_setting(con, "whatsapp_report_caption", "")
 
 # ---- regressions found by the GUI test fleet (run 2) ----
-from labdesk.ui.widgets import money as _money, like_term as _lt   # noqa: E402
+from labdesk.ui.widgets import like_term as _lt
+from labdesk.ui.widgets import money as _money  # noqa: E402
+
 eq(_money(-0.0), "Rs. 0", "money(-0.0) -> 'Rs. 0' (no '-0')")
 eq(_money(0.0), "Rs. 0", "money(0) -> 'Rs. 0'")
 check(_money(-5).startswith("- Rs."), "money negative still formats")
@@ -517,16 +646,21 @@ eq(_lt("_"), "%\\_%", "like_term escapes underscore")
 eq(_lt("%"), "%\\%%", "like_term escapes percent")
 # catalog: a literal '_' search must NOT match the whole catalog
 _nall = con.execute("SELECT COUNT(*) FROM tests WHERE active=1").fetchone()[0]
-_nund = con.execute("SELECT COUNT(*) FROM tests WHERE active=1 AND name LIKE ? ESCAPE '\\'",
-                    (_lt("_"),)).fetchone()[0]
+_nund = con.execute(
+    "SELECT COUNT(*) FROM tests WHERE active=1 AND name LIKE ? ESCAPE '\\'", (_lt("_"),)
+).fetchone()[0]
 check(_nall > 100 and _nund < _nall, "catalog: literal '_' search no longer returns everything")
 # a receipt with NULL patient_name AND NULL lab_no still appears on an empty search (COALESCE)
-con.execute("INSERT INTO receipts(lab_no,patient_name,status,net_amount,paid,due) "
-            "VALUES(NULL,NULL,'reported',0,0,0)")
+con.execute(
+    "INSERT INTO receipts(lab_no,patient_name,status,net_amount,paid,due) "
+    "VALUES(NULL,NULL,'reported',0,0,0)"
+)
 con.commit()
 _tot = con.execute("SELECT COUNT(*) FROM receipts").fetchone()[0]
-_vis = con.execute("SELECT COUNT(*) FROM receipts WHERE (COALESCE(patient_name,'') LIKE '%' "
-                   "OR COALESCE(lab_no,'') LIKE '%')").fetchone()[0]
+_vis = con.execute(
+    "SELECT COUNT(*) FROM receipts WHERE (COALESCE(patient_name,'') LIKE '%' "
+    "OR COALESCE(lab_no,'') LIKE '%')"
+).fetchone()[0]
 check(_vis == _tot, "NULL name/lab_no receipt visible on empty search (COALESCE)")
 
 # WhatsApp attachment uses a friendly lab_no filename, not the random temp name
@@ -534,19 +668,27 @@ eq(_wa._safe_filename("LAB_2026-06-06_003"), "LAB_2026-06-06_003.pdf", "safe fil
 eq(_wa._safe_filename("../etc/passwd"), "etcpasswd.pdf", "safe filename strips path chars")
 _cap = []
 _orig_post = _wa._post
-_wa._post = lambda cfg, path, payload, timeout=None: (_cap.append(payload), (200, '{"success":true}'))[1]
-db.set_setting(con, "whatsapp_url", "http://localhost:8080"); db.set_secret("whatsapp_api_key", "tok")
+_wa._post = lambda cfg, path, payload, timeout=None: (
+    _cap.append(payload),
+    (200, '{"success":true}'),
+)[1]
+db.set_setting(con, "whatsapp_url", "http://localhost:8080")
+db.set_secret("whatsapp_api_key", "tok")
 _wa.send_report(con, R_VALID)
 _wa._post = _orig_post
-check(_cap and _cap[0].get("FileName", "").endswith(".pdf")
-      and "tmp" not in _cap[0]["FileName"].lower(),
-      "WhatsApp FileName is the lab_no PDF, not a temp name")
+check(
+    _cap
+    and _cap[0].get("FileName", "").endswith(".pdf")
+    and "tmp" not in _cap[0]["FileName"].lower(),
+    "WhatsApp FileName is the lab_no PDF, not a temp name",
+)
 # new lab_no format uses hyphenated date (verify the strftime the app uses)
 _ds = con.execute("SELECT strftime('%Y-%m-%d','now','localtime')").fetchone()[0]
 check(len(_ds) == 10 and _ds[4] == "-" and _ds[7] == "-", "lab_no date format is YYYY-MM-DD")
 
 # ---- improvement-pass additions ----
-import os as _os                                                 # noqa: E402
+import os as _os  # noqa: E402
+
 # unique lab_no guard index exists
 _idx = [r[1] for r in con.execute("PRAGMA index_list('receipts')")]
 check("ux_receipts_labno" in _idx, "unique lab_no index exists (race guard)")
@@ -560,55 +702,87 @@ check(db.restore_db("/no/such/file.sqlite") is False, "restore_db rejects a miss
 # audit re-chain after purge
 for _i in range(3):
     db.log_audit(con, "chainuser", "login", f"chain{_i}")
-con.execute("DELETE FROM audit_log WHERE detail='chain1'"); con.commit()
+con.execute("DELETE FROM audit_log WHERE detail='chain1'")
+con.commit()
 _ok, _ = db.verify_audit_chain(con)
 check(not _ok, "deleting a middle row breaks the audit chain")
 db.rechain_audit(con)
 _ok2, _ = db.verify_audit_chain(con)
 check(_ok2, "rechain_audit restores integrity after a purge")
 # report uses the STORED reported_at (stable reprint date)
-con.execute("UPDATE receipts SET reported_at='2026-06-01 09:00' WHERE id=?", (R_VALID,)); con.commit()
+con.execute("UPDATE receipts SET reported_at='2026-06-01 09:00' WHERE id=?", (R_VALID,))
+con.commit()
 _rh = report.build_report_html(con, R_VALID)
 check("2026-06-01 09:00" in _rh, "report uses stored reported_at, not now()")
 # microbiology culture & sensitivity renders on the report
 _ct = con.execute("SELECT id, name FROM tests WHERE is_culture=1 LIMIT 1").fetchone()
 if _ct:
-    _cpid = con.execute("INSERT INTO patients(name,age,age_desc,sex,telephone) "
-                        "VALUES('Cult Pt',30,'Years','Male','03001234567')").lastrowid
-    _crid = con.execute("INSERT INTO receipts(lab_no,patient_id,patient_name,age,age_desc,sex,"
-                        "status,net_amount,paid,due) VALUES('LAB_CULT_1',?,'Cult Pt',30,'Years',"
-                        "'Male','reported',500,500,0)", (_cpid,)).lastrowid
-    _citem = con.execute("INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) "
-                         "VALUES(?,?,?,500)", (_crid, _ct["id"], _ct["name"])).lastrowid
-    _cid = con.execute("INSERT INTO cultures(receipt_item_id,specimen,growth,organism,gram_stain) "
-                       "VALUES(?,?,?,?,?)", (_citem, "Urine", "Growth present", "E. coli",
-                                            "Gram negative")).lastrowid
-    con.execute("INSERT INTO culture_sensitivity(culture_id,antibiotic,result) VALUES(?,?,?)",
-                (_cid, "Ciprofloxacin", "S"))
+    _cpid = con.execute(
+        "INSERT INTO patients(name,age,age_desc,sex,telephone) "
+        "VALUES('Cult Pt',30,'Years','Male','03001234567')"
+    ).lastrowid
+    _crid = con.execute(
+        "INSERT INTO receipts(lab_no,patient_id,patient_name,age,age_desc,sex,"
+        "status,net_amount,paid,due) VALUES('LAB_CULT_1',?,'Cult Pt',30,'Years',"
+        "'Male','reported',500,500,0)",
+        (_cpid,),
+    ).lastrowid
+    _citem = con.execute(
+        "INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) " "VALUES(?,?,?,500)",
+        (_crid, _ct["id"], _ct["name"]),
+    ).lastrowid
+    _cid = con.execute(
+        "INSERT INTO cultures(receipt_item_id,specimen,growth,organism,gram_stain) "
+        "VALUES(?,?,?,?,?)",
+        (_citem, "Urine", "Growth present", "E. coli", "Gram negative"),
+    ).lastrowid
+    con.execute(
+        "INSERT INTO culture_sensitivity(culture_id,antibiotic,result) VALUES(?,?,?)",
+        (_cid, "Ciprofloxacin", "S"),
+    )
     con.commit()
     _chtml = report.build_report_html(con, _crid)
-    check("E. coli" in _chtml and "Ciprofloxacin" in _chtml and "Sensitiv" in _chtml,
-          "report renders microbiology culture & sensitivity")
+    check(
+        "E. coli" in _chtml and "Ciprofloxacin" in _chtml and "Sensitiv" in _chtml,
+        "report renders microbiology culture & sensitivity",
+    )
 
 # ---- deferred-features batch ----
 section("deferred features: void / opt-out / wa-log / retire / payment")
 # void exclusion from income + dues
 _vr = _make_receipt("03001234567", sub=500, paid=500, status="reported")
-_before = con.execute("SELECT COALESCE(SUM(paid),0) FROM receipts WHERE COALESCE(voided,0)=0").fetchone()[0]
-con.execute("UPDATE receipts SET voided=1, due=0 WHERE id=?", (_vr,)); con.commit()
-_after = con.execute("SELECT COALESCE(SUM(paid),0) FROM receipts WHERE COALESCE(voided,0)=0").fetchone()[0]
+_before = con.execute(
+    "SELECT COALESCE(SUM(paid),0) FROM receipts WHERE COALESCE(voided,0)=0"
+).fetchone()[0]
+con.execute("UPDATE receipts SET voided=1, due=0 WHERE id=?", (_vr,))
+con.commit()
+_after = con.execute(
+    "SELECT COALESCE(SUM(paid),0) FROM receipts WHERE COALESCE(voided,0)=0"
+).fetchone()[0]
 check(_after == _before - 500, "voided receipt excluded from income sum")
-check(con.execute("SELECT COUNT(*) FROM receipts WHERE due>0 AND COALESCE(voided,0)=0 AND id=?",
-                  (_vr,)).fetchone()[0] == 0, "voided receipt not counted in dues")
+check(
+    con.execute(
+        "SELECT COUNT(*) FROM receipts WHERE due>0 AND COALESCE(voided,0)=0 AND id=?", (_vr,)
+    ).fetchone()[0]
+    == 0,
+    "voided receipt not counted in dues",
+)
 # WhatsApp opt-out honored by recipient_ready
-con.execute("UPDATE patients SET wa_optout=1 WHERE id=(SELECT patient_id FROM receipts WHERE id=?)",
-            (R_VALID,)); con.commit()
+con.execute(
+    "UPDATE patients SET wa_optout=1 WHERE id=(SELECT patient_id FROM receipts WHERE id=?)",
+    (R_VALID,),
+)
+con.commit()
 _ok, _m = _wa.recipient_ready(con, R_VALID)
 check(not _ok and "agreed" in _m.lower(), "recipient_ready honors WhatsApp opt-out")
-con.execute("UPDATE patients SET wa_optout=0 WHERE id=(SELECT patient_id FROM receipts WHERE id=?)",
-            (R_VALID,)); con.commit()
+con.execute(
+    "UPDATE patients SET wa_optout=0 WHERE id=(SELECT patient_id FROM receipts WHERE id=?)",
+    (R_VALID,),
+)
+con.commit()
 # WhatsApp delivery log written on send
-db.set_setting(con, "whatsapp_url", "http://localhost:8080"); db.set_secret("whatsapp_api_key", "tok")
+db.set_setting(con, "whatsapp_url", "http://localhost:8080")
+db.set_secret("whatsapp_api_key", "tok")
 _op2 = _wa._post
 _wa._post = lambda cfg, path, payload, timeout=None: (200, '{"success":true}')
 _n0 = con.execute("SELECT COUNT(*) FROM wa_messages").fetchone()[0]
@@ -616,45 +790,70 @@ _wa.send_report(con, R_VALID)
 _wa._post = _op2
 _n1 = con.execute("SELECT COUNT(*) FROM wa_messages").fetchone()[0]
 check(_n1 == _n0 + 1, "wa_messages logs a send")
-check(con.execute("SELECT ok FROM wa_messages ORDER BY id DESC LIMIT 1").fetchone()[0] == 1,
-      "wa_messages records success")
+check(
+    con.execute("SELECT ok FROM wa_messages ORDER BY id DESC LIMIT 1").fetchone()[0] == 1,
+    "wa_messages records success",
+)
 # payment method persists
-con.execute("UPDATE receipts SET payment_method='Card' WHERE id=?", (R_VALID,)); con.commit()
-check(con.execute("SELECT payment_method FROM receipts WHERE id=?", (R_VALID,)).fetchone()[0] == "Card",
-      "payment_method stored")
+con.execute("UPDATE receipts SET payment_method='Card' WHERE id=?", (R_VALID,))
+con.commit()
+check(
+    con.execute("SELECT payment_method FROM receipts WHERE id=?", (R_VALID,)).fetchone()[0]
+    == "Card",
+    "payment_method stored",
+)
 # catalog retire/restore (active flag)
 _tt = con.execute("SELECT id FROM tests WHERE active=1 LIMIT 1").fetchone()[0]
-con.execute("UPDATE tests SET active=0 WHERE id=?", (_tt,)); con.commit()
-check(con.execute("SELECT active FROM tests WHERE id=?", (_tt,)).fetchone()[0] == 0,
-      "test can be retired (active=0)")
-con.execute("UPDATE tests SET active=1 WHERE id=?", (_tt,)); con.commit()
+con.execute("UPDATE tests SET active=0 WHERE id=?", (_tt,))
+con.commit()
+check(
+    con.execute("SELECT active FROM tests WHERE id=?", (_tt,)).fetchone()[0] == 0,
+    "test can be retired (active=0)",
+)
+con.execute("UPDATE tests SET active=1 WHERE id=?", (_tt,))
+con.commit()
 # new action labels exist
-for _a in ("receipt_voided", "report_delivered", "exported_csv",
-           "test_deactivated", "test_activated"):
+for _a in (
+    "receipt_voided",
+    "report_delivered",
+    "exported_csv",
+    "test_deactivated",
+    "test_activated",
+):
     check(_a in ACTION_LABELS, f"Logs has a label for '{_a}'")
 
 
 # ---- deferred-features batch 2: panels / reconciliation / visits / edit-bill ----
 section("deferred features: panels, cash reconciliation, previous visits, edit bill")
 # --- test panels / profiles ---
-_pt1 = con.execute("SELECT id,name,charges FROM tests WHERE active=1 ORDER BY id LIMIT 1").fetchone()
-_pt2 = con.execute("SELECT id,name,charges FROM tests WHERE active=1 ORDER BY id LIMIT 1 OFFSET 1").fetchone()
+_pt1 = con.execute(
+    "SELECT id,name,charges FROM tests WHERE active=1 ORDER BY id LIMIT 1"
+).fetchone()
+_pt2 = con.execute(
+    "SELECT id,name,charges FROM tests WHERE active=1 ORDER BY id LIMIT 1 OFFSET 1"
+).fetchone()
 _pid = db.save_panel(con, "Fever Profile", [_pt1["id"], _pt2["id"]])
 check(_pid > 0, "save_panel creates a panel")
 _pmembers = db.panel_tests(con, _pid)
 check(len(_pmembers) == 2, "panel_tests returns the two members")
-check({m["id"] for m in _pmembers} == {_pt1["id"], _pt2["id"]}, "panel members match the tests added")
+check(
+    {m["id"] for m in _pmembers} == {_pt1["id"], _pt2["id"]}, "panel members match the tests added"
+)
 check(any(p["id"] == _pid for p in db.list_panels(con)), "list_panels includes the new panel")
 # update: drop to one test + rename
 db.save_panel(con, "Fever Panel", [_pt1["id"]], _pid)
 check(len(db.panel_tests(con, _pid)) == 1, "save_panel update replaces members")
-check(con.execute("SELECT name FROM panels WHERE id=?", (_pid,)).fetchone()[0] == "Fever Panel",
-      "save_panel update renames the panel")
+check(
+    con.execute("SELECT name FROM panels WHERE id=?", (_pid,)).fetchone()[0] == "Fever Panel",
+    "save_panel update renames the panel",
+)
 # delete (soft) hides it from list_panels and clears members
 db.delete_panel(con, _pid)
 check(not any(p["id"] == _pid for p in db.list_panels(con)), "delete_panel retires the panel")
-check(con.execute("SELECT COUNT(*) FROM panel_items WHERE panel_id=?", (_pid,)).fetchone()[0] == 0,
-      "delete_panel removes member rows")
+check(
+    con.execute("SELECT COUNT(*) FROM panel_items WHERE panel_id=?", (_pid,)).fetchone()[0] == 0,
+    "delete_panel removes member rows",
+)
 try:
     db.save_panel(con, "  ", [_pt1["id"]])
     check(False, "save_panel rejects a blank name")
@@ -664,127 +863,219 @@ except ValueError:
 # --- cash reconciliation: per-method breakdown equals total income for the range ---
 _today = con.execute("SELECT date('now','localtime')").fetchone()[0]
 _rc1 = _make_receipt("03007770001", sub=400, paid=400, status="reported")
-con.execute("UPDATE receipts SET payment_method='Card', received_at=datetime('now','localtime') "
-            "WHERE id=?", (_rc1,))
+con.execute(
+    "UPDATE receipts SET payment_method='Card', received_at=datetime('now','localtime') "
+    "WHERE id=?",
+    (_rc1,),
+)
 _rc2 = _make_receipt("03007770002", sub=600, paid=600, status="reported")
-con.execute("UPDATE receipts SET payment_method='Cash', received_at=datetime('now','localtime') "
-            "WHERE id=?", (_rc2,))
+con.execute(
+    "UPDATE receipts SET payment_method='Cash', received_at=datetime('now','localtime') "
+    "WHERE id=?",
+    (_rc2,),
+)
 con.commit()
 _methods = con.execute(
     "SELECT COALESCE(NULLIF(TRIM(payment_method),''),'Cash') AS m, COUNT(*) n, "
     "COALESCE(SUM(paid),0) total FROM receipts "
-    "WHERE COALESCE(voided,0)=0 AND paid>0 AND date(received_at)=? GROUP BY m", (_today,)).fetchall()
+    "WHERE COALESCE(voided,0)=0 AND paid>0 AND date(received_at)=? GROUP BY m",
+    (_today,),
+).fetchall()
 _income = con.execute(
     "SELECT COALESCE(SUM(paid),0) FROM receipts WHERE COALESCE(voided,0)=0 AND date(received_at)=?",
-    (_today,)).fetchone()[0]
+    (_today,),
+).fetchone()[0]
 check(sum(m["total"] for m in _methods) == _income, "reconciliation breakdown sums to income")
 check(any(m["m"] == "Card" and m["total"] >= 400 for m in _methods), "Card collection counted")
 
 # --- patient previous-visits query (reception) ---
 _pvpid = con.execute("SELECT patient_id FROM receipts WHERE id=?", (_rc2,)).fetchone()[0]
-con.execute("INSERT INTO receipts(patient_id,lab_no,patient_name,sex,status,net_amount,paid,due) "
-            "VALUES(?,?,?,?,?,?,?,?)",
-            (_pvpid, "LAB_PV_2", "PV Patient", "Male", "reported", 300, 300, 0))
+con.execute(
+    "INSERT INTO receipts(patient_id,lab_no,patient_name,sex,status,net_amount,paid,due) "
+    "VALUES(?,?,?,?,?,?,?,?)",
+    (_pvpid, "LAB_PV_2", "PV Patient", "Male", "reported", 300, 300, 0),
+)
 con.commit()
 _visits = con.execute(
-    "SELECT lab_no FROM receipts WHERE patient_id=? AND COALESCE(voided,0)=0 ORDER BY id DESC", (_pvpid,)
+    "SELECT lab_no FROM receipts WHERE patient_id=? AND COALESCE(voided,0)=0 ORDER BY id DESC",
+    (_pvpid,),
 ).fetchall()
 check(len(_visits) >= 2, "previous-visits query returns the patient's receipts")
 
 # --- edit pending bill: recompute net/due + ledger adjustment ---
 _er = _make_receipt("03008880001", sub=1000, paid=400, status="pending")
-con.execute("UPDATE receipts SET discount_pct=0, net_amount=1000, due=600, subtotal=1000 WHERE id=?",
-            (_er,)); con.commit()
+con.execute(
+    "UPDATE receipts SET discount_pct=0, net_amount=1000, due=600, subtotal=1000 WHERE id=?", (_er,)
+)
+con.commit()
 # apply 10% discount and pay 900 total
 _sub = con.execute("SELECT subtotal FROM receipts WHERE id=?", (_er,)).fetchone()[0]
 _newnet = _sub - _sub * 10 / 100.0
 _newpaid = 900.0
 _newdue = max(0.0, _newnet - _newpaid)
 _oldpaid = con.execute("SELECT paid FROM receipts WHERE id=?", (_er,)).fetchone()[0]
-con.execute("UPDATE receipts SET discount_pct=10, net_amount=?, paid=?, due=? WHERE id=?",
-            (_newnet, _newpaid, _newdue, _er))
-con.execute("INSERT INTO ledger(kind,ref_id,detail,credit) VALUES('adjustment',?,?,?)",
-            (_er, "edit", _newpaid - _oldpaid))
+con.execute(
+    "UPDATE receipts SET discount_pct=10, net_amount=?, paid=?, due=? WHERE id=?",
+    (_newnet, _newpaid, _newdue, _er),
+)
+con.execute(
+    "INSERT INTO ledger(kind,ref_id,detail,credit) VALUES('adjustment',?,?,?)",
+    (_er, "edit", _newpaid - _oldpaid),
+)
 con.commit()
 _row = con.execute("SELECT net_amount,paid,due FROM receipts WHERE id=?", (_er,)).fetchone()
 check(abs(_row["net_amount"] - 900.0) < 1e-6, "edit bill recomputes net after discount")
 check(abs(_row["due"] - 0.0) < 1e-6, "edit bill clears due when fully paid")
-check(con.execute("SELECT credit FROM ledger WHERE ref_id=? AND kind='adjustment'",
-                  (_er,)).fetchone()[0] == 500, "edit bill writes a ledger adjustment for extra paid")
+check(
+    con.execute(
+        "SELECT credit FROM ledger WHERE ref_id=? AND kind='adjustment'", (_er,)
+    ).fetchone()[0]
+    == 500,
+    "edit bill writes a ledger adjustment for extra paid",
+)
 
 for _a in ("panel_created", "panel_updated", "panel_deleted", "receipt_edited"):
     check(_a in ACTION_LABELS, f"Logs has a label for '{_a}'")
 
 # --- in-app parameter editor (db.save_test_parameters) ---
 _pet = con.execute("SELECT id FROM tests WHERE active=1 LIMIT 1").fetchone()[0]
-con.execute("DELETE FROM test_parameters WHERE test_id=?", (_pet,)); con.commit()
+con.execute("DELETE FROM test_parameters WHERE test_id=?", (_pet,))
+con.commit()
 # create three lines: heading, normal, note
-db.save_test_parameters(con, _pet, [
-    {"id": None, "part_type": "H", "name": "CBC", "units": "", "ref_male": "", "ref_female": ""},
-    {"id": None, "part_type": "N", "name": "Haemoglobin", "units": "g/dL",
-     "ref_male": "13-17", "ref_female": "12-15", "default_result": ""},
-    {"id": None, "part_type": "L", "name": "Method: automated", "units": "", "ref_male": "", "ref_female": ""},
-])
-_prows = con.execute("SELECT * FROM test_parameters WHERE test_id=? ORDER BY seq", (_pet,)).fetchall()
+db.save_test_parameters(
+    con,
+    _pet,
+    [
+        {
+            "id": None,
+            "part_type": "H",
+            "name": "CBC",
+            "units": "",
+            "ref_male": "",
+            "ref_female": "",
+        },
+        {
+            "id": None,
+            "part_type": "N",
+            "name": "Haemoglobin",
+            "units": "g/dL",
+            "ref_male": "13-17",
+            "ref_female": "12-15",
+            "default_result": "",
+        },
+        {
+            "id": None,
+            "part_type": "L",
+            "name": "Method: automated",
+            "units": "",
+            "ref_male": "",
+            "ref_female": "",
+        },
+    ],
+)
+_prows = con.execute(
+    "SELECT * FROM test_parameters WHERE test_id=? ORDER BY seq", (_pet,)
+).fetchall()
 check(len(_prows) == 3, "save_test_parameters inserts new lines")
 check([r["part_type"] for r in _prows] == ["H", "N", "L"], "parameter types and order preserved")
-check(_prows[1]["name"] == "Haemoglobin" and _prows[1]["ref_male"] == "13-17",
-      "normal parameter fields stored")
+check(
+    _prows[1]["name"] == "Haemoglobin" and _prows[1]["ref_male"] == "13-17",
+    "normal parameter fields stored",
+)
 # edit in place (keep ids) + reorder: swap first two, rename Haemoglobin
 _hid = _prows[1]["id"]
-db.save_test_parameters(con, _pet, [
-    {"id": _prows[1]["id"], "part_type": "N", "name": "Hb", "units": "g/dL",
-     "ref_male": "13-17", "ref_female": "12-15"},
-    {"id": _prows[0]["id"], "part_type": "H", "name": "CBC"},
-    {"id": _prows[2]["id"], "part_type": "L", "name": "Method: automated"},
-])
-_prows2 = con.execute("SELECT id,name FROM test_parameters WHERE test_id=? ORDER BY seq", (_pet,)).fetchall()
-check(_prows2[0]["name"] == "Hb" and _prows2[0]["id"] == _hid,
-      "edit preserves parameter id (results stay linked) and reorders")
-check(con.execute("SELECT COUNT(*) FROM test_parameters WHERE test_id=?", (_pet,)).fetchone()[0] == 3,
-      "edit does not duplicate rows")
+db.save_test_parameters(
+    con,
+    _pet,
+    [
+        {
+            "id": _prows[1]["id"],
+            "part_type": "N",
+            "name": "Hb",
+            "units": "g/dL",
+            "ref_male": "13-17",
+            "ref_female": "12-15",
+        },
+        {"id": _prows[0]["id"], "part_type": "H", "name": "CBC"},
+        {"id": _prows[2]["id"], "part_type": "L", "name": "Method: automated"},
+    ],
+)
+_prows2 = con.execute(
+    "SELECT id,name FROM test_parameters WHERE test_id=? ORDER BY seq", (_pet,)
+).fetchall()
+check(
+    _prows2[0]["name"] == "Hb" and _prows2[0]["id"] == _hid,
+    "edit preserves parameter id (results stay linked) and reorders",
+)
+check(
+    con.execute("SELECT COUNT(*) FROM test_parameters WHERE test_id=?", (_pet,)).fetchone()[0] == 3,
+    "edit does not duplicate rows",
+)
 # delete-guard: a parameter with saved results cannot be removed
-_gri = con.execute("INSERT INTO receipts(lab_no,patient_name,sex,status) "
-                   "VALUES('LAB_PG','PG','Male','reported')").lastrowid
-_git = con.execute("INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) VALUES(?,?,?,0)",
-                   (_gri, _pet, "x")).lastrowid
-con.execute("INSERT INTO results(receipt_item_id,parameter_id,name,value) VALUES(?,?,?,?)",
-            (_git, _hid, "Hb", "14")); con.commit()
+_gri = con.execute(
+    "INSERT INTO receipts(lab_no,patient_name,sex,status) "
+    "VALUES('LAB_PG','PG','Male','reported')"
+).lastrowid
+_git = con.execute(
+    "INSERT INTO receipt_items(receipt_id,test_id,test_name,charge) VALUES(?,?,?,0)",
+    (_gri, _pet, "x"),
+).lastrowid
+con.execute(
+    "INSERT INTO results(receipt_item_id,parameter_id,name,value) VALUES(?,?,?,?)",
+    (_git, _hid, "Hb", "14"),
+)
+con.commit()
 try:
-    db.save_test_parameters(con, _pet, [
-        {"id": _prows2[1]["id"], "part_type": "H", "name": "CBC"}])  # omits _hid
+    db.save_test_parameters(
+        con, _pet, [{"id": _prows2[1]["id"], "part_type": "H", "name": "CBC"}]
+    )  # omits _hid
     check(False, "save_test_parameters blocks deleting an in-use parameter")
 except db.ParameterInUseError as _e:
     check("Hb" in _e.names, "ParameterInUseError names the in-use parameter")
-check(con.execute("SELECT 1 FROM test_parameters WHERE id=?", (_hid,)).fetchone() is not None,
-      "in-use parameter survives the rejected delete (rollback)")
+check(
+    con.execute("SELECT 1 FROM test_parameters WHERE id=?", (_hid,)).fetchone() is not None,
+    "in-use parameter survives the rejected delete (rollback)",
+)
 check("parameters_edited" in ACTION_LABELS, "Logs has a label for 'parameters_edited'")
 
 # ---- refactor pass: shared helpers behave identically ----
 section("refactor: shared db/widgets helpers")
 # db.currency + SQL fragment constants
 check(db.currency(con) == db.get_setting(con, "currency", "Rs."), "db.currency matches setting")
-check("voided" in db.NOT_VOIDED and "+1 day" in db.RECEIVED_TODAY,
-      "db SQL fragments defined (NOT_VOIDED / RECEIVED_TODAY)")
+check(
+    "voided" in db.NOT_VOIDED and "+1 day" in db.RECEIVED_TODAY,
+    "db SQL fragments defined (NOT_VOIDED / RECEIVED_TODAY)",
+)
 # db.receive_due: ledger credit + paid/due update + audit, shared by Receipts & Accounts
 _rdp = con.execute("INSERT INTO patients(name,sex) VALUES('RD Pt','Male')").lastrowid
 _rdr = con.execute(
     "INSERT INTO receipts(patient_id,lab_no,patient_name,sex,status,net_amount,paid,due) "
-    "VALUES(?,?,?,?,?,?,?,?)", (_rdp, "LAB_RDX", "RD Pt", "Male", "reported", 1000, 400, 600)).lastrowid
+    "VALUES(?,?,?,?,?,?,?,?)",
+    (_rdp, "LAB_RDX", "RD Pt", "Male", "reported", 1000, 400, 600),
+).lastrowid
 con.commit()
 _res = db.receive_due(con, _rdr, 250, "admin")
 check(_res == ("LAB_RDX", 650.0, 350.0), "db.receive_due returns (lab_no, new_paid, new_due)")
 _chk = con.execute("SELECT paid, due FROM receipts WHERE id=?", (_rdr,)).fetchone()
 check(_chk["paid"] == 650 and _chk["due"] == 350, "db.receive_due updates paid/due")
-check(con.execute("SELECT credit FROM ledger WHERE ref_id=? AND kind='due_recovery'",
-                  (_rdr,)).fetchone()[0] == 250, "db.receive_due writes ledger credit")
+check(
+    con.execute(
+        "SELECT credit FROM ledger WHERE ref_id=? AND kind='due_recovery'", (_rdr,)
+    ).fetchone()[0]
+    == 250,
+    "db.receive_due writes ledger credit",
+)
 check(db.receive_due(con, _rdr, 0, "admin") is None, "db.receive_due ignores zero amount")
 # widgets helpers
-from labdesk.ui.widgets import num_item, status_badge  # noqa: E402
 from PySide6.QtCore import Qt as _QtA  # noqa: E402
+
+from labdesk.ui.widgets import num_item, status_badge  # noqa: E402
+
 _ni = num_item("1,234", "#c0392b")
-check(_ni.text() == "1,234" and int(_ni.textAlignment()) & int(_QtA.AlignRight),
-      "num_item is right-aligned")
+check(
+    _ni.text() == "1,234" and int(_ni.textAlignment()) & int(_QtA.AlignRight),
+    "num_item is right-aligned",
+)
 check(status_badge("in_progress").text() == "In Progress", "status_badge formats status")
 check(status_badge("x", voided=True).text() == "Voided", "status_badge shows Voided")
 
@@ -793,7 +1084,8 @@ check(status_badge("x", voided=True).text() == "Voided", "status_badge shows Voi
 # 11b) Themes / caption templates / send_text / timeout / new settings
 # ============================================================================
 section("themes / captions / send_text / settings")
-from labdesk.ui.style import build_qss, THEMES                  # noqa: E402
+from labdesk.ui.style import THEMES, build_qss  # noqa: E402
+
 for t in ("light", "dark"):
     q = build_qss(t)
     check(isinstance(q, str) and "QPushButton" in q and len(q) > 1000, f"build_qss({t}) valid")
@@ -805,38 +1097,60 @@ check(build_qss("nonsense") == build_qss("light"), "unknown theme falls back to 
 # caption templating ({lab}/{lab_no}/{name})
 eq(whatsapp._caption(con, "no_such_key", "FB"), "FB", "caption blank -> fallback")
 db.set_setting(con, "whatsapp_report_caption", "{lab}/{lab_no}/{name}")
-eq(whatsapp._caption(con, "whatsapp_report_caption", "FB", lab="L", lab_no="N1", name="Joe"),
-   "L/N1/Joe", "caption renders placeholders")
+eq(
+    whatsapp._caption(con, "whatsapp_report_caption", "FB", lab="L", lab_no="N1", name="Joe"),
+    "L/N1/Joe",
+    "caption renders placeholders",
+)
 db.set_setting(con, "whatsapp_report_caption", "{bogus}")
-eq(whatsapp._caption(con, "whatsapp_report_caption", "FB", lab="L"), "{bogus}",
-   "bad caption placeholder -> sent as-is, no crash")
+eq(
+    whatsapp._caption(con, "whatsapp_report_caption", "FB", lab="L"),
+    "{bogus}",
+    "bad caption placeholder -> sent as-is, no crash",
+)
 db.set_setting(con, "whatsapp_report_caption", "")
 
 # upload timeout clamping in _cfg
-db.set_setting(con, "whatsapp_timeout", "1"); eq(whatsapp._cfg(con)["timeout"], 5, "timeout clamps low->5")
-db.set_setting(con, "whatsapp_timeout", "9999"); eq(whatsapp._cfg(con)["timeout"], 120, "timeout clamps high->120")
-db.set_setting(con, "whatsapp_timeout", "abc"); eq(whatsapp._cfg(con)["timeout"], 40, "timeout bad->default")
-db.set_setting(con, "whatsapp_timeout", "30"); eq(whatsapp._cfg(con)["timeout"], 30, "timeout valid kept")
+db.set_setting(con, "whatsapp_timeout", "1")
+eq(whatsapp._cfg(con)["timeout"], 5, "timeout clamps low->5")
+db.set_setting(con, "whatsapp_timeout", "9999")
+eq(whatsapp._cfg(con)["timeout"], 120, "timeout clamps high->120")
+db.set_setting(con, "whatsapp_timeout", "abc")
+eq(whatsapp._cfg(con)["timeout"], 40, "timeout bad->default")
+db.set_setting(con, "whatsapp_timeout", "30")
+eq(whatsapp._cfg(con)["timeout"], 30, "timeout valid kept")
 
 # send_text across gateway states (the Settings 'send test message' button)
 db.set_setting(con, "whatsapp_url", "http://localhost:8080")
 db.set_setting(con, "whatsapp_api_key", "tok")
-SCN.clear(); SCN["mode"] = "ok"
-ok, m = whatsapp.send_text(con, "03001234567", "hi"); check(ok, "send_text ok")
+SCN.clear()
+SCN["mode"] = "ok"
+ok, m = whatsapp.send_text(con, "03001234567", "hi")
+check(ok, "send_text ok")
 has(m, "test message sent", "send_text ok msg")
 SCN["mode"] = "down"
-ok, m = whatsapp.send_text(con, "03001234567", "hi"); check(not ok, "send_text gateway down")
+ok, m = whatsapp.send_text(con, "03001234567", "hi")
+check(not ok, "send_text gateway down")
 has(m, "could not reach", "send_text down msg")
 SCN["mode"] = "unauthorized"
-ok, m = whatsapp.send_text(con, "03001234567", "hi"); check(not ok, "send_text bad token")
-SCN.clear(); SCN["mode"] = "ok"
-ok, m = whatsapp.send_text(con, "12", "hi"); check(not ok, "send_text invalid number")
+ok, m = whatsapp.send_text(con, "03001234567", "hi")
+check(not ok, "send_text bad token")
+SCN.clear()
+SCN["mode"] = "ok"
+ok, m = whatsapp.send_text(con, "12", "hi")
+check(not ok, "send_text invalid number")
 db.set_setting(con, "whatsapp_url", "")
-ok, m = whatsapp.send_text(con, "03001234567", "hi"); check(not ok, "send_text not configured")
+ok, m = whatsapp.send_text(con, "03001234567", "hi")
+check(not ok, "send_text not configured")
 db.set_setting(con, "whatsapp_url", "http://localhost:8080")
 
-for k in ("theme", "whatsapp_auto_receipt", "whatsapp_report_caption",
-          "whatsapp_receipt_caption", "whatsapp_timeout"):
+for k in (
+    "theme",
+    "whatsapp_auto_receipt",
+    "whatsapp_report_caption",
+    "whatsapp_receipt_caption",
+    "whatsapp_timeout",
+):
     check(k in db.DEFAULT_SETTINGS, f"default setting {k} present")
 
 
@@ -846,18 +1160,26 @@ for k in ("theme", "whatsapp_auto_receipt", "whatsapp_report_caption",
 section("Qt background helper + debounce")
 try:
     import time
+
     from PySide6.QtWidgets import QApplication, QPushButton, QWidget
+
     app = QApplication.instance() or QApplication([])
     from labdesk.ui import tasks
 
-    parent = QWidget(); btn = QPushButton("Go")
+    parent = QWidget()
+    btn = QPushButton("Go")
     res = {}
-    tasks.run_in_background(parent, lambda c: report.build_report_bytes(c, R_VALID),
-                            lambda ok, r: res.update(ok=ok, n=(len(r) if ok else r)),
-                            clicked=btn, busy_text="Working…")
+    tasks.run_in_background(
+        parent,
+        lambda c: report.build_report_bytes(c, R_VALID),
+        lambda ok, r: res.update(ok=ok, n=(len(r) if ok else r)),
+        clicked=btn,
+        busy_text="Working…",
+    )
     check(btn.text() == "Working…" and not btn.isEnabled(), "task: busy state shown")
     for _ in range(200):
-        app.processEvents(); time.sleep(0.02)
+        app.processEvents()
+        time.sleep(0.02)
         if "ok" in res:
             break
     check(res.get("ok") is True and res.get("n", 0) > 1000, "task: completed with PDF")
@@ -868,64 +1190,85 @@ try:
     for _ in range(5):
         trig("x")
     for _ in range(40):
-        app.processEvents(); time.sleep(0.02)
+        app.processEvents()
+        time.sleep(0.02)
         if hits["n"]:
             break
     eq(hits["n"], 1, "debounce: 5 calls -> 1 fire")
 
     # error path: work raises -> on_done(ok=False, message)
     res2 = {}
-    tasks.run_in_background(parent, lambda c: (_ for _ in ()).throw(RuntimeError("boom")),
-                            lambda ok, r: res2.update(ok=ok, r=r))
+    tasks.run_in_background(
+        parent,
+        lambda c: (_ for _ in ()).throw(RuntimeError("boom")),
+        lambda ok, r: res2.update(ok=ok, r=r),
+    )
     for _ in range(50):
-        app.processEvents(); time.sleep(0.02)
+        app.processEvents()
+        time.sleep(0.02)
         if "ok" in res2:
             break
     check(res2.get("ok") is False and "boom" in str(res2.get("r")), "task: error surfaced safely")
 
     # ---- login: a wrong password must warn exactly ONCE (not twice) ----
-    from PySide6.QtWidgets import QMessageBox, QPushButton
-    from PySide6.QtTest import QTest
     from PySide6.QtCore import Qt as _Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QMessageBox, QPushButton
+
     from labdesk.ui.login import LoginDialog
+
     _wc = {"n": 0}
     _orig_warn = QMessageBox.warning
     QMessageBox.warning = staticmethod(lambda *a, **k: _wc.__setitem__("n", _wc["n"] + 1))
     # the seeded admin is forced to change password on first login; clear that +
     # any lockout so this test exercises the wrong/right-password warning flow.
-    con.execute("UPDATE users SET must_change_password=0, failed_attempts=0, "
-                "locked_until=NULL WHERE username='admin'"); con.commit()
+    con.execute(
+        "UPDATE users SET must_change_password=0, failed_attempts=0, "
+        "locked_until=NULL WHERE username='admin'"
+    )
+    con.commit()
     try:
-        d = LoginDialog(con); d.show()
-        d.username.setText("admin"); d.password.setText("definitely-wrong")
-        QTest.keyClick(d.password, _Qt.Key_Return); app.processEvents()
+        d = LoginDialog(con)
+        d.show()
+        d.username.setText("admin")
+        d.password.setText("definitely-wrong")
+        QTest.keyClick(d.password, _Qt.Key_Return)
+        app.processEvents()
         eq(_wc["n"], 1, "login: ENTER wrong password warns once")
         _wc["n"] = 0
-        d2 = LoginDialog(con); d2.show()
-        d2.username.setText("admin"); d2.password.setText("nope")
+        d2 = LoginDialog(con)
+        d2.show()
+        d2.username.setText("admin")
+        d2.password.setText("nope")
         [b for b in d2.findChildren(QPushButton) if b.text() == "Sign in"][0].click()
         app.processEvents()
         eq(_wc["n"], 1, "login: CLICK wrong password warns once")
         _wc["n"] = 0
-        d3 = LoginDialog(con); d3.show()
-        d3.username.setText("admin"); d3.password.setText("admin")
-        QTest.keyClick(d3.password, _Qt.Key_Return); app.processEvents()
+        d3 = LoginDialog(con)
+        d3.show()
+        d3.username.setText("admin")
+        d3.password.setText("admin")
+        QTest.keyClick(d3.password, _Qt.Key_Return)
+        app.processEvents()
         check(_wc["n"] == 0 and d3.user is not None, "login: correct password accepts, no warning")
     finally:
         QMessageBox.warning = _orig_warn
 
     # ---- Logs page constructs and shows the audit rows ----
     from labdesk.ui.logs import LogsPage
+
     _u = {"username": "admin", "role": "admin", "id": 1}
     lp = LogsPage(con, _u)
     lp.on_show()
     check(lp.table.rowCount() >= 1, "LogsPage lists audit entries")
-    lp.search.setText("tester"); lp.refresh()
+    lp.search.setText("tester")
+    lp.refresh()
     check(lp.table.rowCount() >= 1, "LogsPage search filters")
 
     # ---- pages that previously lacked self.user now construct with it ----
-    from labdesk.ui.microbiology import MicrobiologyPage
     from labdesk.ui.accounts import AccountsPage
+    from labdesk.ui.microbiology import MicrobiologyPage
+
     mp = MicrobiologyPage(con, _u)
     check(getattr(mp, "user", None) is _u, "MicrobiologyPage stores self.user")
     ap = AccountsPage(con, _u)
@@ -934,33 +1277,45 @@ try:
     # ---- regressions found by the GUI test fleet ----
     # worklist: clearing the selection must NOT re-select the receipt (signal reentrancy)
     from labdesk.ui.worklist import WorklistPage
+
     wp = WorklistPage(con, _u)
-    wp.status_filter.setCurrentIndex(0)   # All
+    wp.status_filter.setCurrentIndex(0)  # All
     wp.refresh_list()
     if R_VALID in getattr(wp, "_ids", []):
-        wp.table.selectRow(wp._ids.index(R_VALID)); app.processEvents()
+        wp.table.selectRow(wp._ids.index(R_VALID))
+        app.processEvents()
         check(wp.current_receipt == R_VALID, "worklist: selecting a row loads it")
-        wp.clear_selection(); app.processEvents()
-        check(wp.current_receipt is None,
-              "worklist: clear_selection clears current_receipt (no signal reentrancy)")
+        wp.clear_selection()
+        app.processEvents()
+        check(
+            wp.current_receipt is None,
+            "worklist: clear_selection clears current_receipt (no signal reentrancy)",
+        )
     # microbiology: clear_selection resets current_item
     mp.current_item = 999999
     mp.clear_selection()
     check(mp.current_item is None, "microbiology: clear_selection clears current_item")
     # receipts: deselecting a row yields no id (buttons disable), not a stale one
     from labdesk.ui.receipts import ReceiptsPage
-    rp2 = ReceiptsPage(con, _u); rp2.on_show()
+
+    rp2 = ReceiptsPage(con, _u)
+    rp2.on_show()
     if rp2._ids:
-        rp2.table.selectRow(0); app.processEvents()
+        rp2.table.selectRow(0)
+        app.processEvents()
         check(rp2._selected_id() is not None, "receipts: selected row gives an id")
-        rp2.table.clearSelection(); app.processEvents()
-        check(rp2._selected_id() is None, "receipts: deselect -> _selected_id None (stale-action fix)")
+        rp2.table.clearSelection()
+        app.processEvents()
+        check(
+            rp2._selected_id() is None, "receipts: deselect -> _selected_id None (stale-action fix)"
+        )
 
     # reception: itemActivated can fire with item=None (Enter on empty list, Wayland)
     # — the handlers must not crash (regression: AttributeError on None.data)
     from labdesk.ui.reception import ReceptionPage
+
     rcp = ReceptionPage(con, _u)
-    rcp.add_from_list(None)          # would raise 'NoneType has no attribute data' before the fix
+    rcp.add_from_list(None)  # would raise 'NoneType has no attribute data' before the fix
     rcp.pick_patient(None)
     check(True, "reception: add_from_list/pick_patient tolerate a None item")
 except Exception as e:  # pragma: no cover

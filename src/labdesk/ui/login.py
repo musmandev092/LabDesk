@@ -1,13 +1,20 @@
 """Login dialog."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QLineEdit, QPushButton, QLabel, QMessageBox, QInputDialog,
+    QDialog,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
 )
 
-from .. import db, __version__
-from .style import PRODUCT_NAME, PRODUCT_TAGLINE, DEVELOPER, DEVELOPER_GITHUB
+from .. import __version__, db
+from .style import DEVELOPER, DEVELOPER_GITHUB, PRODUCT_NAME, PRODUCT_TAGLINE
 
 
 class LoginDialog(QDialog):
@@ -66,7 +73,8 @@ class LoginDialog(QDialog):
         outer.addStretch(2)
 
         credit = QLabel(
-            f"{PRODUCT_NAME} v{__version__}  ·  Developed by {DEVELOPER}  ·  {DEVELOPER_GITHUB}")
+            f"{PRODUCT_NAME} v{__version__}  ·  Developed by {DEVELOPER}  ·  {DEVELOPER_GITHUB}"
+        )
         credit.setObjectName("muted")
         credit.setAlignment(Qt.AlignCenter)
         # The full credit line is wider than the narrow auth dialog — wrap it and
@@ -85,26 +93,32 @@ class LoginDialog(QDialog):
         p = self.password.text()
         rem = db.lock_remaining(self.con, u)
         if rem:
-            QMessageBox.warning(self, "Sign in",
-                                f"Too many failed attempts. Try again in {rem} second(s).")
+            QMessageBox.warning(
+                self, "Sign in", f"Too many failed attempts. Try again in {rem} second(s)."
+            )
             return
         user = db.verify_user(self.con, u, p)
         if user:
             db.log_audit(self.con, user["username"], "login", "signed in")
             if "must_change_password" in user.keys() and user["must_change_password"]:
                 if not self._force_password_change(user):
-                    return                       # cancelled → stay on the login screen
+                    return  # cancelled → stay on the login screen
             self.user = user
             self.accept()
         else:
             # store the attacker-controlled username in DETAIL, not the username
             # column (log-injection / misleading actor), and surface lockout.
-            db.log_audit(self.con, "(unauthenticated)", "login_failed",
-                         f"attempted username: {u or '(blank)'}")
+            db.log_audit(
+                self.con,
+                "(unauthenticated)",
+                "login_failed",
+                f"attempted username: {u or '(blank)'}",
+            )
             rem2 = db.lock_remaining(self.con, u)
             if rem2:
-                QMessageBox.warning(self, "Sign in",
-                                    f"Too many failed attempts. Locked for {rem2} second(s).")
+                QMessageBox.warning(
+                    self, "Sign in", f"Too many failed attempts. Locked for {rem2} second(s)."
+                )
             else:
                 QMessageBox.warning(self, "Sign in", "Invalid username or password.")
             self.password.clear()
@@ -112,12 +126,13 @@ class LoginDialog(QDialog):
 
     def _force_password_change(self, user) -> bool:
         """Make a user with must_change_password set a new one before entering."""
-        QMessageBox.information(self, "Set a new password",
-                               "For security, please set a new password before continuing.")
+        QMessageBox.information(
+            self, "Set a new password", "For security, please set a new password before continuing."
+        )
         while True:
-            pw, ok = QInputDialog.getText(self, "New password",
-                                          "New password (at least 6 characters):",
-                                          QLineEdit.Password)
+            pw, ok = QInputDialog.getText(
+                self, "New password", "New password (at least 6 characters):", QLineEdit.Password
+            )
             if not ok:
                 return False
             pw = pw.strip()
@@ -130,8 +145,10 @@ class LoginDialog(QDialog):
             h, salt = db.hash_password(pw)
             self.con.execute(
                 "UPDATE users SET pass_hash=?, salt=?, must_change_password=0 WHERE id=?",
-                (h, salt, user["id"]))
+                (h, salt, user["id"]),
+            )
             self.con.commit()
-            db.log_audit(self.con, user["username"], "password_changed",
-                         "forced first-login change")
+            db.log_audit(
+                self.con, user["username"], "password_changed", "forced first-login change"
+            )
             return True
