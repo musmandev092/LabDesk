@@ -68,6 +68,10 @@ class LoginDialog(QDialog):
             f"{PRODUCT_NAME} v{__version__}  ·  Developed by {DEVELOPER}  ·  {DEVELOPER_GITHUB}")
         credit.setObjectName("muted")
         credit.setAlignment(Qt.AlignCenter)
+        # The full credit line is wider than the narrow auth dialog — wrap it and
+        # shrink slightly so neither end is clipped (was rendering "oDesk…/…mosman0").
+        credit.setWordWrap(True)
+        credit.setStyleSheet("font-size: 11px;")
         outer.addWidget(credit)
 
         # Enter: username → move to password; password → sign in (once).

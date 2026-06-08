@@ -120,7 +120,8 @@ class MicrobiologyPage(QWidget):
     def _combo(self, kind):
         cb = QComboBox(); cb.setEditable(True); cb.addItem("")
         for r in self.con.execute(
-            "SELECT value FROM micro_lists WHERE kind=? ORDER BY seq, value", (kind,)
+            "SELECT value FROM micro_lists WHERE kind=? GROUP BY value ORDER BY MIN(seq), value",
+            (kind,),
         ):
             cb.addItem(r["value"])
         return cb
@@ -186,7 +187,9 @@ class MicrobiologyPage(QWidget):
     def _add_sens(self, antibiotic="", result="S"):
         i = self.sens.rowCount(); self.sens.insertRow(i)
         ab = QComboBox(); ab.setEditable(True)
-        for r in self.con.execute("SELECT value FROM micro_lists WHERE kind='antibiotic' ORDER BY value"):
+        for r in self.con.execute(
+            "SELECT value FROM micro_lists WHERE kind='antibiotic' GROUP BY value ORDER BY value"
+        ):
             ab.addItem(r["value"])
         ab.setCurrentText(antibiotic)
         res = QComboBox(); res.addItems(["S", "I", "R"]); res.setCurrentText(result or "S")

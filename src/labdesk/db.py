@@ -430,9 +430,11 @@ def log_audit(con: sqlite3.Connection, username: str, action: str, detail: str =
     page). Each row carries a rolling SHA-256 hash of (prev_hash, at, user, action,
     detail), so any later edit/deletion is detectable. Never raises — recording an
     action must never break the action itself; on DB failure it falls back to a file."""
-    username = (username or "")[:64]
-    action = (action or "")[:64]
-    detail = (detail or "")[:500]
+    # str() coercion keeps the "never raises" contract even when a caller passes a
+    # non-string (int/dict/object): slicing those directly would throw before the try.
+    username = str(username or "")[:64]
+    action = str(action or "")[:64]
+    detail = str(detail or "")[:500]
     try:
         prev = con.execute("SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1").fetchone()
         prev_hash = (prev["hash"] or "") if (prev and "hash" in prev.keys()) else ""
@@ -579,7 +581,8 @@ def lock_remaining(con: sqlite3.Connection, username: str) -> int:
         return 0
     try:
         return max(0, int(float(row["locked_until"]) - time.time()))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: a non-finite (inf) timestamp from a corrupted/edited DB.
         return 0
 
 

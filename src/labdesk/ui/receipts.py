@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QMenu, QDateEdit, QListWidget, QListWidgetItem,
 )
 
-from .widgets import muted, page_header, money, num_item, selected_id, status_badge
+from .widgets import muted, page_header, money, num_item, selected_id, status_badge, like_term
 from . import wa, tasks
 from .. import db, report, render
 from ..constants import PAYMENT_METHODS
@@ -173,10 +173,11 @@ class _EditReceiptDialog(QDialog):
         text = (text or "").strip(); self.results.clear()
         if len(text) < 1:
             self.results.hide(); return
-        like = f"%{text}%"
+        like = like_term(text)
         rows = self.con.execute(
             "SELECT id,name,charges,legacy_no FROM tests WHERE active=1 "
-            "AND (name LIKE ? OR CAST(legacy_no AS TEXT) LIKE ?) ORDER BY name LIMIT 30",
+            "AND (name LIKE ? ESCAPE '\\' OR CAST(legacy_no AS TEXT) LIKE ? ESCAPE '\\') "
+            "ORDER BY name LIMIT 30",
             (like, like),
         ).fetchall()
         for r in rows:
@@ -402,9 +403,9 @@ class ReceiptsPage(QWidget):
         self.refresh()
 
     def refresh(self):
-        q = f"%{self.search.text().strip()}%"
-        sql = ("SELECT * FROM receipts WHERE (COALESCE(patient_name,'') LIKE ? "
-               "OR COALESCE(lab_no,'') LIKE ? OR COALESCE(mr_no,'') LIKE ?)")
+        q = like_term(self.search.text())
+        sql = ("SELECT * FROM receipts WHERE (COALESCE(patient_name,'') LIKE ? ESCAPE '\\' "
+               "OR COALESCE(lab_no,'') LIKE ? ESCAPE '\\' OR COALESCE(mr_no,'') LIKE ? ESCAPE '\\')")
         args = [q, q, q]
         st = self.status.currentData()
         if st and st != "All":

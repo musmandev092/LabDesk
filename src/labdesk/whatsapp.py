@@ -36,7 +36,8 @@ _TIMEOUT_GET = 8            # status / quick checks
 def _cfg(con):
     try:
         timeout = int(float(db.get_setting(con, "whatsapp_timeout", "") or _TIMEOUT_POST))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: int(float('inf')) — a user typed 'inf' in the timeout field.
         timeout = _TIMEOUT_POST
     timeout = max(5, min(timeout, 120))            # keep it sane (5-120s)
     return {
@@ -149,7 +150,10 @@ def is_loopback_url(url: str) -> bool:
     where plain http carries no on-the-wire exposure (it never leaves the box).
     Used to decide whether to warn about unencrypted http transport."""
     import urllib.parse
-    host = (urllib.parse.urlparse(url or "").hostname or "").lower()
+    try:
+        host = (urllib.parse.urlparse(url or "").hostname or "").lower()
+    except ValueError:
+        return False        # malformed bracket/IPv6 host → not loopback (fail safe)
     return host in ("localhost", "127.0.0.1", "::1")
 
 
@@ -158,7 +162,10 @@ def is_local_url(url: str) -> bool:
     intended self-hosted deployment. Non-local hosts get a warning before sending."""
     import ipaddress
     import urllib.parse
-    host = (urllib.parse.urlparse(url or "").hostname or "").lower()
+    try:
+        host = (urllib.parse.urlparse(url or "").hostname or "").lower()
+    except ValueError:
+        return False        # malformed bracket/IPv6 host → treat as non-local (warn)
     if host in ("localhost", "127.0.0.1", "::1", ""):
         return True
     try:

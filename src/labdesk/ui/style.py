@@ -117,6 +117,10 @@ QPushButton#ghost:hover {{ background: {p['primary_light']}; }}
 QPushButton#ghost:disabled {{ background: transparent; color: {p['muted']}; border: 1.5px solid {p['border']}; }}
 QPushButton#danger {{ background: {p['danger']}; border: 1.5px solid transparent; }}
 QPushButton#danger:hover {{ background: #99291c; }}
+/* The #danger id-selector out-specifies QPushButton:disabled, so without this a
+   disabled Delete keeps its red fill with low-contrast text. Match the normal
+   disabled look so it reads the same as a disabled Edit. */
+QPushButton#danger:disabled {{ background: {p['disabled_bg']}; color: {p['disabled_text']}; border: 1.5px solid transparent; }}
 QPushButton#linkbtn {{ background: transparent; color: {p['ghost_text']}; border: none; padding: 6px; font-weight: 700; }}
 QPushButton#linkbtn:hover {{ color: {p['primary']}; }}
 
