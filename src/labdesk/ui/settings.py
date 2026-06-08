@@ -243,17 +243,17 @@ class SettingsPage(QWidget):
         self.theme_combo = QComboBox()
         self.theme_combo.addItem("Light", "light")
         self.theme_combo.addItem("Dark", "dark")
-        # apply instantly on change so the user sees the result; Save persists it
-        self.theme_combo.currentIndexChanged.connect(self._apply_theme_preview)
+        # No live preview: the theme is applied only when Save is pressed, so simply
+        # picking Dark and leaving without saving never changes the look.
         form.addRow(self._flbl("Theme"), self.theme_combo)
         w = QWidget(); w.setLayout(form)
         return card(
-            muted("Choose a light or dark look. The change applies immediately; "
-                  "click Save settings to keep it."),
+            muted("Choose a light or dark look. The change takes effect when you "
+                  "click Save settings."),
             w, title="Appearance",
         )
 
-    def _apply_theme_preview(self):
+    def _apply_theme(self):
         theme = self.theme_combo.currentData() or "light"
         app = QApplication.instance()
         if app is not None:
@@ -556,7 +556,7 @@ class SettingsPage(QWidget):
         # WhatsApp token → private 0600 secret file (kept out of the DB)
         db.set_secret("whatsapp_api_key", self.inputs["whatsapp_api_key"].text().strip())
         if theme != prev_theme:
-            self._apply_theme_preview()                    # only restyle when it changed
+            self._apply_theme()                            # only restyle when it changed
         db.log_audit(self.con, self.user["username"], "settings_saved", f"theme={theme}")
         QMessageBox.information(self, "Settings", "Saved.")
 
