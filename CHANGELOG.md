@@ -4,6 +4,21 @@ All notable changes to LabDesk are recorded here.
 
 ## Unreleased
 
+### Internal — code quality (no behaviour change)
+- **Tooling gate:** `ruff` (lint + format) and `mypy` are now configured in
+  `pyproject.toml`, enforced by `.pre-commit-config.yaml` and CI (`lint` +
+  `types` jobs alongside the tests). See `CODING_STANDARDS.md`.
+- **Codebase professionalised** behind the full test suite: consistent
+  formatting, type hints across the UI and renderers, and narrowed exception
+  handling (specific exceptions, no bare `except` in the data layer).
+- **Large modules decomposed into packages** (public import surface unchanged):
+  `db.py`→`db/`, `render.py`→`render/`, `report.py`→`report/`.
+- **Service layer:** billing math, promo logic and receipt void/deliver moved
+  out of the Qt views into a testable `services/` package.
+- **Refactor safety net:** `scripts/golden_render.py` captures a byte-exact
+  pixel/HTML/totals baseline of the rendered receipt & report, asserted
+  unchanged after every refactor step. See `ARCHITECTURE.md`.
+
 ### Added
 - **Patient ID** (replaces "MR No"): every patient gets a unique id in the form
   `YY-NNN-NN<L>` (e.g. `26-000-43F`) with a trailing **check letter** computed

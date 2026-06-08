@@ -103,14 +103,19 @@ data were retired — the staging DBs live outside the repo under
 ```
 src/labdesk/        (internal package name)
   app.py            bootstrap (wizard -> login -> main window)
-  db.py             SQLite layer, schema, seeding, auth, white-label settings
+  db/               SQLite layer, schema, seeding, auth, white-label settings
   schema.sql        clean normalized schema
-  report.py         receipt + lab-report data/logic, print & PDF API
-  render.py         native Qt (QPainter→QPdfWriter) PDF rendering — no WeasyPrint
+  report/           receipt + lab-report data/logic, print & PDF API
+  render/           native Qt (QPainter→QPdfWriter) PDF rendering — no WeasyPrint
+  services/         business logic extracted from the views (billing, receipts)
   seed.sqlite       catalog the app ships with (706 tests, no branding)
   ui/               one module per screen + setup_wizard + style
 scripts/
   build_appimage.sh   bundle python+PySide6+app -> LabDesk-x86_64.AppImage
   install_desktop.sh  add LabDesk to the applications menu
   qa_screens.py       render screenshots of every screen (dev/QA only)
+  golden_render.py    byte-exact render baseline (refactor safety net)
 ```
+
+See **`ARCHITECTURE.md`** for the package map and **`CODING_STANDARDS.md`** for
+the enforced clean-code rules.
