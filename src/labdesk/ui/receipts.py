@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
@@ -667,6 +669,7 @@ class ReceiptsPage(QWidget):
         labno = self._lab_no(rid)
         try:
             pages = render.render_pages(self.con, rid, kind)
+        # deliberate UI safety net: any render failure surfaces as a message, not a crash
         except Exception as e:  # noqa: BLE001
             QMessageBox.warning(self, "Preview", f"Could not build preview:\n{e}")
             return
@@ -717,6 +720,7 @@ class ReceiptsPage(QWidget):
         try:
             report.print_doc(self.con, rid, kind, self, title, printer)
             db.log_audit(self.con, self.user["username"], "printed_" + kind, labno)
+        # deliberate UI safety net: any print failure surfaces as a message, not a crash
         except Exception as e:  # noqa: BLE001
             QMessageBox.warning(self, "Print", f"Could not print:\n{e}")
 
@@ -865,10 +869,10 @@ class ReceiptsPage(QWidget):
                         (rid, f"Bill edit {rec['lab_no']} — refund", -delta),
                     )
             self.con.commit()
-        except Exception as e:
+        except sqlite3.Error as e:
             try:
                 self.con.rollback()
-            except Exception:
+            except sqlite3.Error:
                 pass
             QMessageBox.warning(self, "Edit bill", f"Could not save the changes:\n{e}")
             return

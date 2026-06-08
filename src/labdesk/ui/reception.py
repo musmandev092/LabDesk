@@ -799,7 +799,7 @@ class ReceptionPage(QWidget):
                     (rid, f"Receipt {lab_no} — {name}", paid),
                 )
             c.commit()
-        except Exception as e:
+        except (sqlite3.Error, RuntimeError) as e:
             try:
                 c.rollback()
             except Exception:

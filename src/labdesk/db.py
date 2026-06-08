@@ -246,7 +246,7 @@ def _verify_password(password: str, stored: str, legacy_salt: str) -> bool:
                 dklen=len(hexh) // 2,
             )
             return hmac.compare_digest(dk.hex(), hexh)
-        except Exception:
+        except (ValueError, IndexError):
             return False
     h = hashlib.sha256(((legacy_salt or "") + password).encode("utf-8")).hexdigest()
     return hmac.compare_digest(h, stored)
@@ -345,7 +345,7 @@ def _sync_catalog_from_seed(con: sqlite3.Connection) -> None:
         seed_ro = sqlite3.connect(f"file:{SEED_DB}?mode=ro", uri=True)
         row = seed_ro.execute("SELECT value FROM settings WHERE key='catalog_version'").fetchone()
         seed_ro.close()
-    except Exception:
+    except sqlite3.Error:
         return
     seed_ver = int(row[0]) if row and str(row[0]).isdigit() else 1
     cur = con.execute("SELECT value FROM settings WHERE key='catalog_version'").fetchone()
@@ -513,7 +513,7 @@ def _audit_fallback(username, action, detail, err) -> None:
             os.chmod(p, 0o600)
         except OSError:
             pass
-    except Exception:
+    except OSError:
         pass
 
 
@@ -539,7 +539,7 @@ def log_audit(con: sqlite3.Connection, username: str, action: str, detail: str =
             (ts, username, action, detail, chain),
         )
         con.commit()
-    except Exception as e:
+    except sqlite3.Error as e:
         _audit_fallback(username, action, detail, e)
 
 
@@ -552,7 +552,7 @@ def verify_audit_chain(con: sqlite3.Connection):
         rows = con.execute(
             "SELECT id, at, username, action, detail, hash FROM audit_log ORDER BY id"
         ).fetchall()
-    except Exception:
+    except sqlite3.Error:
         return True, None
     for row in rows:
         if row["hash"] is None:
@@ -620,12 +620,12 @@ def backup_db(reason: str = "auto", keep: int = 14) -> Path | None:
         sc.close()
         dc.close()
         os.chmod(dest, 0o600)
-    except Exception:
+    except (sqlite3.Error, OSError):
         return None
     try:
         for old in sorted(bdir.glob("labdesk-*.sqlite"))[:-keep]:
             old.unlink()
-    except Exception:
+    except OSError:
         pass
     return dest
 
@@ -671,7 +671,7 @@ def restore_db(path: str) -> bool:
                 p.unlink()
         os.chmod(cur, 0o600)
         return True
-    except Exception:
+    except OSError:
         return False
 
 
@@ -711,7 +711,7 @@ def verify_user(con: sqlite3.Connection, username: str, password: str):
                 "UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id=?", (row["id"],)
             )
             con.commit()
-        except Exception:
+        except (ValueError, sqlite3.Error):
             pass
         return row
     # wrong password → count the failure, then lock with an exponentially
@@ -728,7 +728,7 @@ def verify_user(con: sqlite3.Connection, username: str, password: str):
             "UPDATE users SET failed_attempts=?, locked_until=? WHERE id=?", (fa, lock, row["id"])
         )
         con.commit()
-    except Exception:
+    except sqlite3.Error:
         pass
     return None
 
@@ -873,7 +873,7 @@ def save_test_parameters(con: sqlite3.Connection, test_id: int, rows) -> None:
         con.commit()
     except ParameterInUseError:
         raise
-    except Exception:
+    except sqlite3.Error:
         try:
             con.rollback()
         except Exception:
