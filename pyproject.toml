@@ -1,0 +1,202 @@
+[project]
+name = "labdesk"
+# Canonical version (uv_build has no dynamic-version support). Keep the fallback
+# literal in src/labdesk/__init__.py in sync with this — see scripts/check_version.py.
+version = "1.1.8"
+description = "LabDesk — laboratory management system"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "jeepney>=0.9.0",
+    "pyside6>=6.7,<6.12",
+    "sqlcipher3-binary>=0.6.0",
+]
+
+[project.gui-scripts]
+labdesk = "labdesk.app:run_cli"
+
+[build-system]
+requires = ["uv_build>=0.11.18,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "bandit>=1.9.4",
+    "import-linter>=2.11",
+    "mutmut>=3.6.0",
+    "mypy>=2.1.0",
+    "nuitka>=4.1.2",
+    "patchelf>=0.17.2.4",
+    "pip-audit>=2.10.1",
+    "pre-commit>=4.6.0",
+    "pytest>=8.0",
+    "pytest-cov>=7.1.0",
+    "pytest-qt>=4.5.0",
+    "ruff>=0.15.17",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Coverage is measured (branch) but NOT gated in Wave 0 — observability only.
+# The fail-under gate (80 global / 95 critical) lands in Wave 1.
+addopts = "-q --cov=labdesk --cov-branch --cov-report=term-missing --cov-report=xml"
+
+# --------------------------------------------------------------------------
+# A+ uplift tooling (Wave 0 — "make quality observable"). These configs define
+# the measurement baseline; CI runs them in REPORT mode (non-blocking) until the
+# Wave 8 ratchet flips each gate to hard-fail. See audit/uplift/A-PLUS-MASTERPLAN.md
+# and DEBT.md for the tracked baseline (794 ruff findings at time of writing).
+# --------------------------------------------------------------------------
+
+[tool.ruff]
+# src layout: let ruff resolve first-party imports for isort (I rules).
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Expanded ruleset per the maintainability A+ plan. NOT all green today — these
+# surface the debt register; do not bulk-autofix without review.
+select = [
+    "E", "F", "W",      # pycodestyle + pyflakes
+    "I",                # isort
+    "C90",              # mccabe complexity
+    "N",                # pep8-naming
+    "UP",               # pyupgrade
+    "B",                # bugbear
+    "SIM",              # simplify
+    "PLR", "PLW", "PLC",# pylint refactor/warning/convention
+    "RUF",              # ruff-specific
+    "ARG",              # unused arguments
+    "PERF",             # perflint
+    "C4",               # comprehensions
+]
+ignore = [
+    # `key in row.keys()` is REQUIRED for sqlite3.Row — plain `key in row` checks
+    # the row's VALUES, not its column names. SIM118's "simplification" silently
+    # breaks every such membership test (audit chain, lockout, optional columns),
+    # and the codebase uses sqlite3.Row pervasively. So SIM118 is a false positive
+    # here and is ignored project-wide.
+    "SIM118",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+# Vendored RFC 8032 Ed25519 reference implementation — preserve upstream naming,
+# magic constants and line length verbatim for auditability against the spec.
+"src/labdesk/licensing/_ed25519.py" = ["N", "PLR2004", "E501", "PLW", "RUF"]
+# Qt overrides use camelCase method/arg names (sizeHint, mousePressEvent, ...).
+"src/labdesk/presentation/widgets.py" = ["N802", "N803"]
+# Tests legitimately use literal expected values and unused fixtures.
+"tests/**" = ["PLR2004", "ARG", "PLR0913"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["src/labdesk"]
+warn_unused_ignores = true
+pretty = true
+
+# Third-party packages that ship no type stubs — don't fail on missing imports.
+[[tool.mypy.overrides]]
+module = ["PySide6.*", "jeepney.*", "sqlcipher3.*", "sqlcipher3"]
+ignore_missing_imports = true
+
+# Vendored RFC 8032 Ed25519 reference implementation — kept byte-identical to
+# upstream for auditability, so it is not type-policed (mirrors the ruff ignore).
+[[tool.mypy.overrides]]
+module = ["labdesk.licensing._ed25519"]
+ignore_errors = true
+
+# Presentation/composition-root/edge are NOT strict yet — they get typed and
+# folded into strict during Waves 6/8. Keep them measured but non-strict for now.
+[[tool.mypy.overrides]]
+module = ["labdesk.presentation.*", "labdesk.app", "labdesk.whatsapp"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+check_untyped_defs = false
+warn_return_any = false
+
+[tool.coverage.run]
+branch = true
+source = ["labdesk"]
+omit = ["*/assets/*", "*/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+# fail_under intentionally absent in Wave 0; added in Wave 1.
+
+# Import-Linter: enforces the Clean-Architecture dependency rule. Wave 3 renamed
+# services→application and ui→presentation (the two layers whose generic names
+# clarify their role); the lower layers keep their descriptive names (db = the
+# infrastructure/persistence layer, render/report = output adapters, licensing =
+# the node-lock/security layer). The DIRECTION is what these contracts enforce.
+[tool.importlinter]
+root_package = "labdesk"
+
+[[tool.importlinter.contracts]]
+name = "Lower layers must not import presentation or the composition root"
+type = "forbidden"
+source_modules = [
+    "labdesk.db",
+    "labdesk.render",
+    "labdesk.report",
+    "labdesk.application",
+    "labdesk.licensing",
+]
+forbidden_modules = ["labdesk.presentation", "labdesk.app"]
+
+# Licensing's only current labdesk dependency is db.paths.data_dir (a low-level
+# path helper, imported lazily in licensing/__init__.py:89,95). That coupling is
+# tracked in DEBT.md for inversion in a later wave. Until then the contract pins
+# the rule that matters: licensing must never reach UP into the upper layers.
+[[tool.importlinter.contracts]]
+name = "Licensing must not depend on application/report/render/presentation/app"
+type = "forbidden"
+source_modules = ["labdesk.licensing"]
+forbidden_modules = [
+    "labdesk.application",
+    "labdesk.report",
+    "labdesk.render",
+    "labdesk.presentation",
+    "labdesk.app",
+    "labdesk.whatsapp",
+]
+
+[[tool.importlinter.contracts]]
+name = "Database (infrastructure) is the lowest layer"
+type = "forbidden"
+source_modules = ["labdesk.db"]
+forbidden_modules = [
+    "labdesk.application",
+    "labdesk.report",
+    "labdesk.render",
+    "labdesk.presentation",
+    "labdesk.app",
+    "labdesk.whatsapp",
+]
+
+# Mutation testing (Wave 1 stretch): prove the trust-core tests actually KILL
+# mutants, not just execute lines. Scoped to the 4 critical modules; runs only
+# their fast tests with the coverage plugin off. Invoke with QT_QPA_PLATFORM=
+# offscreen so the Qt-touching imports work headlessly.
+[tool.mutmut]
+source_paths = [
+    "src/labdesk/db/patient_id.py",
+    "src/labdesk/application/billing.py",
+    "src/labdesk/report/verify.py",
+    "src/labdesk/db/audit.py",
+]
+pytest_add_cli_args_test_selection = [
+    "tests/test_patient_id.py",
+    "tests/test_billing.py",
+    "tests/test_report_verify.py",
+    "tests/test_audit_chain.py",
+    "tests/test_audit_anchor.py",
+]
+pytest_add_cli_args = ["-o", "addopts=", "-x", "-q", "--no-header", "-p", "no:cacheprovider"]
+# copy the whole package (sibling modules + seed.sqlite/schema.sql) so the
+# mutated module's cross-imports + DB fixtures work inside the mutants/ copy
+also_copy = ["src/labdesk"]

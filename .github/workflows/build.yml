@@ -1,0 +1,101 @@
+name: Build release (main only)
+
+# Builds the PORTABLE LabDesk tarball — but ONLY when code lands on `main`
+# (i.e. when you merge dev → main). It deliberately does NOT run on `dev` or on
+# pull requests; day-to-day pushes just run the test/quality CI (ci.yml).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {} # also lets you trigger a build by hand from the Actions tab
+
+permissions:
+  contents: write # needed to attach the tarball to a GitHub Release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cache the ~250 MB of Qt/CPython/uv downloads the container fetches, so
+      # repeat builds are much faster (first build on a fresh key is slow).
+      - name: Cache build downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/labdesk-build
+          key: labdesk-build-${{ hashFiles('uv.lock') }}
+          restore-keys: labdesk-build-
+
+      - name: Read app version
+        id: ver
+        run: |
+          v=$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      # Compiles inside the manylinux_2_34 image (glibc 2.34 floor → portable) and
+      # stages dist/labdesk-<ver>.tar.gz + .sha256. Docker is preinstalled on the
+      # GitHub runner. This step takes ~15-25 min (Nuitka compile).
+      - name: Build portable distributable (manylinux + Nuitka)
+        run: bash scripts/build_release.sh
+
+      - name: Show build output
+        run: ls -la dist/
+
+      # Always available: download from the Actions run page (kept 90 days).
+      - name: Upload tarball as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: labdesk-${{ steps.ver.outputs.version }}-portable
+          path: |
+            dist/labdesk-*.tar.gz
+            dist/labdesk-*.sha256
+          if-no-files-found: error
+
+      # Has this exact version already been released? (i.e. did you bump `version`
+      # in pyproject.toml since the last release?) Drives the versioned release below.
+      - name: Check if v<version> is already released
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${{ steps.ver.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "v${{ steps.ver.outputs.version }} already released — only refreshing 'latest'."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "New version v${{ steps.ver.outputs.version }} — will cut a versioned release."
+          fi
+
+      # PROPER VERSIONED RELEASE — created only when the version is NEW (you bumped
+      # pyproject.toml). Tags the commit v<version> and publishes a real (non-pre)
+      # release with the tarball. Re-merges of the same version won't duplicate it.
+      - name: Publish versioned release (only on a new version)
+        if: steps.rel.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: LabDesk v${{ steps.ver.outputs.version }}
+          body: |
+            Portable LabDesk **v${{ steps.ver.outputs.version }}** (commit ${{ github.sha }}).
+            Download the `.tar.gz`, verify it against the `.sha256`, then run its
+            `install.sh` on each lab PC.
+          files: |
+            dist/labdesk-*.tar.gz
+            dist/labdesk-*.sha256
+
+      # Permanent "always the newest" link: a rolling "latest" pre-release on the
+      # Releases page, refreshed on every merge to main with the newest tarball.
+      - name: Refresh the "latest" pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest build (main)
+          body: |
+            Automated portable build of LabDesk v${{ steps.ver.outputs.version }}
+            from `main` (commit ${{ github.sha }}). For pinned versions see the
+            `v*` releases. Download the `.tar.gz`, verify against `.sha256`, run
+            its `install.sh`.
+          prerelease: true
+          files: |
+            dist/labdesk-*.tar.gz
+            dist/labdesk-*.sha256

@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync (frozen — exact locked deps + dev group)
+        run: uv sync --frozen --dev
+
+      - name: Qt runtime libs (needed for the offscreen platform in GUI tests)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3
+
+      - name: Run test suite (unit + GUI, offscreen Qt) + branch coverage
+        env:
+          QT_QPA_PLATFORM: offscreen
+        # Coverage is collected (branch) via pyproject addopts. No fail-under gate
+        # yet — that lands in Wave 1. This step still fails on any test failure.
+        run: uv run pytest
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: ignore
+
+      # Wave 1 coverage gates (read the .coverage produced by the pytest step above).
+      - name: G5 Coverage — trust-core critical set >=95% branch (BLOCKING)
+        run: >
+          uv run coverage report
+          --include="*/db/audit.py,*/report/verify.py,*/application/billing.py,*/db/patient_id.py"
+          --fail-under=95
+
+      - name: G5 Coverage — write-services (authz boundary) >=90% branch (BLOCKING)
+        run: >
+          uv run coverage report
+          --include="*/application/receipts.py,*/application/results.py,*/application/users.py,*/application/money.py,*/application/billing.py"
+          --fail-under=90
+
+      - name: G5 Coverage — global floor (ratchet; raised each wave toward 80)
+        run: uv run coverage report --fail-under=33
+
+      - name: Headless self-test (offscreen Qt, builds every page)
+        env:
+          QT_QPA_PLATFORM: offscreen
+          LABDESK_SELFTEST: "1"
+          LABDESK_DB_KEY: ci-selftest-key
+          LABDESK_DATA_DIR: ${{ runner.temp }}/labdesk-selftest
+        run: uv run python -m labdesk
+
+  # ---------------------------------------------------------------------------
+  # Quality gates (A+ uplift, Wave 0). GREEN gates block; debt-carrying gates run
+  # in REPORT mode (continue-on-error) until the Wave 8 ratchet flips them to
+  # hard-fail. No Qt runtime needed — all static analysis. Baselines in DEBT.md.
+  # ---------------------------------------------------------------------------
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync (frozen — exact locked deps + dev group)
+        run: uv sync --frozen --dev
+
+      # --- GREEN gates: these MUST stay passing (a regression fails the build) ---
+
+      - name: G4 Architecture — import-linter contracts (BLOCKING)
+        run: uv run lint-imports
+
+      - name: G10 Dependency CVEs — pip-audit (BLOCKING)
+        # Audit the locked environment; the local unpublished project is skipped.
+        run: uv run pip-audit
+
+      - name: G9 SAST — bandit, High severity (BLOCKING)
+        run: uv run bandit -r src/labdesk --severity-level high -q
+
+      # --- REPORT-mode gates: tracked debt, non-blocking until Wave 8 ratchet ---
+
+      - name: G1 Lint — ruff (report only; baseline 794, see DEBT.md)
+        continue-on-error: true
+        run: uv run ruff check src tests
+
+      - name: G2 Format — ruff format --check (BLOCKING; repo is fully formatted)
+        run: uv run ruff format --check src tests
+
+      - name: G3 Types — mypy --strict, scoped (report only; baseline 588)
+        continue-on-error: true
+        run: uv run mypy
+
+      - name: G3b Types — mypy --strict on the security-critical surface (BLOCKING)
+        run: >
+          uv run mypy src/labdesk/application/ src/labdesk/licensing/
+          src/labdesk/db/audit.py src/labdesk/db/crypto.py src/labdesk/db/patient_id.py
+          src/labdesk/report/verify.py src/labdesk/roles.py
+
+      - name: G9b SAST — bandit, full Medium+Low inventory (report only)
+        continue-on-error: true
+        run: uv run bandit -r src/labdesk -ll -q

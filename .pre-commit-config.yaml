@@ -1,0 +1,33 @@
+# LabDesk pre-commit hooks (A+ uplift, Wave 0).
+#
+# OPT-IN: activate locally with `uv run pre-commit install`. Mirrors the CI
+# quality jobs so issues are caught before push. ruff/mypy still carry baseline
+# debt (see DEBT.md) — until the Wave 8 ratchet, run hooks on changed files only
+# (`pre-commit run` runs on staged files by default), so you fix what you touch
+# rather than the whole backlog at once.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.17
+    hooks:
+      # Lint with safe autofix, then format. Order matters: fix import/lint first.
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v2.1.0
+    hooks:
+      - id: mypy
+        # Use the project config (scoped strict); only run on first-party code.
+        args: [--config-file=pyproject.toml]
+        files: ^src/labdesk/
+        additional_dependencies: []
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
