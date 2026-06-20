@@ -82,20 +82,3 @@ jobs:
           files: |
             dist/labdesk-*.tar.gz
             dist/labdesk-*.sha256
-
-      # Permanent "always the newest" link: a rolling "latest" pre-release on the
-      # Releases page, refreshed on every merge to main with the newest tarball.
-      - name: Refresh the "latest" pre-release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: Latest build (main)
-          body: |
-            Automated portable build of LabDesk v${{ steps.ver.outputs.version }}
-            from `main` (commit ${{ github.sha }}). For pinned versions see the
-            `v*` releases. Download the `.tar.gz`, verify against `.sha256`, run
-            its `install.sh`.
-          prerelease: true
-          files: |
-            dist/labdesk-*.tar.gz
-            dist/labdesk-*.sha256
