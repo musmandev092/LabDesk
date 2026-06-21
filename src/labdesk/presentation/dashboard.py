@@ -76,8 +76,10 @@ class DashboardPage(QWidget):
         n_rec = c.execute(
             f"SELECT COUNT(*) FROM receipts WHERE {db.NOT_VOIDED} AND {db.RECEIVED_TODAY}"
         ).fetchone()[0]
+        # income = money actually earned, capped at the bill (MIN(paid, net_amount)) —
+        # an over-payment is change returned to the patient, not revenue.
         income = c.execute(
-            f"SELECT COALESCE(SUM(paid),0) FROM receipts "
+            f"SELECT COALESCE(SUM(MIN(paid, net_amount)),0) FROM receipts "
             f"WHERE {db.NOT_VOIDED} AND {db.RECEIVED_TODAY}"
         ).fetchone()[0]
         pending = c.execute(

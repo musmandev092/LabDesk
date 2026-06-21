@@ -88,8 +88,11 @@ class ReceiptsMutationsMixin:
         if dlg.exec() != QDialog.Accepted:
             return
         v = dlg.values()
-        old_paid = rec["paid"] or 0.0
-        delta = v["paid"] - old_paid
+        # delta of money actually collected (capped at each bill's net), not raw paid —
+        # an over-payment is change handed back, so it must not move the ledger.
+        old_collected = min(rec["paid"] or 0.0, rec["net_amount"] or 0.0)
+        new_collected = min(v["paid"], v["net_amount"])
+        delta = new_collected - old_collected
         try:
             # remove deleted line items — guarded to never drop one that has
             # results/cultures (defence in depth; the dialog already blocks it)

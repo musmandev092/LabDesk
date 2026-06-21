@@ -23,7 +23,15 @@ from PySide6.QtWidgets import (
 )
 
 from .. import db
-from .widgets import field_label, money, num_item, page_header, selected_id, stat_card
+from .widgets import (
+    field_label,
+    money,
+    num_item,
+    page_header,
+    selected_id,
+    setup_date_edit,
+    stat_card,
+)
 
 
 class AccountsPage(QWidget):
@@ -51,10 +59,10 @@ class AccountsPage(QWidget):
         lay = QVBoxLayout(w)
         rng = QHBoxLayout()
         self.from_date = QDateEdit(QDate.currentDate().addDays(-30))
-        self.from_date.setCalendarPopup(True)
+        setup_date_edit(self.from_date)
         self.from_date.setDisplayFormat("dd MMM yyyy")
         self.to_date = QDateEdit(QDate.currentDate())
-        self.to_date.setCalendarPopup(True)
+        setup_date_edit(self.to_date)
         self.to_date.setDisplayFormat("dd MMM yyyy")
         go = QPushButton("Apply")
         go.clicked.connect(self.refresh_summary)
@@ -118,8 +126,10 @@ class AccountsPage(QWidget):
         cur = db.currency(c)
         f = self.from_date.date().toString("yyyy-MM-dd")
         t = self.to_date.date().toString("yyyy-MM-dd")
+        # income = earned revenue, capped at the bill (MIN(paid, net_amount)); an
+        # over-payment is change handed back, not income.
         income = c.execute(
-            "SELECT COALESCE(SUM(paid),0) FROM receipts "
+            "SELECT COALESCE(SUM(MIN(paid, net_amount)),0) FROM receipts "
             f"WHERE {db.NOT_VOIDED} AND date(received_at) BETWEEN ? AND ?",
             (f, t),
         ).fetchone()[0]
@@ -142,7 +152,7 @@ class AccountsPage(QWidget):
         # cash reconciliation breakdown by payment method
         methods = c.execute(
             "SELECT COALESCE(NULLIF(TRIM(payment_method),''),'Cash') AS m, "
-            "COUNT(*) AS n, COALESCE(SUM(paid),0) AS total FROM receipts "
+            "COUNT(*) AS n, COALESCE(SUM(MIN(paid, net_amount)),0) AS total FROM receipts "
             f"WHERE {db.NOT_VOIDED} AND paid>0 AND date(received_at) BETWEEN ? AND ? "
             "GROUP BY m ORDER BY total DESC",
             (f, t),
@@ -173,7 +183,7 @@ class AccountsPage(QWidget):
         w = QWidget()
         lay = QVBoxLayout(w)
         self.exp_date = QDateEdit(QDate.currentDate())
-        self.exp_date.setCalendarPopup(True)
+        setup_date_edit(self.exp_date)
         self.exp_date.setDisplayFormat("dd MMM yyyy")
         self.exp_head = QLineEdit()
         self.exp_head.setPlaceholderText("e.g. Reagents, Salary")

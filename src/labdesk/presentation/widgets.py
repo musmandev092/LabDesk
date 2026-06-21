@@ -6,6 +6,8 @@ from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QApplication,
+    QCalendarWidget,
+    QDateEdit,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -17,6 +19,26 @@ from PySide6.QtWidgets import (
 )
 
 from .style import PRIMARY
+
+
+def setup_date_edit(d: QDateEdit) -> QDateEdit:
+    """Enable a themed calendar popup with readable 3-letter weekday names (Sun, Mon…
+    instead of the elided "S…", "T…") and no week-number column. Used by every date
+    picker so they look and behave the same app-wide."""
+    d.setCalendarPopup(True)
+    cal = d.calendarWidget()
+    if cal is not None:
+        cal.setHorizontalHeaderFormat(
+            QCalendarWidget.HorizontalHeaderFormat.ShortDayNames
+        )
+        cal.setVerticalHeaderFormat(
+            QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader
+        )
+        cal.setGridVisible(False)
+        # wide enough that every 3-letter day fits — the widest ("Wed"/"Mon") would
+        # otherwise elide to "W…"/"M…" at the default popup width.
+        cal.setMinimumWidth(336)
+    return d
 
 
 class FlowLayout(QLayout):

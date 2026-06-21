@@ -204,12 +204,15 @@ def create_receipt(
                 "VALUES (?,?,?,?,CAST(ROUND(?*100) AS INTEGER))",
                 (rid, item["test_id"], item["name"], item["charge"], item["charge"]),
             )
-        if d.paid:
+        # record income = money actually earned (capped at the bill); over-payment is
+        # change returned, not revenue — keeps the ledger from over-stating income.
+        collected = min(d.paid, d.net)
+        if collected:
             con.execute(
                 "INSERT INTO ledger(kind,ref_id,detail,credit,credit_paisa,date) "
                 "VALUES ('income',?,?,?,CAST(ROUND(?*100) AS INTEGER),"
                 "date('now','localtime'))",
-                (rid, f"Receipt {lab_no} — {d.name}", d.paid, d.paid),
+                (rid, f"Receipt {lab_no} — {d.name}", collected, collected),
             )
         con.commit()
     except (sqlite3.Error, RuntimeError):
@@ -259,7 +262,8 @@ def void_receipt(
     """
     require(actor_role, "void_receipt")
     r = con.execute(
-        "SELECT lab_no, paid, voided FROM receipts WHERE id=?", (receipt_id,)
+        "SELECT lab_no, paid, net_amount, voided FROM receipts WHERE id=?",
+        (receipt_id,),
     ).fetchone()
     if r is None or r["voided"]:
         return  # unknown or already-voided — never reverse the ledger twice
@@ -268,11 +272,14 @@ def void_receipt(
         "voided_by=?, due=0, due_paisa=0 WHERE id=?",
         (reason, username, receipt_id),
     )
-    if r["paid"]:  # reversing ledger entry keeps ledger-based accounting balanced
+    # reverse exactly what was booked as income (collected = min(paid, net)), not the
+    # raw tendered amount — otherwise voiding an over-paid bill over-credits the reversal.
+    collected = min(r["paid"] or 0.0, r["net_amount"] or 0.0)
+    if collected:  # reversing ledger entry keeps ledger-based accounting balanced
         con.execute(
             "INSERT INTO ledger(kind,ref_id,detail,debit,debit_paisa,date) "
             "VALUES ('void',?,?,?,CAST(ROUND(?*100) AS INTEGER),date('now','localtime'))",
-            (receipt_id, f"Void {r['lab_no']} — {reason[:60]}", r["paid"], r["paid"]),
+            (receipt_id, f"Void {r['lab_no']} — {reason[:60]}", collected, collected),
         )
     con.commit()
     db.log_audit(

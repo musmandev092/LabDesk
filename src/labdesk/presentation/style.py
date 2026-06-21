@@ -177,6 +177,40 @@ QComboBox QAbstractItemView {{
     background: {p["input_bg"]}; border: 1px solid {p["border"]};
     selection-background-color: {p["primary_light"]}; selection-color: {p["text"]}; outline: none;
 }}
+
+/* Calendar popup (every QDateEdit) — themed to match the app instead of Qt's raw
+   black-on-green default. Covers the nav bar, the month menu, the year editor (the
+   bit that looked black-on-green), and the day grid. */
+QCalendarWidget QWidget#qt_calendar_navigationbar {{
+    background: {p["primary"]}; min-height: 32px;
+    border-top-left-radius: 8px; border-top-right-radius: 8px;
+}}
+QCalendarWidget QToolButton {{
+    color: white; background: transparent; font-weight: 700; font-size: 14px;
+    border: none; padding: 4px 12px; border-radius: 6px;
+}}
+QCalendarWidget QToolButton:hover {{ background: rgba(255,255,255,0.18); }}
+QCalendarWidget QToolButton:pressed {{ background: rgba(255,255,255,0.28); }}
+QCalendarWidget QToolButton::menu-indicator {{ image: none; width: 0; }}
+QCalendarWidget QMenu {{
+    background: {p["card"]}; border: 1px solid {p["border"]}; color: {p["text"]}; padding: 4px;
+}}
+QCalendarWidget QMenu::item {{ padding: 6px 22px; border-radius: 4px; }}
+QCalendarWidget QMenu::item:selected {{ background: {p["primary_light"]}; color: {p["text"]}; }}
+QCalendarWidget QSpinBox {{
+    background: white; color: {p["text"]}; border: 1px solid {p["border"]};
+    border-radius: 6px; padding: 2px 6px; min-width: 64px; font-weight: 700;
+    selection-background-color: {p["primary"]}; selection-color: white;
+}}
+QCalendarWidget QSpinBox::up-button {{ subcontrol-position: top right; width: 16px; }}
+QCalendarWidget QSpinBox::down-button {{ subcontrol-position: bottom right; width: 16px; }}
+QCalendarWidget QWidget {{ alternate-background-color: {p["card"]}; }}
+QCalendarWidget QAbstractItemView {{
+    background: {p["card"]}; color: {p["text"]}; outline: none; font-size: 13px;
+    selection-background-color: {p["primary"]}; selection-color: white;
+}}
+QCalendarWidget QAbstractItemView:enabled {{ color: {p["text"]}; }}
+QCalendarWidget QAbstractItemView:disabled {{ color: {p["muted"]}; }}
 /* hide the broken/clipped spin steppers — values are typed */
 QSpinBox::up-button, QSpinBox::down-button,
 QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{ width: 0; height: 0; border: none; }}

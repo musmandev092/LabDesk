@@ -54,8 +54,8 @@ import contextlib
 NAV = [
     ("Dashboard", DashboardPage),
     ("Reception / Billing", ReceptionPage),
-    ("Receipts / Reports", ReceiptsPage),
     ("Worklist / Results", WorklistPage),
+    ("Receipts / Reports", ReceiptsPage),
     ("Test Catalog", CatalogPage),
     ("Doctors", DoctorsPage),
     ("Microbiology", MicrobiologyPage),

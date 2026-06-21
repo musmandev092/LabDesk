@@ -70,16 +70,18 @@ MAX_LENGTHS: dict[str, int] = {
     "lab_no_prefix": 8,
     "phc_reg_no": 25,
     "lab_reg_no": 25,
-    # report footer / signatories
-    "report_footer": 80,
-    "dept_band": 40,
+    # report footer / signatories — the department band lists every section the lab
+    # reports (e.g. "HEMATOLOGY | CHEMICAL PATHOLOGY | HORMONES | MOLECULAR BIOLOGY |
+    # HISTOPATHOLOGY", ~77 chars), so give the footer fields room for the full text.
+    "report_footer": 140,
+    "dept_band": 140,
     "signatory_1_name": 35,
     "signatory_1_title": 35,
     "signatory_2_name": 35,
     "signatory_2_title": 35,
     # receipt footer
-    "receipt_remarks": 60,
-    "receipt_footer_note": 80,
+    "receipt_remarks": 80,
+    "receipt_footer_note": 140,
     # whatsapp + misc (generous — URLs/tokens/captions can be long, but still bounded)
     "promo_until": 10,
     "whatsapp_url": 200,

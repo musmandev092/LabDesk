@@ -32,6 +32,7 @@ from .widgets import (
     num_item,
     page_header,
     selected_id,
+    setup_date_edit,
     status_badge,
     toast_info,
     toast_warn,
@@ -213,7 +214,7 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
         """A calendar-popup date editor, defaulting to today, disabled until the
         'By date' filter is switched on."""
         d = QDateEdit()
-        d.setCalendarPopup(True)
+        setup_date_edit(d)
         d.setDisplayFormat("yyyy-MM-dd")
         d.setDate(QDate.currentDate())
         d.setEnabled(False)
