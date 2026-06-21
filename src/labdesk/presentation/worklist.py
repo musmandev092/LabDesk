@@ -64,7 +64,9 @@ def _qual_options(ref: str) -> list[str]:
 
 
 def _bloodbank_options(name: str) -> list[str]:
-    """Result options for a blood-bank parameter, inferred from its name."""
+    """Result options for a blood-bank parameter, inferred from its name. An empty
+    list means "no fixed vocabulary" → the entry should be a free-text box (e.g.
+    Blood Bag No, donor name), not a constrained dropdown."""
     n = (name or "").lower()
     if "group" in n and "rh" not in n:
         return ["", "A", "B", "AB", "O"]
@@ -72,7 +74,9 @@ def _bloodbank_options(name: str) -> list[str]:
         return ["", "Positive", "Negative"]
     if "cross" in n or "compat" in n:
         return ["", "Compatible", "Not Compatible"]
-    return ["", "Positive", "Negative"]
+    if "coomb" in n or "antibod" in n or "screen" in n:
+        return ["", "Positive", "Negative"]
+    return []  # bag numbers, names, free notes → plain text field
 
 
 def _widget_text(w) -> str:
@@ -90,6 +94,48 @@ def _widget_set_readonly(w, ro: bool) -> None:
         w.setEnabled(not ro)
     else:
         w.setReadOnly(ro)
+
+
+class _GrowingText(QPlainTextEdit):
+    """A multi-line editor that grows to fit its content (so long findings /
+    impressions aren't clipped on entry) up to ``max_h``, then scrolls.
+
+    Height is driven by the document layout's documentSizeChanged signal, whose
+    reported height is the wrapped line count at the editor's *current* width —
+    reliable across resizes, unlike reading viewport().width() before layout.
+    """
+
+    def __init__(self, min_h: int = 78, max_h: int = 240) -> None:
+        super().__init__()
+        self._min_h = min_h
+        self._max_h = max_h
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setFixedHeight(min_h)
+        self.textChanged.connect(self._fit)
+
+    def _fit(self, *args) -> None:
+        fm = self.fontMetrics()
+        width = self.viewport().width()
+        if width < 80:  # not laid out yet → assume the entry column width
+            width = 560
+        avail = max(1, width - 8)
+        text = self.toPlainText() or self.placeholderText()
+        lines = 0
+        for para in (text or "").split("\n"):
+            adv = fm.horizontalAdvance(para)
+            lines += max(1, (int(adv) + avail - 1) // avail)  # ceil division
+        h = (
+            lines * fm.lineSpacing()
+            + 2 * self.document().documentMargin()
+            + 2 * self.frameWidth()
+            + 6
+        )
+        self.setFixedHeight(int(max(self._min_h, min(self._max_h, h))))
+
+    def resizeEvent(self, e) -> None:  # re-fit when the column width changes
+        super().resizeEvent(e)
+        self._fit()
 
 
 class WorklistPage(QWidget):
@@ -396,10 +442,9 @@ class WorklistPage(QWidget):
         grid.addWidget(cb, 0, 0, Qt.AlignTop if multiline else Qt.AlignVCenter)
         grid.addWidget(QLabel("Findings" if multiline else "Result"), 0, 1, Qt.AlignTop)
         if multiline:
-            ed = QPlainTextEdit()
+            ed = _GrowingText(min_h=140, max_h=440)
             ed.setPlainText(existing.get(None, "") or "")
             ed.setPlaceholderText("Type the report (gross, microscopy, etc.)")
-            ed.setMinimumHeight(140)
         else:
             ed = QLineEdit()
             ed.setText(existing.get(None, "") or "")
@@ -479,12 +524,11 @@ class WorklistPage(QWidget):
             cb.setChecked(not (had and hidden.get(p["id"])))
             grid.addWidget(cb, row_i, 0, Qt.AlignTop)
             grid.addWidget(QLabel(name), row_i, 1, Qt.AlignTop)
-            box = QPlainTextEdit()
+            box = _GrowingText(min_h=60, max_h=260)
             if p["id"] in existing:
                 box.setPlainText(existing.get(p["id"]) or "")
             else:  # first entry → start from the normal template
                 box.setPlainText(resolve_ref(p, sex) or "")
-            box.setFixedHeight(52)
             grid.addWidget(box, row_i, 2)
             self._editors[(item["id"], p["id"])] = box
             self._show[(item["id"], p["id"])] = cb
@@ -551,13 +595,19 @@ class WorklistPage(QWidget):
             cb.setChecked(not (had and hidden.get(p["id"])))
             grid.addWidget(cb, row_i, 0, Qt.AlignCenter)
             grid.addWidget(QLabel(name), row_i, 1)
-            combo = QComboBox()
-            combo.setEditable(True)
-            combo.addItems(_bloodbank_options(name))
-            combo.setMaximumWidth(200)
-            combo.setCurrentText(existing.get(p["id"], "") or "")
-            grid.addWidget(combo, row_i, 2)
-            self._editors[(item["id"], p["id"])] = combo
+            opts = _bloodbank_options(name)
+            if opts:  # known result vocabulary → editable dropdown
+                editor = QComboBox()
+                editor.setEditable(True)
+                editor.addItems(opts)
+                editor.setMaximumWidth(200)
+                editor.setCurrentText(existing.get(p["id"], "") or "")
+            else:  # bag number, donor name, free note → plain text field
+                editor = QLineEdit()
+                editor.setMaximumWidth(240)
+                editor.setText(existing.get(p["id"], "") or "")
+            grid.addWidget(editor, row_i, 2)
+            self._editors[(item["id"], p["id"])] = editor
             self._show[(item["id"], p["id"])] = cb
             row_i += 1
 
@@ -634,12 +684,11 @@ class WorklistPage(QWidget):
                 else "Interpretation"
             )
             existing_con = (item["conclusion"] if "conclusion" in rk else "") or ""
-            con_box = QPlainTextEdit()
+            con_box = _GrowingText(min_h=72, max_h=220)
             con_box.setPlainText(existing_con)
             con_box.setPlaceholderText(
                 f"{label} (optional) — printed as a highlighted block on the report"
             )
-            con_box.setFixedHeight(72)
             self._conclusion[item["id"]] = con_box
             hl.addWidget(muted(label))
             hl.addWidget(con_box)

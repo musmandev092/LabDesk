@@ -18,6 +18,60 @@ def _esc(v) -> str:
     return html.escape(str(v if v is not None else ""))
 
 
+# Medical acronyms / tokens that must stay uppercase in a report title. Plain
+# str.title() mangles them (MTB→Mtb, CSF→Csf, PCR→Pcr) and breaks possessives
+# (COOMB's→Coomb'S), so smart_title() title-cases everything else but preserves
+# these and never capitalises the letter after an apostrophe.
+_TITLE_ACRONYMS = {
+    "MTB", "PCR", "CSF", "HBV", "HCV", "HIV", "HDV", "HAV", "HEV", "HGV", "HBS",
+    "HBC", "HBE", "DNA", "RNA", "PUS", "PAP", "AFB", "QL", "QN", "CMV", "VDRL",
+    "RPR", "ANA", "ASOT", "ICT", "TPHA", "ELISA", "CFU", "ZN", "FNAC", "KUB",
+    "LFT", "RFT", "CBC", "ESR", "TLC", "DLC", "MCV", "MCH", "MCHC", "RDW", "PCV",
+    "HCT", "INR", "APTT", "FDP", "LDH", "CPK", "CKMB", "AST", "ALT", "SGOT",
+    "SGPT", "GGT", "ALP", "BUN", "PSA", "CEA", "AFP", "TSH", "FSH", "ACTH",
+    "DHEA", "SHBG", "PTH", "VMA", "HIAA", "TIBC", "HLA", "RBC", "WBC", "HCG",
+    "GTT", "GCT", "VLDL", "LDL", "HDL", "ESBL", "NAAT", "RH", "ABO", "CRP",
+    "TORCH", "HBA1C", "G6PD", "FFP", "CVP", "OGTT", "TFT", "PT", "RA", "LE", "MP",
+    "TT", "ECG", "EEG",
+}
+_TITLE_SMALL = {"for", "by", "of", "and", "the", "with", "in", "on", "to", "or", "as", "a", "an"}
+
+
+def _cap_word(w: str) -> str:
+    """Capitalise the first letter of each segment (split on non-alphabetic chars
+    such as '-' and '/'), lowercase the rest — so "Met-Haemoglobin", "Blood/Renal"
+    and "(Aids)" keep their internal capitals — but never capitalise after an
+    apostrophe, so possessives stay intact ("Coomb's", not "Coomb'S")."""
+    out, prev = [], ""
+    for ch in w:
+        start = ch.isalpha() and (prev == "" or (not prev.isalpha() and prev != "'"))
+        out.append(ch.upper() if start else ch.lower())
+        prev = ch
+    return "".join(out)
+
+
+def smart_title(text) -> str:
+    """Title-case a report heading while keeping medical acronyms uppercase and
+    possessives intact. Connective words (for/by/of…) stay lower-case unless first."""
+    s = (text or "").strip()
+    if not s:
+        return ""
+    out = []
+    for i, w in enumerate(s.split(" ")):
+        if not w:
+            continue
+        core = re.sub(r"[^A-Za-z0-9/]", "", w)
+        if re.fullmatch(r"(?i)Ig[GMAED]", core):  # immunoglobulin: IgG/IgM/IgA/IgE/IgD
+            out.append(w.replace(core, "Ig" + core[-1].upper()))
+        elif core.upper() in _TITLE_ACRONYMS:
+            out.append(w.upper())
+        elif i != 0 and w.lower().strip(",.:;()") in _TITLE_SMALL:
+            out.append(w.lower())
+        else:
+            out.append(_cap_word(w))
+    return " ".join(out)
+
+
 def _method_block(head) -> str:
     """The 'Method / Comments' footer for a test. One normalisation everywhere:
     collapse blank lines, then collapse runs of spaces (the two report variants

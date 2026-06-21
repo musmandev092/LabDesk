@@ -50,6 +50,7 @@ _DESC_HEAD = (
     "sonograph",
     "x-ray",
     "x ray",
+    "xray",
     "doppler",
     "histopath",
     "biopsy",

@@ -15,6 +15,7 @@ from .formatting import (
     _method_block,
     _remarks_block,
     _resolve_ref,
+    smart_title,
 )
 
 
@@ -217,9 +218,9 @@ def _report_section(con, item, sex, receipt) -> str:
     head = con.execute(
         "SELECT report_head, method_note FROM tests WHERE id=?", (item["test_id"],)
     ).fetchone()
-    title = (
+    title = smart_title(
         head["report_head"] if head and head["report_head"] else item["test_name"]
-    ).title()
+    )
     hist_labels, hist_maps = _history_for_item(con, item, receipt)
     ncols = 3 + len(hist_labels) + 1
 
@@ -273,9 +274,9 @@ def _culture_section(con, item) -> str:
     head = con.execute(
         "SELECT report_head, method_note FROM tests WHERE id=?", (item["test_id"],)
     ).fetchone()
-    title = (
+    title = smart_title(
         head["report_head"] if head and head["report_head"] else item["test_name"]
-    ).title()
+    )
     cur = con.execute(
         "SELECT * FROM cultures WHERE receipt_item_id=? ORDER BY id DESC LIMIT 1",
         (item["id"],),

@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QImage
 
 from ..catalog_render import category_for_test
+from ..report.formatting import smart_title
 from ._shared import _patient_card, centered_logo_left, fit_lab_name_font
 from .constants import (
     A4_H_MM,
@@ -255,9 +256,9 @@ def _measure_test(d: Doc, con, item, sex: str | None, receipt) -> dict[str, obje
     head = con.execute(
         "SELECT report_head, method_note FROM tests WHERE id=?", (item["test_id"],)
     ).fetchone()
-    title = (
+    title = smart_title(
         head["report_head"] if head and head["report_head"] else item["test_name"]
-    ).title()
+    )
     hist_labels, hist_maps = R._history_for_item(con, item, receipt)
     cur_label = (receipt["received_at"] or "")[:10]
 
@@ -288,10 +289,14 @@ def _measure_test(d: Doc, con, item, sex: str | None, receipt) -> dict[str, obje
             continue
         ref_ls, flag = _ref_lines(res, sex)
         pid = res["parameter_id"] if "parameter_id" in res.keys() else None
+        unit = res["units"] or ""
         h_name = d.text_height(name, name_f, cw["test"] - 4)
-        h_ref = sum(d.text_height(ln, ref_f, cw["ref"] - 4) for ln in ref_ls)
+        # measure the ref as one wrapped block and include the unit cell, so a long
+        # reference range or unit grows the row instead of being clipped.
+        h_ref = d.text_height("\n".join(ref_ls), ref_f, cw["ref"] - 4)
+        h_unit = d.text_height(unit, ref_f, cw["unit"] - 2)
         h_val = d.text_height(val, cur_f, each - 2) if val else 0
-        rh = max(h_name, h_ref, h_val, 5.0) + 2.4
+        rh = max(h_name, h_ref, h_unit, h_val, 5.0) + 2.4
         rows.append(
             {
                 "kind": "row",
@@ -437,33 +442,32 @@ def _draw_test_table(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, lis
             wrap=True,
         )
         cx += cw["test"]
-        # ref (possibly 2 lines)
+        # ref — one wrapped block (wraps long ranges instead of clipping them)
         d.rect(cx, y, cw["ref"], rh, BORDER, 1)
-        nlines = len(row["ref_lines"])
-        lh = rh / max(nlines, 1)
-        for k, line in enumerate(row["ref_lines"]):
-            d.text(
-                cx + 2,
-                y + k * lh,
-                cw["ref"] - 4,
-                lh,
-                line,
-                ref_f,
-                MUTED,
-                Qt.AlignHCenter | Qt.AlignVCenter,
-            )
+        d.text(
+            cx + 2,
+            y,
+            cw["ref"] - 4,
+            rh,
+            "\n".join(row["ref_lines"]),
+            ref_f,
+            MUTED,
+            Qt.AlignHCenter | Qt.AlignVCenter,
+            wrap=True,
+        )
         cx += cw["ref"]
-        # unit
+        # unit — wrap so long units (e.g. "Minutes / Seconds") are not clipped
         d.rect(cx, y, cw["unit"], rh, BORDER, 1)
         d.text(
-            cx,
+            cx + 1,
             y,
-            cw["unit"],
+            cw["unit"] - 2,
             rh,
             row["unit"],
             ref_f,
             MUTED,
             Qt.AlignHCenter | Qt.AlignVCenter,
+            wrap=True,
         )
         cx += cw["unit"]
         # history values + current
@@ -498,9 +502,9 @@ def _head_title(con, item) -> tuple:
     head = con.execute(
         "SELECT report_head, method_note FROM tests WHERE id=?", (item["test_id"],)
     ).fetchone()
-    title = (
+    title = smart_title(
         head["report_head"] if head and head["report_head"] else item["test_name"]
-    ).title()
+    )
     return head, title
 
 
@@ -1284,9 +1288,9 @@ def _draw_culture(d: Doc, con, item, x0: float, y: float) -> float:
     head = con.execute(
         "SELECT report_head, method_note FROM tests WHERE id=?", (item["test_id"],)
     ).fetchone()
-    title = (
+    title = smart_title(
         head["report_head"] if head and head["report_head"] else item["test_name"]
-    ).title()
+    )
     d.top_rounded(x0, y, d.content_w, 6.5, 4, TEAL)
     d.text(
         x0 + 4,
@@ -1324,28 +1328,33 @@ def _draw_culture(d: Doc, con, item, x0: float, y: float) -> float:
     ):
         if not val:
             continue
-        rh = 6.5
+        # Wrap long values (specimen / organism / remarks-style text) instead of
+        # clipping them at the right edge; grow the row to fit.
+        valw = d.content_w * 0.7 - 4
+        th = d.text_height(str(val), _font(8.6, bold=True), valw, wrap=True)
+        rh = max(6.5, th + 2.6)
         d.rect(x0, y, d.content_w * 0.3, rh, BORDER, 1)
         d.text(
             x0 + 2,
-            y,
+            y + 1,
             d.content_w * 0.3 - 4,
-            rh,
+            rh - 1,
             label,
             _font(8.6),
             INK,
-            Qt.AlignLeft | Qt.AlignVCenter,
+            Qt.AlignLeft | Qt.AlignTop,
         )
         d.rect(x0 + d.content_w * 0.3, y, d.content_w * 0.7, rh, BORDER, 1)
         d.text(
             x0 + d.content_w * 0.3 + 2,
-            y,
-            d.content_w * 0.7 - 4,
-            rh,
+            y + 1,
+            valw,
+            rh - 1,
             str(val),
             _font(8.6, bold=True),
             INK,
-            Qt.AlignLeft | Qt.AlignVCenter,
+            Qt.AlignLeft | Qt.AlignTop,
+            wrap=True,
         )
         y += rh
     sens = con.execute(
@@ -1379,29 +1388,49 @@ def _draw_culture(d: Doc, con, item, x0: float, y: float) -> float:
         )
         y += 7
         for s in sens:
-            rh = 6.5
             res = (s["result"] or "").upper()
+            ab = s["antibiotic"] or ""
+            abw = d.content_w * 0.5 - 4
+            th = d.text_height(ab, _font(8.6), abw, wrap=True)
+            rh = max(6.5, th + 2.6)
             d.rect(x0, y, d.content_w * 0.5, rh, BORDER, 1)
             d.text(
                 x0 + 2,
-                y,
-                d.content_w * 0.5 - 4,
-                rh,
-                s["antibiotic"] or "",
+                y + 1,
+                abw,
+                rh - 1,
+                ab,
                 _font(8.6),
                 INK,
-                Qt.AlignLeft | Qt.AlignVCenter,
+                Qt.AlignLeft | Qt.AlignTop,
+                wrap=True,
             )
             d.rect(x0 + d.content_w * 0.5, y, d.content_w * 0.5, rh, BORDER, 1)
             d.text(
                 x0 + d.content_w * 0.5 + 2,
-                y,
+                y + 1,
                 d.content_w * 0.5 - 4,
-                rh,
+                rh - 1,
                 f"{res} — {full.get(res, '')}",
                 _font(8.6, bold=True),
                 colour.get(res, INK),
-                Qt.AlignLeft | Qt.AlignVCenter,
+                Qt.AlignLeft | Qt.AlignTop,
             )
             y += rh
+    # Culture remarks (entered on the Microbiology screen) were never printed —
+    # render them as a wrapped block so technician notes reach the report.
+    if cur["remarks"]:
+        y += 3
+        d.text(
+            x0 + 2, y, d.content_w - 4, 5, "Remarks",
+            _font(8.6, bold=True), TEAL, Qt.AlignLeft | Qt.AlignTop,
+        )
+        y += 5
+        rw = d.content_w - 4
+        th = d.text_height(cur["remarks"], _font(8.4), rw, wrap=True)
+        d.text(
+            x0 + 2, y, rw, th + 1, cur["remarks"],
+            _font(8.4), INK, Qt.AlignLeft | Qt.AlignTop, wrap=True,
+        )
+        y += th + 2
     return y

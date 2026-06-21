@@ -313,7 +313,7 @@ def test_history_respects_show_history_setting(con):
 
 
 def test_entry_widgets_match_category(con, qtbot):
-    from PySide6.QtWidgets import QComboBox, QPlainTextEdit
+    from PySide6.QtWidgets import QComboBox, QLineEdit, QPlainTextEdit
 
     from labdesk.presentation.worklist import WorklistPage
 
@@ -333,10 +333,11 @@ def test_entry_widgets_match_category(con, qtbot):
             page.table.selectRow(r)
             break
 
-    kinds = {type(w).__name__ for w in page._editors.values()}
-    assert "QPlainTextEdit" in kinds  # descriptive (ultrasound) finding boxes
-    assert "QComboBox" in kinds  # qualitative (serology) result dropdowns
-    assert "QLineEdit" in kinds  # numeric (CBC) value boxes
+    widgets = list(page._editors.values())
+    # isinstance (not exact class name) so auto-growing QPlainTextEdit subclasses count
+    assert any(isinstance(w, QPlainTextEdit) for w in widgets)  # descriptive findings
+    assert any(isinstance(w, QComboBox) for w in widgets)  # qualitative dropdowns
+    assert any(isinstance(w, QLineEdit) for w in widgets)  # numeric value boxes
     # a descriptive organ box is pre-filled with its normal template text
     filled = [
         w.toPlainText() for w in page._editors.values() if isinstance(w, QPlainTextEdit)
