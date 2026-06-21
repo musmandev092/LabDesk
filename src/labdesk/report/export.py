@@ -66,7 +66,9 @@ def _make_printer(parent, title, printer_name):
     return printer if dlg.exec() else None
 
 
-def print_doc(con, receipt_id, kind, parent, title, printer_name="") -> None:
+def print_doc(
+    con, receipt_id, kind, parent, title, printer_name="", letterhead=True
+) -> None:
     """Render a document straight onto the chosen printer — vector output, no
     QtPdf round-trip and no patient-PII temp file. MUST run on the UI thread
     (QPrinter/QPainter are not thread-safe); native rendering is fast (~tens of
@@ -80,7 +82,7 @@ def print_doc(con, receipt_id, kind, parent, title, printer_name="") -> None:
     elif kind == "receipt":
         render.build_receipt(con, receipt_id, device=printer)
     else:
-        render.build_report(con, receipt_id, device=printer)
+        render.build_report(con, receipt_id, device=printer, letterhead=letterhead)
 
 
 def print_report(con, receipt_id: int, parent=None) -> None:

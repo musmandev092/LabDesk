@@ -1210,27 +1210,8 @@ _DRAW_BY_KIND = {
 }
 
 
-def build_report(
-    con, receipt_id: int, device=None, images: bool = False
-) -> bytes | list[QImage] | None:
-    from . import report as R
-
-    g = R._g(con)
-    r = con.execute("SELECT * FROM receipts WHERE id=?", (receipt_id,)).fetchone()
-    items = con.execute(
-        "SELECT * FROM receipt_items WHERE receipt_id=? ORDER BY id", (receipt_id,)
-    ).fetchall()
-    sex = r["sex"]
-    # verification code in the footer — only for a finalised report (results in)
-    code = (
-        R.verification_code(con, receipt_id)
-        if ("reported_at" in r.keys() and r["reported_at"])
-        else ""
-    )
-
-    d = Doc(margin_mm=(8, 8, 8, 8), device=device, images=images)
-    # Pre-measure: each item → list of "page chunks" (one test may span pages)
-    # First a dry layout to count pages.
+def _build_layouts(d: Doc, con, items, sex, r) -> list:
+    """Pre-measure each receipt item into a (kind, layout) pair ready for drawing."""
     layouts = []
     for it in items:
         cat = category_for_test(con, it["test_id"])
@@ -1244,6 +1225,120 @@ def build_report(
             layouts.append(("blood_bank", _measure_blood_bank(d, con, it, sex, r)))
         else:
             layouts.append(("numeric", _measure_test(d, con, it, sex, r)))
+    return layouts
+
+
+def _draw_letterfree_item(d: Doc, con, g, r, sex, kind, lay, top: float) -> float:
+    """Draw the patient card + one test's body with NO clinic letterhead and NO
+    footer — the content a lab prints onto its own pre-printed letterhead pad.
+    Returns the end y."""
+    from . import report as R
+
+    x0 = d.ml
+    ch = _patient_card(
+        d,
+        x0,
+        top,
+        R._patient_pairs(r),
+        card_pad=(2.4, 5),
+        gap=(1.6, 4),
+        l_pt=6.6,
+        v_pt=8.4,
+        radius=5,
+        border=BORDER,
+    )
+    y = top + ch + 4
+    if kind == "culture":
+        return _draw_culture(d, con, lay, x0, y)
+    draw = _DRAW_BY_KIND[kind]
+    y, remaining = draw(d, lay, x0, y)
+    while remaining:  # a long test spilling onto more pages (rare); keep no footer
+        d.new_page()
+        lay2 = dict(lay)
+        lay2["rows"] = remaining
+        y, remaining = draw(d, lay2, x0, d.mt)
+    return _draw_blocks_after_table(d, lay, x0, y)
+
+
+def _letterfree_height(con, g, r, sex, kind, lay) -> float | None:
+    """Height (mm) of a single-page letterhead-free item, or None if it spans more
+    than one page. Measured on a throwaway in-memory page so the real render can
+    vertically centre single-page content."""
+    tmp = Doc(margin_mm=(8, 8, 8, 8), images=True)
+    end = _draw_letterfree_item(tmp, con, g, r, sex, kind, lay, tmp.mt)
+    imgs = tmp.finish()  # commits the page(s); list length == page count
+    if isinstance(imgs, list) and len(imgs) == 1:
+        return max(0.0, end - tmp.mt)
+    return None
+
+
+def _build_report_letterfree(con, r, items, sex, g, device, images):
+    """Render the report with no clinic letterhead and no footer, content vertically
+    centred, so it can be printed onto the lab's own pre-printed letterhead paper."""
+    d = Doc(margin_mm=(8, 8, 8, 8), device=device, images=images)
+    layouts = _build_layouts(d, con, items, sex, r)
+    if not layouts:
+        from . import report as R
+
+        x0 = d.ml
+        ch = _patient_card(
+            d,
+            x0,
+            d.mt + 30,
+            R._patient_pairs(r),
+            card_pad=(2.4, 5),
+            gap=(1.6, 4),
+            l_pt=6.6,
+            v_pt=8.4,
+            radius=5,
+            border=BORDER,
+        )
+        d.text(
+            x0,
+            d.mt + 34 + ch,
+            d.content_w,
+            10,
+            "No tests on this receipt.",
+            _font(10),
+            MUTED,
+        )
+        return d.tobytes()
+    usable = A4_H_MM - d.mt - d.mb
+    page_no = 0
+    for kind, lay in layouts:
+        if page_no > 0:
+            d.new_page()
+        page_no += 1
+        h = _letterfree_height(con, g, r, sex, kind, lay)
+        top = d.mt + (usable - h) / 2.0 if (h and 0 < h < usable) else d.mt + 4
+        _draw_letterfree_item(d, con, g, r, sex, kind, lay, top)
+    return d.tobytes()
+
+
+def build_report(
+    con, receipt_id: int, device=None, images: bool = False, letterhead: bool = True
+) -> bytes | list[QImage] | None:
+    from . import report as R
+
+    g = R._g(con)
+    r = con.execute("SELECT * FROM receipts WHERE id=?", (receipt_id,)).fetchone()
+    items = con.execute(
+        "SELECT * FROM receipt_items WHERE receipt_id=? ORDER BY id", (receipt_id,)
+    ).fetchall()
+    sex = r["sex"]
+    # "Plain" copy for a pre-printed letterhead pad: no clinic header, no footer,
+    # content centred on the page (admin-only action on the Receipts page).
+    if not letterhead:
+        return _build_report_letterfree(con, r, items, sex, g, device, images)
+    # verification code in the footer — only for a finalised report (results in)
+    code = (
+        R.verification_code(con, receipt_id)
+        if ("reported_at" in r.keys() and r["reported_at"])
+        else ""
+    )
+
+    d = Doc(margin_mm=(8, 8, 8, 8), device=device, images=images)
+    layouts = _build_layouts(d, con, items, sex, r)
     total_pages = max(1, len(layouts))  # one test per page (overflow adds pages, rare)
 
     page_no = 0

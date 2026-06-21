@@ -85,17 +85,25 @@ class ReceiptsOutputMixin:
     def whatsapp_report(self) -> None:
         self._send_whatsapp("report")
 
-    def _print(self, kind: str) -> None:
-        """Render straight onto the printer (native, vector — no PDF round-trip)."""
+    def _print(self, kind: str, letterhead: bool = True) -> None:
+        """Render straight onto the printer (native, vector — no PDF round-trip).
+        ``letterhead=False`` prints a 'plain' report (no clinic header/footer, content
+        centred) for the lab's own pre-printed letterhead paper."""
         rid = self._selected_id()
         if rid is None:
             return
-        title = "Print Receipt" if kind == "receipt" else "Print Report"
+        if kind == "receipt":
+            title = "Print Receipt"
+        else:
+            title = "Print Report (plain)" if not letterhead else "Print Report"
         printer = db.get_setting(self.con, "default_printer", "")
         labno = self._lab_no(rid)
         try:
-            report.print_doc(self.con, rid, kind, self, title, printer)
-            db.log_audit(self.con, self.user["username"], "printed_" + kind, labno)
+            report.print_doc(
+                self.con, rid, kind, self, title, printer, letterhead=letterhead
+            )
+            action = "printed_" + kind + ("" if letterhead else "_plain")
+            db.log_audit(self.con, self.user["username"], action, labno)
         # deliberate UI safety net: any print failure surfaces as a message, not a crash
         except Exception as e:
             toast_warn(self, "Print", f"Could not print:\n{e}")
@@ -105,6 +113,11 @@ class ReceiptsOutputMixin:
 
     def print_report(self) -> None:
         self._print("report")
+
+    def print_report_plain(self) -> None:
+        """Admin-only: print the report with no letterhead/footer, centred — for the
+        lab's own pre-printed letterhead pad."""
+        self._print("report", letterhead=False)
 
     def verify_report(self) -> None:
         """Check the verification code printed on a report against our records.

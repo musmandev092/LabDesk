@@ -74,6 +74,9 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
         # report actions — only once results are entered (report ready)
         self.prev_rpt_btn = _btn("Preview report", self.preview)
         self.print_rpt_btn = _btn("Print report", self.print_report)
+        # admin-only: a header/footer-free, page-centred copy for the lab's own
+        # pre-printed letterhead pad (added to the toolbar below only for admins).
+        self.print_plain_btn = _btn("Print on letterhead", self.print_report_plain)
         self.pdf_rpt_btn = _btn("Save report PDF", self.save_report_pdf)
         self.wa_rpt_btn = _btn("WhatsApp report", self.whatsapp_report)
         self.verify_rpt_btn = _btn("Verify report", self.verify_report)
@@ -113,6 +116,11 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
         tb.addWidget(rpt_lbl)
         for b in self._report_btns:
             tb.addWidget(b)
+        # the "Print on letterhead" plain copy is an admin-only action
+        if can(self.user["role"], "manage_users"):
+            tb.addWidget(self.print_plain_btn)
+        else:
+            self.print_plain_btn.hide()
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.VLine)
         sep2.setFrameShadow(QFrame.Sunken)
@@ -332,6 +340,7 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
             for b in self._report_btns:
                 b.setEnabled(ready)
                 b.setToolTip("" if ready else "Report not ready yet (results pending)")
+            self.print_plain_btn.setEnabled(ready and self._is_admin)
             self.pay_btn.setEnabled(bool(row["due"] and row["due"] > 0))
             delivered = (row["status"] or "") == "delivered"
             self.deliver_btn.setEnabled(ready and not delivered)
@@ -343,6 +352,7 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
         else:
             for b in (
                 *self._report_btns,
+                self.print_plain_btn,
                 self.pay_btn,
                 self.deliver_btn,
                 self.edit_btn,
