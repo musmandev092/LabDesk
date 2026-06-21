@@ -2,7 +2,7 @@
 name = "labdesk"
 # Canonical version (uv_build has no dynamic-version support). Keep the fallback
 # literal in src/labdesk/__init__.py in sync with this — see scripts/check_version.py.
-version = "1.1.8"
+version = "1.1.9"
 description = "LabDesk — laboratory management system"
 readme = "README.md"
 requires-python = ">=3.13"
