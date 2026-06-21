@@ -7,9 +7,12 @@ set/confirm dialog warns clearly.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -35,6 +38,137 @@ def _remember_checkbox() -> QCheckBox | None:
         "without asking. Unlocked by your OS login; a copied database stays protected."
     )
     return cb
+
+
+class FirstRunDialog(QDialog):
+    """First run (after activation): start a brand-new laboratory, or restore from a
+    backup (e.g. moving to a new computer). Sets ``self.choice`` to 'new' | 'restore'."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.choice: str | None = None
+        self.setWindowTitle(f"{PRODUCT_NAME} — Set up")
+        self.setModal(True)
+        lay = QVBoxLayout(self)
+        title = QLabel("Welcome to LabDesk")
+        title.setStyleSheet("font-size:16px; font-weight:800;")
+        lay.addWidget(title)
+        sub = QLabel(
+            "Is this a brand-new laboratory, or are you restoring from a backup "
+            "(for example, setting up a new computer)?"
+        )
+        sub.setWordWrap(True)
+        lay.addWidget(sub)
+        new_btn = QPushButton("Start a new laboratory")
+        new_btn.setMinimumHeight(44)
+        new_btn.clicked.connect(lambda: self._pick("new"))
+        rst_btn = QPushButton("Restore from a backup")
+        rst_btn.setObjectName("ghost")
+        rst_btn.setMinimumHeight(44)
+        rst_btn.clicked.connect(lambda: self._pick("restore"))
+        lay.addWidget(new_btn)
+        lay.addWidget(rst_btn)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        quit_btn = QPushButton("Quit")
+        quit_btn.setObjectName("ghost")
+        quit_btn.clicked.connect(self.reject)
+        row.addWidget(quit_btn)
+        lay.addLayout(row)
+
+    def _pick(self, choice: str) -> None:
+        self.choice = choice
+        self.accept()
+
+
+class RestoreBackupDialog(QDialog):
+    """Pick a LabDesk backup file + the password it was saved with, validated before
+    accepting. Exposes ``path``, ``passphrase`` and ``remember`` for the caller to
+    install the backup as the live DB."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.path: str | None = None
+        self.passphrase: str | None = None
+        self.remember = False
+        self.setWindowTitle(f"{PRODUCT_NAME} — Restore from backup")
+        self.setModal(True)
+        lay = QVBoxLayout(self)
+        lay.addWidget(
+            QLabel(
+                "Choose a LabDesk backup file and enter the password it was saved with."
+            )
+        )
+        frow = QHBoxLayout()
+        self.file_lbl = QLineEdit()
+        self.file_lbl.setReadOnly(True)
+        self.file_lbl.setPlaceholderText("No backup selected")
+        self.file_lbl.setMinimumWidth(320)
+        self.file_lbl.setMinimumHeight(36)
+        browse = QPushButton("Browse…")
+        browse.clicked.connect(self._browse)
+        frow.addWidget(self.file_lbl, 1)
+        frow.addWidget(browse)
+        lay.addLayout(frow)
+        self.pw = QLineEdit()
+        self.pw.setEchoMode(QLineEdit.Password)
+        self.pw.setPlaceholderText("Backup password")
+        self.pw.setMinimumHeight(36)
+        lay.addWidget(self.pw)
+        note = QLabel(
+            "Use the password this backup was encrypted with (it may differ from a "
+            "new one). It becomes this computer's database password."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#6b7280; font-size:12px;")
+        lay.addWidget(note)
+        self._remember_cb = _remember_checkbox()
+        if self._remember_cb is not None:
+            lay.addWidget(self._remember_cb)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        cancel = QPushButton("Cancel")
+        cancel.setObjectName("ghost")
+        cancel.clicked.connect(self.reject)
+        ok = QPushButton("Restore")
+        ok.setDefault(True)
+        ok.clicked.connect(self._try)
+        row.addWidget(cancel)
+        row.addWidget(ok)
+        lay.addLayout(row)
+
+    def _browse(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Choose backup",
+            str(Path.home()),
+            "LabDesk backup (*.sqlite);;All files (*)",
+        )
+        if path:
+            self.path = path
+            self.file_lbl.setText(path)
+
+    def _try(self) -> None:
+        from ..db.backup import _looks_like_labdesk_db
+
+        if not self.path:
+            toast_warn(self, "Restore", "Choose a backup file first.")
+            return
+        pw = self.pw.text()
+        if not pw:
+            toast_warn(self, "Restore", "Enter the backup's password.")
+            return
+        if not _looks_like_labdesk_db(Path(self.path), pw):
+            toast_warn(
+                self,
+                "Restore",
+                "Couldn't open this backup with that password.\n"
+                "Check the file and password and try again.",
+            )
+            return
+        self.passphrase = pw
+        self.remember = bool(self._remember_cb and self._remember_cb.isChecked())
+        self.accept()
 
 
 class UnlockDialog(QDialog):

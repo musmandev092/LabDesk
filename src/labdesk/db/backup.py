@@ -175,6 +175,30 @@ def _looks_like_labdesk_db(path: Path, key: str | None = None) -> bool:
         return False
 
 
+def install_restored(src_path: str, key: str | None) -> bool:
+    """First-run restore: validate an encrypted backup opens with ``key`` and looks
+    like a real LabDesk DB, then copy it into place as the live database. Unlike
+    :func:`restore_db` there is no existing DB to safety-copy (this runs before any
+    DB exists), and validation uses the BACKUP's own passphrase. Returns True on
+    success, never raises."""
+    src = Path(src_path)
+    if not src.exists() or not _looks_like_labdesk_db(src, key):
+        return False
+    try:
+        cur = db_path()
+        cur.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, cur)
+        # drop any stale WAL/SHM sidecars so the copied DB is opened cleanly
+        for sidecar in ("-wal", "-shm"):
+            p = Path(str(cur) + sidecar)
+            if p.exists():
+                p.unlink()
+        os.chmod(cur, 0o600)
+        return True
+    except OSError:
+        return False
+
+
 def restore_db(path: str) -> bool:
     """Replace the live DB with a backup file (caller should close connections and
     restart the app afterwards). A TIMESTAMPED safety copy of the current DB is taken

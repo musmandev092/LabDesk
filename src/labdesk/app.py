@@ -355,10 +355,32 @@ def run(argv: list[str]) -> int:
         splash.show()
         app.processEvents()
 
+    # ---- node-locked licensing (machine activation) ---------------------------
+    # Verify activation BEFORE touching the database, so a fresh install can offer to
+    # restore a backup or start anew only once the copy is licensed for this machine.
+    # Activation needs no DB (it reads license.lic from the data dir). Gated by
+    # licensing.enforced() so dev runs and the self-test are never blocked.
+    from . import licensing
+
+    license_just_activated = False
+    if not _selftest() and licensing.enforced():
+        if splash is not None:
+            splash.close()
+        state, _ = licensing.check()
+        if state != "ok":
+            from .presentation.activation import ActivationDialog
+
+            if ActivationDialog(initial_state=state).exec() != QDialog.Accepted:
+                return 0
+            if licensing.check()[0] != "ok":
+                return 0
+            license_just_activated = True
+
     # ---- database unlock (encrypted at rest with SQLCipher) -------------------
-    # The live DB is encrypted; obtain the passphrase BEFORE opening it. First run
-    # sets a new password; a legacy plaintext DB is migrated; otherwise we unlock.
-    # Headless self-test takes the key from LABDESK_DB_KEY in the environment.
+    # The live DB is encrypted; obtain the passphrase BEFORE opening it. On a fresh
+    # install (post-activation) the lab chooses to start a new lab or restore from a
+    # backup; a legacy plaintext DB is migrated; otherwise we unlock. Headless
+    # self-test takes the key from LABDESK_DB_KEY in the environment.
     if not _selftest():
         if splash is not None:
             splash.close()  # don't leave the splash on top of the password dialog
@@ -366,14 +388,39 @@ def run(argv: list[str]) -> int:
 
         dbf = db.db_path()
         if not dbf.exists():
-            from .presentation.unlock import SetPasswordDialog
+            from .presentation.unlock import (
+                FirstRunDialog,
+                RestoreBackupDialog,
+                SetPasswordDialog,
+            )
 
-            dlg = SetPasswordDialog()
-            if dlg.exec() != QDialog.Accepted or not dlg.passphrase:
+            fr = FirstRunDialog()
+            if fr.exec() != QDialog.Accepted:
                 return 0
-            db.unlock(dlg.passphrase)
-            if dlg.remember:
-                keyvault.store_key(dlg.passphrase)
+            if fr.choice == "restore":
+                rdlg = RestoreBackupDialog()
+                if rdlg.exec() != QDialog.Accepted:
+                    return 0
+                from .db.backup import install_restored
+
+                if not install_restored(rdlg.path, rdlg.passphrase):
+                    QMessageBox.critical(
+                        None,
+                        "LabDesk",
+                        "Could not restore that backup. The file may be damaged or the "
+                        "password was wrong. Your computer was not changed.",
+                    )
+                    return 0
+                db.unlock(rdlg.passphrase)
+                if rdlg.remember:
+                    keyvault.store_key(rdlg.passphrase)
+            else:
+                dlg = SetPasswordDialog()
+                if dlg.exec() != QDialog.Accepted or not dlg.passphrase:
+                    return 0
+                db.unlock(dlg.passphrase)
+                if dlg.remember:
+                    keyvault.store_key(dlg.passphrase)
         elif db.db_is_plaintext(dbf):
             # upgrade an unencrypted DB left by a pre-encryption build
             from .presentation.unlock import SetPasswordDialog
@@ -448,21 +495,11 @@ def run(argv: list[str]) -> int:
         print(f"SELFTEST OK — {win.stack.count()} pages, {n} tests in catalog")
         return 0
 
-    # Node-locked licensing: the installed launcher must be activated for THIS
-    # machine (offline, signature-based). Gated by licensing.enforced() so dev runs
-    # and the self-test are never blocked. Copying the app to another PC lands here.
-    from . import licensing
-
-    if licensing.enforced():
-        state, _ = licensing.check()
-        if state != "ok":
-            from .presentation.activation import ActivationDialog
-
-            if ActivationDialog(initial_state=state).exec() != QDialog.Accepted:
-                return 0
-            if licensing.check()[0] != "ok":
-                return 0
-            db.log_audit(con, "system", "license_activated", licensing.current_code())
+    # Licensing was verified before the DB step (above, so a fresh install could offer
+    # restore-vs-new only once activated). Record the activation now that we have a
+    # connection for the audit trail.
+    if license_just_activated:
+        db.log_audit(con, "system", "license_activated", licensing.current_code())
 
     # First-run setup wizard (white-label: each lab enters its own branding).
     if db.get_setting(con, "configured", "0") != "1":
