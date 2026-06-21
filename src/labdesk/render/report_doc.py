@@ -1422,15 +1422,28 @@ def _draw_culture(d: Doc, con, item, x0: float, y: float) -> float:
     if cur["remarks"]:
         y += 3
         d.text(
-            x0 + 2, y, d.content_w - 4, 5, "Remarks",
-            _font(8.6, bold=True), TEAL, Qt.AlignLeft | Qt.AlignTop,
+            x0 + 2,
+            y,
+            d.content_w - 4,
+            5,
+            "Remarks",
+            _font(8.6, bold=True),
+            TEAL,
+            Qt.AlignLeft | Qt.AlignTop,
         )
         y += 5
         rw = d.content_w - 4
         th = d.text_height(cur["remarks"], _font(8.4), rw, wrap=True)
         d.text(
-            x0 + 2, y, rw, th + 1, cur["remarks"],
-            _font(8.4), INK, Qt.AlignLeft | Qt.AlignTop, wrap=True,
+            x0 + 2,
+            y,
+            rw,
+            th + 1,
+            cur["remarks"],
+            _font(8.4),
+            INK,
+            Qt.AlignLeft | Qt.AlignTop,
+            wrap=True,
         )
         y += th + 2
     return y
