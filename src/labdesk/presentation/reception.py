@@ -32,6 +32,8 @@ from ..constants import (
     SEXES,
     SPECIMEN_PRESETS,
     TITLES,
+    format_address,
+    format_person_name,
     normalize_phone,
 )
 from ..db import sqlite3
@@ -434,7 +436,11 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
 
     # ---------------------------------------------------------------
     def save(self, do_print=True):
-        name = self.name.text().strip()
+        # Auto-format the typed name to proper case (MUHAMMAD USMAN / muhammad usman
+        # → Muhammad Usman) so it stores and prints tidily however it was entered.
+        name = format_person_name(self.name.text())
+        if name:
+            self.name.setText(name)  # reflect the tidy form back in the field
         if not name:
             toast_warn(self, "Reception", "Patient name is required.")
             return
@@ -477,7 +483,7 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         age = self.age.value()
         age_desc = self.age_desc.currentText()
         sex = self.sex.currentText()
-        addr = self.address.text().strip()
+        addr = format_address(self.address.text())
         # Resolve the patient identity:
         #  1) an explicitly picked "returning patient", else
         #  2) auto-match on (canonical phone + same name), else

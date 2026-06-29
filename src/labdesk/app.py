@@ -468,6 +468,24 @@ def run(argv: list[str]) -> int:
             return 1
         _db_damaged_notice(e)
         return 1
+
+    # Recovery: `labdesk --unlock` clears any brute-force lockout so a locked-out
+    # admin can sign in again without waiting out the window. It runs only after the
+    # normal DB-password unlock above, so only someone who already holds the database
+    # password (the lab owner / vendor) can use it. Then it exits.
+    if "--unlock" in argv:
+        n = db.clear_lockouts(con)
+        db.log_audit(
+            con, "system", "lockout_cleared", f"--unlock cleared {n} account(s)"
+        )
+        QMessageBox.information(
+            None,
+            PRODUCT_NAME,
+            f"Sign-in lock cleared for {n} account(s).\n\n"
+            "You can now start LabDesk normally and sign in.",
+        )
+        return 0
+
     # Automatic backups (once a day on launch + on exit) are written to the lab's
     # chosen folder, with a Documents fallback — see _auto_backup_on_launch below and
     # MainWindow._auto_backup_on_exit. A manual "Back up now" remains in Settings.

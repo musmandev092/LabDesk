@@ -180,18 +180,29 @@ def _report_footer(d: Doc, con, g, page_no: int, total: int, code: str = "") -> 
         )
         cy -= 4.5
     if fline:
+        # Disclaimer: wrap across (almost) the full width instead of clipping a
+        # single centred line at both ends ("This…proceedings" was losing its first
+        # and last letters). The block bottom stays where the one-line version sat
+        # and grows upward; the rule above it widens to match. One-line footers are
+        # rendered identically to before.
+        fw = d.content_w - 16
+        fx = x0 + 8
+        ff = _font(7.3)
+        fh = max(4.0, d.text_height(fline, ff, fw, wrap=True))
+        ftop = cy + 4 - fh
         d.text(
-            x0 + 17,
-            cy,
-            d.content_w - 34,
-            4,
+            fx,
+            ftop,
+            fw,
+            fh,
             fline,
-            _font(7.3),
+            ff,
             MUTED,
             Qt.AlignHCenter | Qt.AlignVCenter,
+            wrap=True,
         )
-        d.hline(x0 + 17, cy - 0.5, d.content_w - 34, BORDER, 1)
-        cy -= 5
+        d.hline(fx, ftop - 0.5, fw, BORDER, 1)
+        cy = ftop - 5
     if sigs:
         sw = (d.content_w - 34) / len(sigs)
         for i, (n, t) in enumerate(sigs):
@@ -285,10 +296,21 @@ def _measure_test(d: Doc, con, item, sex: str | None, receipt) -> dict[str, obje
             continue
         name = (res["name"] or "").strip()
         val = str(res["value"]).strip() if res["value"] is not None else ""
-        if not name and not val:
+        pid = res["parameter_id"] if "parameter_id" in res.keys() else None
+        hist = [m.get(pid) for m in hist_maps]
+        has_hist = any(str(h).strip() for h in hist if h is not None)
+        # Blank current value: omit the row entirely — UNLESS the patient has
+        # previous results for this parameter. Then keep the row so the history
+        # columns still print, and show "No result" in the current column instead
+        # of a misleading empty cell.
+        no_result = False
+        if not val:
+            if not has_hist:
+                continue
+            no_result = True
+        if not name and not val and not has_hist:
             continue
         ref_ls, flag = _ref_lines(res, sex)
-        pid = res["parameter_id"] if "parameter_id" in res.keys() else None
         unit = res["units"] or ""
         h_name = d.text_height(name, name_f, cw["test"] - 4)
         # measure the ref as one wrapped block and include the unit cell, so a long
@@ -306,10 +328,12 @@ def _measure_test(d: Doc, con, item, sex: str | None, receipt) -> dict[str, obje
                 "unit": res["units"] or "",
                 "pid": pid,
                 "value": res["value"],
-                "hist": [m.get(pid) for m in hist_maps],
+                "hist": hist,
+                "no_result": no_result,
                 "h": rh,
             }
         )
+    rows = _drop_orphan_subheads(rows)
     return {
         "title": title,
         "cw": cw,
@@ -326,8 +350,11 @@ def _draw_test_table(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, lis
     remaining_rows is a list to continue on the next page (header repeats)."""
     cw = lay["cw"]
     body_bottom = A4_H_MM - d.mb - REPORT_FOOTER_MM + 24  # body may use most of page
-    # title bar
-    d.top_rounded(x0, y, d.content_w, 6.5, 4, TEAL)
+    # title bar — square edges + a matching 1px border so it lines up pixel-flush
+    # with the result rows below (which carry a border); a rounded bar previously
+    # left the rows ~1-2px wider at both ends.
+    d.fill_rect(x0, y, d.content_w, 6.5, TEAL)
+    d.rect(x0, y, d.content_w, 6.5, TEAL_DARK, 1)
     d.text(
         x0 + 4,
         y,
@@ -475,7 +502,24 @@ def _draw_test_table(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, lis
         for vi, v in enumerate(vals):
             is_cur = vi == len(vals) - 1
             d.rect(cx, y, each, rh, BORDER, 1)
-            _draw_value(d, cx, y, each, rh, v, row["flag"], cur_f if is_cur else cell_f)
+            if is_cur and row.get("no_result"):
+                # blank current value but prior results exist — label it instead of
+                # leaving an empty cell (see _measure_test).
+                d.text(
+                    cx + 1,
+                    y,
+                    each - 2,
+                    rh,
+                    "No result",
+                    _font(7.2),
+                    MUTED,
+                    Qt.AlignHCenter | Qt.AlignVCenter,
+                    wrap=True,
+                )
+            else:
+                _draw_value(
+                    d, cx, y, each, rh, v, row["flag"], cur_f if is_cur else cell_f
+                )
             cx += each
         y += rh
         i += 1
@@ -488,6 +532,29 @@ def _draw_test_table(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, lis
 # multi-page reports keep working; only the per-test table body differs. Numeric
 # tabular tests (CBC/LFT/RFT) and cultures are unchanged.
 # ---------------------------------------------------------------------------
+def _drop_orphan_subheads(rows: list) -> list:
+    """Remove section sub-headings that have no visible content row beneath them.
+    Once blank parameters are skipped, a heading like "DIFFERENTIAL COUNT" can be
+    left with nothing under it; this drops the dangling heading. A heading is kept
+    only if a row / narrative / note follows it before the next heading."""
+    content_kinds = {"row", "narrative", "note"}
+    keep: list = []
+    n = len(rows)
+    for i, r in enumerate(rows):
+        if r.get("kind") == "subhead":
+            has_content = False
+            for j in range(i + 1, n):
+                if rows[j].get("kind") == "subhead":
+                    break
+                if rows[j].get("kind") in content_kinds:
+                    has_content = True
+                    break
+            if not has_content:
+                continue
+        keep.append(r)
+    return keep
+
+
 def _result_rows(con, item) -> list:
     """Entered result rows for a receipt item, joined to their parameter's ranges."""
     return con.execute(
@@ -509,7 +576,9 @@ def _head_title(con, item) -> tuple:
 
 
 def _draw_title_bar(d: Doc, x0: float, y: float, title: str) -> float:
-    d.top_rounded(x0, y, d.content_w, 6.5, 4, TEAL)
+    # square edges + matching border so the title bar lines up flush with the table
+    d.fill_rect(x0, y, d.content_w, 6.5, TEAL)
+    d.rect(x0, y, d.content_w, 6.5, TEAL_DARK, 1)
     d.text(
         x0 + 4,
         y,
@@ -582,7 +651,8 @@ def _measure_descriptive(d: Doc, con, item, sex: str | None, receipt) -> dict:
             h = d.text_height(val, find_f, d.content_w - 6)
             rows.append({"kind": "narrative", "text": val, "h": h + 3})
             continue
-        if not name and not val:
+        # blank findings → omit the organ/part row (no history on imaging reports)
+        if not val:
             continue
         h_name = d.text_height(name, part_f, cw["part"] - 4)
         h_val = d.text_height(val, find_f, cw["find"] - 4) if val else 0
@@ -594,6 +664,7 @@ def _measure_descriptive(d: Doc, con, item, sex: str | None, receipt) -> dict:
                 "h": max(h_name, h_val, 5.0) + 2.4,
             }
         )
+    rows = _drop_orphan_subheads(rows)
     from . import report as R
 
     narrative = not any(r["kind"] == "row" for r in rows)
@@ -743,7 +814,8 @@ def _measure_qual(d: Doc, con, item, sex: str | None, receipt) -> dict:
             h = d.text_height(note, ref_f, d.content_w - 6)
             rows.append({"kind": "note", "text": note, "h": max(h, 4.5) + 1.5})
             continue
-        if not name and not val:
+        # blank result → omit the row (qualitative serology has no history columns)
+        if not val:
             continue
         h_name = d.text_height(name, name_f, cw["test"] - 4)
         h_res = d.text_height(val, res_f, cw["result"] - 4) if val else 0
@@ -757,6 +829,7 @@ def _measure_qual(d: Doc, con, item, sex: str | None, receipt) -> dict:
                 "h": max(h_name, h_res, h_ref, 5.0) + 2.4,
             }
         )
+    rows = _drop_orphan_subheads(rows)
     return {
         "title": title,
         "cw": cw,
@@ -901,7 +974,8 @@ def _measure_blood_bank(d: Doc, con, item, sex: str | None, receipt) -> dict:
             h = d.text_height(note, name_f, d.content_w - 6)
             rows.append({"kind": "note", "text": note, "h": max(h, 4.5) + 1.5})
             continue
-        if not name and not val:
+        # blank result → omit the row (blood-bank report has no history columns)
+        if not val:
             continue
         h_name = d.text_height(name, name_f, cw["test"] - 4)
         h_res = d.text_height(val, res_f, cw["result"] - 4) if val else 0
@@ -913,6 +987,7 @@ def _measure_blood_bank(d: Doc, con, item, sex: str | None, receipt) -> dict:
                 "h": max(h_name, h_res, 5.0) + 2.4,
             }
         )
+    rows = _drop_orphan_subheads(rows)
     return {
         "title": title,
         "cw": cw,
@@ -1386,7 +1461,8 @@ def _draw_culture(d: Doc, con, item, x0: float, y: float) -> float:
     title = smart_title(
         head["report_head"] if head and head["report_head"] else item["test_name"]
     )
-    d.top_rounded(x0, y, d.content_w, 6.5, 4, TEAL)
+    d.fill_rect(x0, y, d.content_w, 6.5, TEAL)  # square edges, flush with the table
+    d.rect(x0, y, d.content_w, 6.5, TEAL_DARK, 1)
     d.text(
         x0 + 4,
         y,

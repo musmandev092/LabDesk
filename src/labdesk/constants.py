@@ -1,5 +1,29 @@
 """Shared pick-list constants + small shared helpers."""
 
+import re
+
+
+def format_person_name(name: str) -> str:
+    """Tidy a typed patient name to proper case regardless of how it was entered.
+
+    ``MUHAMMAD USMAN``, ``muhammad usman`` and ``muHAMmad   usman`` all become
+    ``Muhammad Usman``. Each whitespace-separated word is capitalised (first letter
+    upper, rest lower); hyphen/apostrophe sub-parts are capitalised too
+    (``abdul-rehman`` → ``Abdul-Rehman``, ``o'brien`` → ``O'Brien``). Runs of
+    whitespace collapse to a single space. Returns "" for blank input."""
+
+    def _cap(word: str) -> str:
+        return re.sub(r"[^\W\d_]+", lambda m: m.group(0).capitalize(), word)
+
+    return " ".join(_cap(w) for w in (name or "").split())
+
+
+def format_address(addr: str) -> str:
+    """Capitalise just the first letter of an address (leave the rest as typed);
+    a small touch that makes the printed header read nicely. Blank stays blank."""
+    a = (addr or "").strip()
+    return a[:1].upper() + a[1:] if a else a
+
 
 def normalize_phone(raw: str, cc: str = "92") -> str:
     """Canonical local phone format used everywhere in the system.

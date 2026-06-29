@@ -312,6 +312,151 @@ def test_history_respects_show_history_setting(con):
 # --------------------------------------------------------------------------
 
 
+# --------------------------------------------------------------------------
+# blank-value suppression on the printed report (skip empty rows, keep the
+# print/don't-print checkbox, label blank-but-has-history as "No result", and
+# drop section headings left empty)
+# --------------------------------------------------------------------------
+
+
+def _insert_result(con, item_id, seq, part_type, name, value, *, pid=None, units=""):
+    con.execute(
+        "INSERT INTO results(receipt_item_id,parameter_id,seq,part_type,name,"
+        "units,ref_text,value) VALUES (?,?,?,?,?,?,?,?)",
+        (item_id, pid, seq, part_type, name, units, "", value),
+    )
+
+
+def test_drop_orphan_subheads_pure():
+    rows = [
+        {"kind": "subhead", "text": "A"},  # has a row under it -> kept
+        {"kind": "row", "name": "x"},
+        {"kind": "subhead", "text": "B"},  # immediately followed by another head -> drop
+        {"kind": "subhead", "text": "C"},  # has a row under it -> kept
+        {"kind": "row", "name": "y"},
+        {"kind": "subhead", "text": "D"},  # nothing after it -> drop
+    ]
+    out = report_doc._drop_orphan_subheads(rows)
+    heads = [r["text"] for r in out if r["kind"] == "subhead"]
+    assert heads == ["A", "C"]
+
+
+def test_numeric_blank_rows_and_orphan_subheads_omitted(con):
+    from labdesk.render.primitives import Doc
+
+    rid = make_receipt(con, status="reported")
+    iid = make_item(con, rid, test_id=683, test_name="CBC")
+    _insert_result(con, iid, 0, "H", "MAIN PANEL", "")  # has content below -> kept
+    _insert_result(con, iid, 1, "N", "Haemoglobin", "13.5")
+    _insert_result(con, iid, 2, "N", "Platelets", "")  # blank, no history -> dropped
+    _insert_result(con, iid, 3, "H", "DIFFERENTIAL COUNT", "")  # children blank -> drop
+    _insert_result(con, iid, 4, "N", "Neutrophils", "")
+    _insert_result(con, iid, 5, "N", "Lymphocytes", "")
+    con.commit()
+
+    rcpt = con.execute("SELECT * FROM receipts WHERE id=?", (rid,)).fetchone()
+    item = con.execute("SELECT * FROM receipt_items WHERE id=?", (iid,)).fetchone()
+    lay = report_doc._measure_test(Doc(images=True), con, item, "Male", rcpt)
+    labels = [r.get("name") or r.get("text") for r in lay["rows"]]
+    assert "Haemoglobin" in labels
+    assert "MAIN PANEL" in labels  # heading with content kept
+    assert "Platelets" not in labels  # blank row dropped
+    assert "Neutrophils" not in labels and "Lymphocytes" not in labels
+    assert "DIFFERENTIAL COUNT" not in labels  # orphan heading dropped
+
+
+def test_numeric_blank_with_history_is_labelled_no_result(con):
+    from labdesk.render.primitives import Doc
+
+    p = con.execute(
+        "SELECT id, name FROM test_parameters WHERE test_id=683 AND "
+        "COALESCE(UPPER(part_type),'N')<>'H' ORDER BY seq LIMIT 1"
+    ).fetchone()
+    pid, pname = p["id"], p["name"]
+    con.execute("INSERT INTO patients(id,name,sex) VALUES (88,'P','Male')")
+    con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES ('show_history','1')")
+    # previous visit carries a value for this parameter
+    con.execute(
+        "INSERT INTO receipts(id,lab_no,patient_id,received_at,reported_at,status) "
+        "VALUES (301,'A',88,'2026-01-01 09:00','2026-01-01 10:00','reported')"
+    )
+    con.execute(
+        "INSERT INTO receipt_items(id,receipt_id,test_id,test_name) "
+        "VALUES (301,301,683,'CBC')"
+    )
+    _insert_result(con, 301, 0, "N", pname, "13.0", pid=pid, units="g/dL")
+    # current visit leaves the same parameter blank
+    con.execute(
+        "INSERT INTO receipts(id,lab_no,patient_id,received_at,status) "
+        "VALUES (302,'B',88,'2026-06-01 09:00','reported')"
+    )
+    con.execute(
+        "INSERT INTO receipt_items(id,receipt_id,test_id,test_name) "
+        "VALUES (302,302,683,'CBC')"
+    )
+    _insert_result(con, 302, 0, "N", pname, "", pid=pid, units="g/dL")
+    con.commit()
+
+    rcpt = con.execute("SELECT * FROM receipts WHERE id=302").fetchone()
+    item = con.execute("SELECT * FROM receipt_items WHERE id=302").fetchone()
+    lay = report_doc._measure_test(Doc(images=True), con, item, "Male", rcpt)
+    hb = [r for r in lay["rows"] if r.get("name") == pname]
+    assert hb, "row with prior results must be kept even though current is blank"
+    assert hb[0]["no_result"] is True
+
+
+def test_qualitative_blank_result_row_omitted(con):
+    from labdesk.render.primitives import Doc
+
+    rid = make_receipt(con, status="reported")
+    iid = make_item(con, rid, test_id=599, test_name="Typhidot")
+    _insert_result(con, iid, 0, "N", "Typhidot IgG", "Positive")
+    _insert_result(con, iid, 1, "N", "Typhidot IgM", "")  # blank -> omitted
+    con.commit()
+    rcpt = con.execute("SELECT * FROM receipts WHERE id=?", (rid,)).fetchone()
+    item = con.execute("SELECT * FROM receipt_items WHERE id=?", (iid,)).fetchone()
+    lay = report_doc._measure_qual(Doc(images=True), con, item, "Male", rcpt)
+    names = [r.get("name") for r in lay["rows"] if r["kind"] == "row"]
+    assert names == ["Typhidot IgG"]
+
+
+def test_has_enterable_content_helper():
+    from labdesk.presentation.worklist import _has_enterable_content
+
+    assert not _has_enterable_content([{"value": ""}], {}, {})
+    assert not _has_enterable_content([{"value": ""}], {1: ""}, {1: ""})
+    assert _has_enterable_content([{"value": "5"}], {}, {})
+    assert _has_enterable_content([{"value": ""}], {1: "note"}, {})
+    assert _has_enterable_content([{"value": ""}], {}, {1: "impression"})
+
+
+def test_blank_report_save_is_refused(con, qtbot):
+    from labdesk.presentation.worklist import WorklistPage
+
+    rid = make_receipt(con, status="pending")
+    con.execute(
+        "INSERT INTO receipt_items(receipt_id,test_id,test_name) VALUES (?,683,'CBC')",
+        (rid,),
+    )
+    con.commit()
+    page = WorklistPage(con, {"username": "a", "role": "admin"})
+    qtbot.addWidget(page)
+    page.refresh_list()
+    for r in range(page.table.rowCount()):
+        if page._ids[r] == rid:
+            page.table.selectRow(r)
+            break
+    page.save_results()  # everything blank → must be refused
+    saved = con.execute(
+        "SELECT COUNT(*) FROM results res JOIN receipt_items i ON i.id=res.receipt_item_id "
+        "WHERE i.receipt_id=?",
+        (rid,),
+    ).fetchone()[0]
+    status = con.execute("SELECT status FROM receipts WHERE id=?", (rid,)).fetchone()[0]
+    assert saved == 0
+    assert status == "pending"  # not advanced to reported
+
+
 def test_entry_widgets_match_category(con, qtbot):
     from PySide6.QtWidgets import QComboBox, QLineEdit, QPlainTextEdit
 

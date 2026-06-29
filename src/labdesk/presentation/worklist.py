@@ -89,6 +89,18 @@ def _widget_text(w) -> str:
     return w.text()
 
 
+def _has_enterable_content(result_rows, remarks, conclusion) -> bool:
+    """True if the technician actually entered something worth saving: at least one
+    result value, or any remark / impression text. Used to refuse an all-blank save
+    so a completely empty report can never be saved (and thus previewed / printed /
+    sent). Values and texts arrive already stripped."""
+    if any((r.get("value") or "") for r in result_rows):
+        return True
+    if any((t or "") for t in remarks.values()):
+        return True
+    return any((t or "") for t in conclusion.values())
+
+
 def _widget_set_readonly(w, ro: bool) -> None:
     """Lock/unlock a result editor regardless of widget type."""
     if isinstance(w, QComboBox):
@@ -768,6 +780,18 @@ class WorklistPage(QWidget):
             item_id: box.toPlainText().strip()
             for item_id, box in self._conclusion.items()
         }
+        # Refuse to save a completely blank report: at least one value (or an
+        # impression / remark) must be entered. This is what stops an all-empty
+        # report from being saved — and thereafter previewed, printed or sent.
+        # Culture-only receipts have no editors here (result_rows is empty; they're
+        # entered on the Microbiology screen), so they are never blocked by this.
+        if result_rows and not _has_enterable_content(result_rows, remarks, conclusion):
+            toast_warn(
+                self,
+                "Nothing to save",
+                "Enter at least one result before saving the report.",
+            )
+            return
         static_rows = self._static_line_rows(sex, items, params_by_test)
         try:
             lab_no = results_svc.release_results(

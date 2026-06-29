@@ -12,18 +12,56 @@ from .crypto import _dummy_verify, _verify_password, hash_password
 _log = logging.getLogger("labdesk")
 
 
+def _remaining_seconds(locked_until) -> int:
+    """Seconds left on a lockout, self-healing against bad data and clock skew.
+
+    A lock written by this module is never more than _LOCK_MAX_SECONDS in the
+    future. A value beyond that can only come from the system clock being
+    wrong/ahead at the moment the lock was written (dead RTC battery, no NTP — a
+    common state on lab PCs) or a corrupted/edited row. Honouring it would trap
+    the account for days, refusing even the correct password (the countdown never
+    reaches zero). Treat any past-due OR implausibly-far value as "not locked" so
+    the next correct password gets through and clears it.
+    """
+    if not locked_until:
+        return 0
+    try:
+        rem = float(locked_until) - time.time()
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: a non-finite (inf) timestamp from a corrupted/edited DB.
+        return 0
+    if rem <= 0 or rem > _LOCK_MAX_SECONDS:
+        return 0
+    return int(rem)
+
+
 def lock_remaining(con: sqlite3.Connection, username: str) -> int:
     """Seconds remaining on a brute-force lockout for this username (0 = none)."""
     row = con.execute(
         "SELECT locked_until FROM users WHERE username=?", (username,)
     ).fetchone()
-    if not row or "locked_until" not in row.keys() or not row["locked_until"]:
+    if not row or "locked_until" not in row.keys():
         return 0
-    try:
-        return max(0, int(float(row["locked_until"]) - time.time()))
-    except (TypeError, ValueError, OverflowError):
-        # OverflowError: a non-finite (inf) timestamp from a corrupted/edited DB.
-        return 0
+    return _remaining_seconds(row["locked_until"])
+
+
+def clear_lockouts(con: sqlite3.Connection, username: str | None = None) -> int:
+    """Recovery: drop the brute-force lockout (and failure counter) for one user,
+    or every user when *username* is None. Does NOT touch passwords. Returns the
+    number of rows cleared. Used by the `--unlock` maintenance command so a locked
+    admin can be let back in without waiting out the window."""
+    if username:
+        cur = con.execute(
+            "UPDATE users SET failed_attempts=0, locked_until=NULL WHERE username=?",
+            (username,),
+        )
+    else:
+        cur = con.execute(
+            "UPDATE users SET failed_attempts=0, locked_until=NULL "
+            "WHERE failed_attempts<>0 OR locked_until IS NOT NULL"
+        )
+    con.commit()
+    return cur.rowcount
 
 
 def verify_user(con: sqlite3.Connection, username: str, password: str):
@@ -34,13 +72,10 @@ def verify_user(con: sqlite3.Connection, username: str, password: str):
         _dummy_verify(password)  # equalise timing so missing users aren't detectable
         return None
     cols = row.keys()
-    # locked out from too many recent failures?
-    if "locked_until" in cols and row["locked_until"]:
-        try:
-            if time.time() < float(row["locked_until"]):
-                return None
-        except (TypeError, ValueError):
-            pass
+    # locked out from too many recent failures? (self-healing: a past-due or
+    # implausibly-far locked_until counts as not locked — see _remaining_seconds.)
+    if "locked_until" in cols and _remaining_seconds(row["locked_until"]) > 0:
+        return None
     legacy_salt = row["salt"] if "salt" in cols else ""
     if _verify_password(password, row["pass_hash"], legacy_salt):
         try:

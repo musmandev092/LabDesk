@@ -54,6 +54,7 @@ from .audit import (
     verify_audit_chain,
 )
 from .auth import (
+    clear_lockouts,
     lock_remaining,
     verify_user,
 )
@@ -166,6 +167,7 @@ __all__ = [
     "get_setting",
     "hash_password",
     "import_asset",
+    "clear_lockouts",
     "init_db",
     "is_unlocked",
     "list_panels",

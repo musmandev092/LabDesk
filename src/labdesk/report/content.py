@@ -241,14 +241,21 @@ def _report_section(con, item, sex, receipt) -> str:
                 f"<tr class='subhead'><td colspan='{ncols}'>{_esc(res['name'])}</td></tr>"
             )
             continue
-        name = (res["name"] or "").strip()
         val = str(res["value"]).strip() if res["value"] is not None else ""
-        if not name and not val:
-            continue  # skip blank filler rows (legacy padding parameters)
-        ref_disp, ref_flag = _resolve_ref(res, sex)
         pid = res["parameter_id"] if "parameter_id" in res.keys() else None
-        prev = "".join(_value_cell(m.get(pid), ref_flag) for m in hist_maps)
-        cur = _value_cell(res["value"], ref_flag, current=True)
+        hist_cells = [m.get(pid) for m in hist_maps]
+        has_hist = any(str(h).strip() for h in hist_cells if h is not None)
+        # Blank current value → omit the row, unless prior results exist (then keep
+        # the row for its history and label the current cell "No result").
+        if not val and not has_hist:
+            continue
+        ref_disp, ref_flag = _resolve_ref(res, sex)
+        prev = "".join(_value_cell(h, ref_flag) for h in hist_cells)
+        cur = (
+            "<td class='cur' style='color:#999;'>No result</td>"
+            if not val
+            else _value_cell(res["value"], ref_flag, current=True)
+        )
         rows.append(
             f"<tr><td class='test'>{_esc(res['name'])}</td>"
             f"<td class='ref'>{ref_disp}</td>"
