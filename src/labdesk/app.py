@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import contextlib
+import logging
+import math
 import os
 import shutil
 import subprocess
@@ -291,6 +293,75 @@ def _auto_backup_on_launch(con) -> None:
         db.log_audit(con, "system", "backup_created", detail)
 
 
+# The UI is laid out in px for roughly a 1080p screen. On smaller panels (e.g. a
+# 1366x768 laptop, where the desktop bar leaves ~731-740 px tall) it overflows and
+# everything needs scrolling. We auto-shrink with QT_SCALE_FACTOR so the whole
+# window fits — the same lever a user would set by hand — instead of asking them to.
+# The target height (860) is calibrated so a 1366x768 screen lands on 0.85, which
+# fits cleanly on that hardware; smaller screens step down from there.
+_FIT_NEED_W = 1280
+_FIT_NEED_H = 860
+
+
+def _fit_scale(
+    avail_w: int, avail_h: int, need_w: int = _FIT_NEED_W, need_h: int = _FIT_NEED_H
+) -> float | None:
+    """Largest scale ≤ 1.0 (in 0.05 steps, floored at 0.70 so text stays legible)
+    that fits the UI's preferred size into the screen's available area. Returns None
+    when no scaling is needed (the UI already fits). E.g. 1366x768 → 0.85."""
+    if avail_w <= 0 or avail_h <= 0:
+        return None
+    s = min(avail_w / need_w, avail_h / need_h, 1.0)
+    s = max(0.70, math.floor(s * 20) / 20)  # floor to 0.05 steps, legibility floor
+    return s if s < 1.0 else None
+
+
+def _reexec_self() -> None:
+    """Restart this process in place (so a freshly-set QT_SCALE_FACTOR is read at
+    QApplication construction). Handles the dev `python -m labdesk`, the installed
+    gui-script, and the compiled binary."""
+    exe = sys.argv[0]
+    if os.path.basename(exe) == "__main__.py":  # python -m labdesk (dev)
+        os.execv(sys.executable, [sys.executable, "-m", "labdesk", *sys.argv[1:]])
+    elif os.access(exe, os.X_OK) and not exe.endswith(".py"):  # binary / gui-script
+        os.execv(exe, sys.argv)
+    else:
+        os.execv(sys.executable, [sys.executable, *sys.argv])
+
+
+def _maybe_rescale_for_screen(app) -> None:
+    """If the primary screen is too small for the UI, set QT_SCALE_FACTOR and re-exec
+    once so the whole window fits without scrolling. No-op when it already fits, when
+    the user set a scale explicitly, or after we've already re-exec'd (no loop)."""
+    if _selftest():
+        return
+    if os.environ.get("QT_SCALE_FACTOR") or os.environ.get("QT_SCREEN_SCALE_FACTORS"):
+        return  # respect an explicit override
+    if os.environ.get("LABDESK_AUTOSCALED") == "1" or os.environ.get(
+        "LABDESK_NO_AUTOSCALE"
+    ):
+        return  # already scaled once, or opted out
+    screen = app.primaryScreen()
+    if screen is None:
+        return
+    geo = screen.availableGeometry()
+    s = _fit_scale(geo.width(), geo.height())
+    if s is None:
+        return
+    os.environ["QT_SCALE_FACTOR"] = f"{s:.2f}"
+    os.environ["LABDESK_AUTOSCALED"] = "1"
+    try:
+        _reexec_self()  # replaces the process image; does not return on success
+    except OSError:
+        # couldn't re-exec — carry on at native scale rather than fail to launch
+        logging.getLogger("labdesk").warning(
+            "auto-scale re-exec failed; running at native size "
+            "(set QT_SCALE_FACTOR=%s manually if the window overflows)",
+            f"{s:.2f}",
+            exc_info=True,
+        )
+
+
 def run(argv: list[str]) -> int:
     _setup_crash_logging()
     # High-DPI: pass the OS's exact fractional scale through (e.g. 150% -> 1.5) so a
@@ -303,6 +374,10 @@ def run(argv: list[str]) -> int:
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
     app = QApplication(argv)
+    # Fit the UI to small screens (e.g. 1366x768) by auto-setting QT_SCALE_FACTOR and
+    # re-exec'ing once. Done before anything else (incl. the single-instance lock) so
+    # the restart is clean. On a screen that already fits, this is a no-op.
+    _maybe_rescale_for_screen(app)
     app.setApplicationName(PRODUCT_NAME)
     app.setOrganizationName(PRODUCT_NAME)
     # associate running windows with the .desktop entry (dock icon on GNOME/Wayland)
