@@ -1,161 +1,106 @@
-# LabDesk — WhatsApp Setup (wuzapi gateway)
+# LabDesk — WhatsApp setup (wuzapi gateway)
 
-LabDesk sends report PDFs over WhatsApp through a small, **free** self-hosted gateway called **wuzapi** ([https://github.com/asternic/wuzapi](https://github.com/asternic/wuzapi)). The flow is:
-
-```
-LabDesk  ──HTTP──►  wuzapi (Docker container)  ──►  WhatsApp (linked phone)
+LabDesk sends report/bill PDFs over WhatsApp through a small, free, self-hosted
+gateway, **wuzapi** ([github.com/asternic/wuzapi](https://github.com/asternic/wuzapi)):
 
 ```
+LabDesk ──HTTP──► wuzapi (Docker) ──► WhatsApp (linked phone)
+```
 
-> **Why wuzapi and not WAHA?** WAHA's free tier **cannot send file attachments** (that's a paid feature). wuzapi is MIT‑licensed, sends PDFs for free, and runs on SQLite with **no extra database**.
+Set up **once** on the lab PC; afterwards LabDesk just talks to `http://localhost:8080`.
+This links WhatsApp like "WhatsApp Web" — use the lab's own number and send real
+reports (not bulk marketing). (wuzapi is chosen over WAHA because WAHA's free tier
+can't send file attachments; wuzapi is MIT-licensed and sends PDFs for free.)
 
-You set this up **once** on the lab's computer. After that LabDesk just talks to `http://localhost:8080`.
+> Run Docker commands with `sudo` (the user is intentionally not in the `docker`
+> group). The tokens/keys below are samples — **change them** for a real deployment.
 
-> ⚠️ This links to WhatsApp like "WhatsApp Web" (a linked device). Use the lab's own number, send real reports (not bulk marketing), and you'll be fine.
-
----
-
-## 1. Install Docker (one time)
-
-> 🔒 **Security Notice:** For maximum security, user accounts are intentionally **not** added to the `docker` root group. All Docker commands must be run explicitly with `sudo`.
-
-**AlmaLinux / RHEL / Rocky (production):**
+## 1. Install Docker (once)
 
 ```bash
+# AlmaLinux / RHEL / Rocky:
 sudo dnf -y install dnf-plugins-core
 sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
 sudo dnf -y install docker-ce docker-ce-cli containerd.io
 sudo systemctl enable --now docker
-
+sudo docker ps    # verify: empty table, no error
 ```
 
-**Other Linux:** Ask your AI or search online: *"How do I install Docker on [Your OS Name] and then sudo systemctl enable --now docker?"*
-
-
-Verify your installation:
+## 2. Run wuzapi (once)
 
 ```bash
-sudo docker ps
-
-```
-
-*(Should output an empty table header with no error).*
-
----
-
-## 2. Run wuzapi (one time)
-
-Run this exact block to spin up the container.
-
-*(Note: The Admin Token is purely alphanumeric to ensure Linux terminal shells like Bash or Zsh do not manipulate or truncate characters like `!` or `$`).*
-
-```bash
-sudo docker run -d \
-  --name wuzapi \
-  --restart unless-stopped \
-  -p 8080:8080 \
+sudo docker run -d --name wuzapi --restart unless-stopped -p 8080:8080 \
   -e 'WUZAPI_ADMIN_TOKEN=7d8F2xKmQ9vN5zPwB4rT6sE1vC8aX9zB' \
   -e 'DB_DIALECT=sqlite' \
   -e 'WUZAPI_GLOBAL_ENCRYPTION_KEY=e2a4b8c1d7f03e5a6b9c2d4e8f1a3b5c' \
   -e 'WUZAPI_GLOBAL_HMAC_KEY=9f1b3d5e7c0a2f4b6e8d0c2a4f6b8e0d' \
-  -e 'TZ=Asia/Karachi' \
-  -v wuzapi-data:/app/dbdata \
-  asternic/wuzapi
-
+  -e 'TZ=Asia/Karachi' -v wuzapi-data:/app/dbdata asternic/wuzapi
 ```
 
-* `--restart unless-stopped` → starts automatically after a reboot.
-* `-e 'DB_DIALECT=sqlite'` → **CRITICAL** forces Wuzapi to successfully structure database tables on its initial boot sequence.
-* `-v wuzapi-data:/app/dbdata` + the fixed keys → **saves the WhatsApp login**, so you don't re‑scan after a machine restart.
+`DB_DIALECT=sqlite` is **required** (so it builds its tables on first boot); the
+`wuzapi-data` volume + fixed keys **persist the WhatsApp login** across reboots.
+Check: `sudo docker ps` (STATUS "Up …"), `sudo docker logs -f wuzapi`.
 
-Check status: `sudo docker ps` (STATUS "Up …"). Verify logs: `sudo docker logs -f wuzapi`.
-
----
-
-## 3. Create the LabDesk user (one time)
-
-This provisions the secure isolated account inside Wuzapi for your daily LabDesk transactions. Run this command from your terminal (*`sudo` is not needed for curl commands, as it is just an API call*):
+## 3. Create the LabDesk user (once)
 
 ```bash
 curl -X POST http://localhost:8080/admin/users \
-  -H "Authorization: 7d8F2xKmQ9vN5zPwB4rT6sE1vC8aX9zB" \
-  -H "Content-Type: application/json" \
+  -H "Authorization: 7d8F2xKmQ9vN5zPwB4rT6sE1vC8aX9zB" -H "Content-Type: application/json" \
   -d '{"name":"LabDesk","token":"LD-prod-9a2b4c6d8e0f1a3b5c7d","events":"Message,ReadReceipt"}'
-
 ```
 
-Keep your production **Access token** safe: **`LD-prod-9a2b4c6d8e0f1a3b5c7d`**
+Keep the **user access token** (`LD-prod-9a2b4c6d8e0f1a3b5c7d`) safe.
 
----
+## 4. Link the phone
 
-## 4. Link the lab's WhatsApp phone (scan the QR)
+Browse to `http://localhost:8080/login`, paste the user token → a QR appears. On the
+lab phone: **WhatsApp → Settings → Linked Devices → Link a Device → scan**.
 
-1. Open a browser and navigate to: **`http://localhost:8080/login`**
-2. Paste your secure User Access Token: `LD-prod-9a2b4c6d8e0f1a3b5c7d`
-3. A WhatsApp QR code will generate on your screen.
-4. On the lab phone: **WhatsApp → Settings → Linked Devices → Link a Device → scan the QR code.**
-
-It will link within a few seconds and show up under your active linked browser sessions.
-
----
-
-## 5. Configure LabDesk
-
-**Settings → WhatsApp gateway:**
+## 5. Configure LabDesk (Settings → WhatsApp gateway)
 
 | Field | Value |
-| --- | --- |
-| **Gateway URL** | `http://localhost:8080` *(use `https://…` if the gateway is on a remote machine)* |
-| **Access token** | `LD-prod-9a2b4c6d8e0f1a3b5c7d` |
-| **Country code** | `92` |
-| **Auto‑send report (checkbox)** | tick to send the report automatically when results are saved |
-| **Auto‑send bill (checkbox)** | tick to send the cash receipt automatically when a bill is saved |
+|---|---|
+| Gateway URL | `http://localhost:8080` (use `https://…` if remote) |
+| Access token | `LD-prod-9a2b4c6d8e0f1a3b5c7d` |
+| Country code | `92` (digits only) |
+| Auto-send report / bill | tick to send automatically on save |
 
-Click **Save settings**, then click **Test connection** → it should reply: *"Gateway reachable — WhatsApp is linked and ready."*
+**Save settings** → **Test connection** should reply "reachable / linked". Reports/bills
+go only to patients with the **per-patient consent toggle** on (Reception, on by
+default, timestamped).
 
-> **Consent:** reports/bills are only sent to patients who have agreed. Each patient has a **"Send reports & bills on WhatsApp"** toggle in **Reception** (on by default, recorded with a timestamp). Untick it and nothing is sent to that patient.
+## 6. Send
 
----
+Manual: Worklist/Results → open a receipt with results → **Send WhatsApp**. Automatic:
+on save if auto-send is ticked. Numbers stored as `03XXXXXXXXX` are converted to
+`92XXXXXXXXXX` automatically.
 
-## 6. Send a report
+## Everyday ops
 
-* **Manual:** Worklist/Results → open a receipt with results → **Send WhatsApp**.
-* **Automatic:** if you ticked auto‑send, it goes out when results are saved.
-
-The report PDF is sent to the patient's saved number (stored as `03XXXXXXXXX`; LabDesk converts it to `92XXXXXXXXXX` automatically).
-
----
-
-## Everyday operations
-
-| Task | Command / Action |
-| --- | --- |
-| **Is it running?** | `sudo docker ps` |
-| **Logs / Debugging** | `sudo docker logs -f wuzapi` |
-| **Restart container** | `sudo docker restart wuzapi` |
-| **Phone unlinked?** | open `http://localhost:8080/login`, paste your user token, re‑scan |
-| **Update wuzapi** | `sudo docker pull asternic/wuzapi && sudo docker rm -f wuzapi &&` *(re‑run step 2 using sudo)* |
-
----
+| Task | Command |
+|---|---|
+| Running? | `sudo docker ps` |
+| Logs | `sudo docker logs -f wuzapi` |
+| Restart | `sudo docker restart wuzapi` |
+| Phone unlinked? | open `…/login`, paste token, re-scan |
+| Update | `sudo docker pull asternic/wuzapi && sudo docker rm -f wuzapi` then re-run step 2 |
 
 ## Troubleshooting
 
-* **"Test connection" → token wrong / Unauthorized (401)**:
-* Ensure the Access token in LabDesk exactly matches `LD-prod-9a2b4c6d8e0f1a3b5c7d`.
-* If you are testing manually via `curl`, ensure you aren't missing the `Authorization:` header or cutting off special characters.
-
-
-* **"WhatsApp isn't linked — scan the QR"**: Open `http://localhost:8080/login`, input your user token, and re-pair the phone.
-* **Reports don't arrive**: Ensure the phone status shows **logged in**. Check that the patient's phone number uses valid formatting.
-* **Logged out after a container update or system restart**: This happens if the environment variables changed, the `DB_DIALECT` flag was missed, or the `wuzapi-data` docker volume was deleted/purged. Ensure step 2 is followed precisely.
-* **Gateway on another PC**: Set LabDesk's Gateway URL to that computer's IP address and expose port 8080. Prefer **`https://`** (e.g. running behind an Nginx reverse proxy) — otherwise, your access tokens and confidential patient PDFs travel across your local area network unencrypted. LabDesk **warns** before saving a plain‑`http` URL that points anywhere other than `localhost`.
-
----
+- **401 / token wrong** — the LabDesk Access token must exactly match the user token.
+- **"WhatsApp isn't linked"** — re-pair at `…/login`.
+- **Logged out after update/reboot** — the env keys changed, `DB_DIALECT` was missed,
+  or the `wuzapi-data` volume was deleted; redo step 2 exactly.
+- **Gateway on another PC** — set the URL to that machine's IP and expose 8080; prefer
+  **`https://`** (e.g. behind nginx) or tokens + patient PDFs cross the LAN in clear.
+  LabDesk warns before saving a plain-`http` URL pointing off-`localhost`.
 
 ## Notes
 
-* wuzapi is free/open‑source (MIT) and perfectly lightweight for individual lab execution.
-* Never expose port `8080` directly to the open internet without an explicit firewall rule; your user token is your perimeter defense.
-* **Privacy:** delivery goes through WhatsApp (Meta), so reports/bills transit a third party. Send only to consenting patients (the per‑patient toggle in Reception) and cover WhatsApp delivery in your privacy policy.
-* **Token storage:** the access token is kept in a private `0600` permissions file at `~/.local/share/LabDesk/.secrets.json` — never in the database or its backups, and never logged.
-* `app/src/labdesk/whatsapp.py` is the only code that talks to the gateway — it posts to `/chat/send/document` with the `token` header, refuses cross‑host redirects, and confirms delivery from the gateway's JSON reply.
+- Don't expose port 8080 to the open internet without a firewall rule — the token is
+  your perimeter.
+- Delivery transits WhatsApp (Meta); send only to consenting patients and cover it in
+  your privacy policy.
+- The token is stored in a `0600` `~/.local/share/LabDesk/.secrets.json` — never in
+  the DB/backups, never logged. `src/labdesk/whatsapp.py` is the only code that talks
+  to the gateway (posts to `/chat/send/document`, refuses cross-host redirects).
