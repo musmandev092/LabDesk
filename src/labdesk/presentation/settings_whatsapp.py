@@ -40,6 +40,7 @@ class WhatsAppSettingsMixin:
         test = QPushButton("Test connection")
         test.setObjectName("ghost")
         test.clicked.connect(self._test_whatsapp)
+        self._wa_conn_btn = test
         link = QPushButton("Open linking page (QR)")
         link.setObjectName("ghost")
         link.clicked.connect(self._open_wa_login)
@@ -82,15 +83,30 @@ class WhatsAppSettingsMixin:
         )
 
     def _test_whatsapp(self) -> None:
-        ok, msg = whatsapp.check_status(self.con)
-        self.wa_status.setText(("✓ " if ok else "✗ ") + msg)
-        db.log_audit(
-            self.con,
-            self.user["username"],
-            "whatsapp_test",
-            ("ok" if ok else "failed") + f" — {msg[:80]}",
+        # Run the status check OFF the UI thread — check_status() is a blocking HTTP
+        # GET (up to 8s); doing it inline froze the whole window if the gateway was
+        # down/slow. Mirrors _send_test_whatsapp's background pattern.
+        def done(work_ok: bool, result) -> None:
+            if work_ok and isinstance(result, tuple):
+                ok, msg = result
+            else:
+                ok, msg = False, (result if isinstance(result, str) else "Failed.")
+            self.wa_status.setText(("✓ " if ok else "✗ ") + msg)
+            db.log_audit(
+                self.con,
+                self.user["username"],
+                "whatsapp_test",
+                ("ok" if ok else "failed") + f" — {msg[:80]}",
+            )
+            (toast_info if ok else toast_warn)(self, "WhatsApp", msg)
+
+        tasks.run_in_background(
+            self,
+            whatsapp.check_status,
+            done,
+            clicked=self._wa_conn_btn,
+            busy_text="Checking…",
         )
-        (toast_info if ok else toast_warn)(self, "WhatsApp", msg)
 
     def _open_wa_login(self) -> None:
         url = (

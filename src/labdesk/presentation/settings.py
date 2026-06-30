@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -170,6 +171,23 @@ class SettingsPage(
         """field = (key, label[, placeholder]) -> a QLineEdit row."""
         key, label = field[0], field[1]
         le = QLineEdit()
+        if key == "whatsapp_api_key":
+            # the access token is a secret — mask it (with a reveal toggle) instead of
+            # showing it in cleartext on the admin screen.
+            le.setEchoMode(QLineEdit.Password)
+            le.setClearButtonEnabled(True)
+            act = le.addAction(
+                self.style().standardIcon(QStyle.SP_FileDialogContentsView),
+                QLineEdit.TrailingPosition,
+            )
+            act.setToolTip("Show / hide the token")
+            act.triggered.connect(
+                lambda: le.setEchoMode(
+                    QLineEdit.Normal
+                    if le.echoMode() == QLineEdit.Password
+                    else QLineEdit.Password
+                )
+            )
         if len(field) > 2 and field[2]:
             le.setPlaceholderText(field[2])
         if key in MAX_LENGTHS:
@@ -395,6 +413,11 @@ class SettingsPage(
             toast_warn(self, "Image", f"Could not use that image:\n{e}")
 
     def save(self) -> None:
+        # defence-in-depth: settings writes are admin-level; gate the action too
+        # (consistent with the other mutating actions, not just page visibility).
+        if not can(self.user["role"], "edit_settings"):
+            toast_warn(self, "Settings", "You don't have permission to change settings.")
+            return
         # reject non-numeric / out-of-range numeric fields before anything is written
         num_err = self._validate_numeric()
         if num_err:

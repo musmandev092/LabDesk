@@ -51,16 +51,23 @@ def _verify_key(con: sqlite3.Connection) -> str:
     return key
 
 
-def report_fingerprint(con: sqlite3.Connection, receipt_id: int) -> str:
+def report_fingerprint(
+    con: sqlite3.Connection, receipt_id: int, version: str = "v2"
+) -> str:
     """Canonical, reproducible serialization of a report's verifiable content.
-    Stable across reprints; changes only when the underlying results/cultures do."""
+    Stable across reprints; changes only when the underlying content does.
+
+    version "v2" (current) ALSO covers the printed Impression/Conclusion and per-item
+    Remarks — for imaging/serology the impression is the clinical payload, so it must
+    be tamper-evident. "v1" is the legacy scheme (results+cultures only), kept so
+    reports already issued before the v2 change still verify (see verify())."""
     r = con.execute(
         "SELECT lab_no, patient_name, reported_at FROM receipts WHERE id=?",
         (receipt_id,),
     ).fetchone()
     if not r:
         return ""
-    parts = ["v1", r["lab_no"] or "", r["patient_name"] or "", r["reported_at"] or ""]
+    parts = [version, r["lab_no"] or "", r["patient_name"] or "", r["reported_at"] or ""]
     for row in con.execute(
         "SELECT name, value, hidden FROM results res "
         "JOIN receipt_items ri ON ri.id = res.receipt_item_id "
@@ -69,6 +76,17 @@ def report_fingerprint(con: sqlite3.Connection, receipt_id: int) -> str:
         (receipt_id,),
     ):
         parts.append(f"{row['name'] or ''}={row['value'] or ''}#{row['hidden'] or 0}")
+    if version != "v1":
+        # per-item impression/conclusion + remarks (printed, so must be covered)
+        for it in con.execute(
+            "SELECT id, conclusion, remarks FROM receipt_items "
+            "WHERE receipt_id=? ORDER BY id",
+            (receipt_id,),
+        ):
+            c = (it["conclusion"] or "").strip()
+            rm = (it["remarks"] or "").strip()
+            if c or rm:
+                parts.append(f"I:{it['id']}={c}#{rm}")
     for cu in con.execute(
         "SELECT cu.* FROM cultures cu JOIN receipt_items ri ON ri.id = cu.receipt_item_id "
         "WHERE ri.receipt_id=? ORDER BY cu.id",
@@ -83,9 +101,12 @@ def report_fingerprint(con: sqlite3.Connection, receipt_id: int) -> str:
     return _SEP.join(parts)
 
 
-def verification_code(con: sqlite3.Connection, receipt_id: int) -> str:
-    """The footer code, e.g. '7F3A-9C21'. Returns '' when there's nothing to verify."""
-    fp = report_fingerprint(con, receipt_id)
+def verification_code(
+    con: sqlite3.Connection, receipt_id: int, version: str = "v2"
+) -> str:
+    """The footer code, e.g. '7F3A-9C21'. Returns '' when there's nothing to verify.
+    New reports print the v2 code (covers the impression too)."""
+    fp = report_fingerprint(con, receipt_id, version)
     if not fp:
         return ""
     mac = hmac.new(bytes.fromhex(_verify_key(con)), fp.encode("utf-8"), hashlib.sha256)
@@ -95,7 +116,13 @@ def verification_code(con: sqlite3.Connection, receipt_id: int) -> str:
 
 def verify(con: sqlite3.Connection, receipt_id: int, code: str) -> bool:
     """True iff `code` matches the recomputed code for this receipt (constant-time,
-    separator/space/case-insensitive)."""
-    expected = verification_code(con, receipt_id).replace("-", "")
+    separator/space/case-insensitive). Accepts the current v2 code AND the legacy v1
+    code, so reports printed before the v2 fingerprint change still verify."""
     given = "".join((code or "").upper().split()).replace("-", "")
-    return bool(expected) and hmac.compare_digest(expected, given)
+    if not given:
+        return False
+    for version in ("v2", "v1"):
+        expected = verification_code(con, receipt_id, version).replace("-", "")
+        if expected and hmac.compare_digest(expected, given):
+            return True
+    return False

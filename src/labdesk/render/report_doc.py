@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -349,7 +350,10 @@ def _draw_test_table(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, lis
     """Draw the title bar + as many rows as fit; returns (y_after, remaining_rows).
     remaining_rows is a list to continue on the next page (header repeats)."""
     cw = lay["cw"]
-    body_bottom = A4_H_MM - d.mb - REPORT_FOOTER_MM + 24  # body may use most of page
+    # Stop the body at the reserved footer band — the previous "+24" reclaimed most
+    # of that band, so on a full page the last rows overprinted the signatures /
+    # disclaimer of an official medical report.
+    body_bottom = A4_H_MM - d.mb - REPORT_FOOTER_MM
     # title bar — square edges + a matching 1px border so it lines up pixel-flush
     # with the result rows below (which carry a border); a rounded bar previously
     # left the rows ~1-2px wider at both ends.
@@ -592,9 +596,21 @@ def _draw_title_bar(d: Doc, x0: float, y: float, title: str) -> float:
     return y + 6.5
 
 
+# Names that designate the dedicated Impression/Conclusion block (rendered below the
+# table, not as a finding row). Whole-name match (not substring) so a real organ row
+# like "Impression of liver" is NOT swallowed. Keep in sync with worklist's grid.
+_CONCLUSION_NAMES = {
+    "conclusion",
+    "impression",
+    "conclusion / impression",
+    "impression / conclusion",
+    "interpretation",
+}
+
+
 def _is_conclusion_name(name: str) -> bool:
-    low = (name or "").strip().lower()
-    return "conclusion" in low or "impression" in low
+    low = (name or "").strip().lower().rstrip(":").strip()
+    return low in _CONCLUSION_NAMES
 
 
 def _polarity(value: object) -> str | None:
@@ -686,7 +702,7 @@ def _draw_descriptive_table(
     d: Doc, lay: dict, x0: float, y: float
 ) -> tuple[float, list]:
     cw = lay["cw"]
-    body_bottom = A4_H_MM - d.mb - REPORT_FOOTER_MM + 24
+    body_bottom = A4_H_MM - d.mb - REPORT_FOOTER_MM  # reserve the footer band
     y = _draw_title_bar(d, x0, y, lay["title"])
     # A pure narrative report (histopathology, biopsy, free-text imaging) has no
     # organ/finding columns — skip the column header band entirely.
@@ -844,7 +860,7 @@ def _measure_qual(d: Doc, con, item, sex: str | None, receipt) -> dict:
 
 def _draw_qual_table(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, list]:
     cw = lay["cw"]
-    body_bottom = A4_H_MM - d.mb - REPORT_FOOTER_MM + 24
+    body_bottom = A4_H_MM - d.mb - REPORT_FOOTER_MM  # reserve the footer band
     y = _draw_title_bar(d, x0, y, lay["title"])
     th_h = 7.0
     thf = _font(7, bold=True, spacing_px=0.3)
@@ -1002,7 +1018,7 @@ def _measure_blood_bank(d: Doc, con, item, sex: str | None, receipt) -> dict:
 
 def _draw_blood_bank(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, list]:
     cw = lay["cw"]
-    body_bottom = A4_H_MM - d.mb - REPORT_FOOTER_MM + 24
+    body_bottom = A4_H_MM - d.mb - REPORT_FOOTER_MM  # reserve the footer band
     y = _draw_title_bar(d, x0, y, lay["title"])
     th_h = 7.0
     thf = _font(7, bold=True, spacing_px=0.3)
@@ -1390,6 +1406,34 @@ def _build_report_letterfree(con, r, items, sex, g, device, images):
     return d.tobytes()
 
 
+def _count_report_pages(con, g, r, sex, layouts) -> int:
+    """How many pages the report will span — a throwaway pagination pass that mirrors
+    the real draw loop (header + per-test body + overflow), so footer 'X of Y' totals
+    are consistent. Uses a buffer Doc (no image rasterisation); reuses the prebuilt
+    layouts (row heights are absolute mm), so it only replays the pagination math."""
+    tmp = Doc(margin_mm=(8, 8, 8, 8))
+    n = 0
+    for kind, lay in layouts:
+        if n > 0:
+            tmp.new_page()
+        n += 1
+        if kind == "culture":
+            continue
+        draw = _DRAW_BY_KIND[kind]
+        body_top = _report_header(tmp, con, g, r)
+        _, remaining = draw(tmp, lay, tmp.ml, body_top)
+        while remaining:
+            tmp.new_page()
+            n += 1
+            body_top = _report_header(tmp, con, g, r)
+            lay2 = dict(lay)
+            lay2["rows"] = remaining
+            _, remaining = draw(tmp, lay2, tmp.ml, body_top)
+    with contextlib.suppress(Exception):
+        tmp.tobytes()  # finalise the painter/buffer
+    return max(1, n)
+
+
 def build_report(
     con, receipt_id: int, device=None, images: bool = False, letterhead: bool = True
 ) -> bytes | list[QImage] | None:
@@ -1414,7 +1458,11 @@ def build_report(
 
     d = Doc(margin_mm=(8, 8, 8, 8), device=device, images=images)
     layouts = _build_layouts(d, con, items, sex, r)
-    total_pages = max(1, len(layouts))  # one test per page (overflow adds pages, rare)
+    # True page count via a throwaway pagination pass, so EVERY footer's "X of Y"
+    # agrees even when a single long test overflows onto extra pages (the old code
+    # guessed total+1 on overflow pages and max(..) on the last, giving mismatched
+    # denominators like "1 of 3 / 2 of 2").
+    total_pages = _count_report_pages(con, g, r, sex, layouts)
 
     page_no = 0
     for idx, (kind, lay) in enumerate(layouts):
@@ -1428,9 +1476,7 @@ def build_report(
             draw = _DRAW_BY_KIND[kind]
             y, remaining = draw(d, lay, d.ml, body_top)
             while remaining:
-                _report_footer(
-                    d, con, g, page_no, total_pages + 1, code
-                )  # will fix total below
+                _report_footer(d, con, g, page_no, total_pages, code)
                 d.new_page()
                 page_no += 1
                 body_top = _report_header(d, con, g, r)

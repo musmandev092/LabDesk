@@ -29,13 +29,14 @@ class ReceptionPatientMixin:
             self.find_results.hide()
             return
         like = f"%{text}%"
+        # One row per patient. (A previous GROUP BY on phone collapsed family members
+        # who share a number into a single result, hiding the rest and causing
+        # duplicate records — patient rows aren't duplicated per visit, so no dedup
+        # is needed here.)
         rows = self.con.execute(
             """SELECT id,title,name,age,age_desc,sex,telephone,address,mr_no
                FROM patients
-               WHERE id IN (
-                 SELECT MAX(id) FROM patients
-                 WHERE name LIKE ? OR telephone LIKE ? OR mr_no LIKE ?
-                 GROUP BY COALESCE(NULLIF(telephone,''), mr_no, id))
+               WHERE name LIKE ? OR telephone LIKE ? OR mr_no LIKE ?
                ORDER BY id DESC LIMIT 8""",
             (like, like, like),
         ).fetchall()

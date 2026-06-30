@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import db
+from .. import db, roles
 from .widgets import (
     field_label,
     money,
@@ -128,11 +128,10 @@ class AccountsPage(QWidget):
         t = self.to_date.date().toString("yyyy-MM-dd")
         # income = earned revenue, capped at the bill (MIN(paid, net_amount)); an
         # over-payment is change handed back, not income.
-        income = c.execute(
-            "SELECT COALESCE(SUM(MIN(paid, net_amount)),0) FROM receipts "
-            f"WHERE {db.NOT_VOIDED} AND date(received_at) BETWEEN ? AND ?",
-            (f, t),
-        ).fetchone()[0]
+        # income = cash actually booked in the period, from the LEDGER by event date,
+        # so a due collected / bill edited / voided later counts in the month it
+        # happened (not the month the bill was created). See db.income_between.
+        income = db.income_between(c, f, t)
         expense = c.execute(
             "SELECT COALESCE(SUM(amount),0) FROM expenses WHERE date BETWEEN ? AND ?",
             (f, t),
@@ -149,14 +148,9 @@ class AccountsPage(QWidget):
             f"font-size: 30px; font-weight: 800; color: {net_color};"
         )
         self.c_due.value_label.setText(money(due, cur))
-        # cash reconciliation breakdown by payment method
-        methods = c.execute(
-            "SELECT COALESCE(NULLIF(TRIM(payment_method),''),'Cash') AS m, "
-            "COUNT(*) AS n, COALESCE(SUM(MIN(paid, net_amount)),0) AS total FROM receipts "
-            f"WHERE {db.NOT_VOIDED} AND paid>0 AND date(received_at) BETWEEN ? AND ? "
-            "GROUP BY m ORDER BY total DESC",
-            (f, t),
-        ).fetchall()
+        # cash reconciliation by payment method — also ledger-based (same event-date
+        # basis as income above), joining each ledger entry to its receipt's method.
+        methods = db.income_by_method(c, f, t)
         self.method_table.setRowCount(0)
         for m in methods:
             i = self.method_table.rowCount()
@@ -220,6 +214,13 @@ class AccountsPage(QWidget):
         return w
 
     def add_expense(self) -> None:
+        # defence-in-depth: the Accounts page is already level-4, but gate the money
+        # write at the action too (consistent with the other ledger mutations).
+        if not roles.can(self.user["role"], "record_expense"):
+            QMessageBox.warning(
+                self, "Add expense", "You don't have permission to record expenses."
+            )
+            return
         if self.exp_amount.value() <= 0:
             return
         date = self.exp_date.date().toString("yyyy-MM-dd")
@@ -256,7 +257,7 @@ class AccountsPage(QWidget):
             self.con,
             self.user["username"],
             "expense_added",
-            f"{head or 'expense'} — {money(amount)}",
+            f"{head or 'expense'} — {money(amount, db.currency(self.con))}",
         )
         self.exp_head.clear()
         self.exp_detail.clear()
@@ -337,7 +338,7 @@ class AccountsPage(QWidget):
         amount, ok = QInputDialog.getDouble(
             self,
             "Recover due",
-            f"Amount received for {rec['lab_no']}  (due {money(rec['due'])}):",
+            f"Amount received for {rec['lab_no']}  (due {money(rec['due'], db.currency(self.con))}):",
             float(rec["due"]),
             0.0,
             float(rec["due"]),
@@ -345,7 +346,15 @@ class AccountsPage(QWidget):
         )
         if not ok or amount <= 0:
             return
-        db.receive_due(self.con, rid, amount, self.user["username"])
+        try:
+            db.receive_due(
+                self.con, rid, amount, self.user["username"], actor_role=self.user["role"]
+            )
+        except PermissionError:
+            QMessageBox.warning(
+                self, "Recover due", "You don't have permission to receive payments."
+            )
+            return
         self.refresh_dues()
         self.refresh_summary()
 

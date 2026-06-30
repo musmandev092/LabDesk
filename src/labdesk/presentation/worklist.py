@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import db, report
+from .. import db, report, whatsapp
 from ..application import results as results_svc
 from ..catalog_render import category_for_test
 from ..roles import can
@@ -524,8 +524,16 @@ class WorklistPage(QWidget):
         for p in params:
             pt = (p["part_type"] or "N").upper()
             name = (p["name"] or "").strip()
-            low = name.lower()
-            if "conclusion" in low or "impression" in low:
+            # whole-name match (not substring) so a real organ row like "Impression
+            # of liver" keeps its editor; only the dedicated block names are skipped.
+            # Keep in sync with render.report_doc._CONCLUSION_NAMES.
+            if name.lower().rstrip(":").strip() in (
+                "conclusion",
+                "impression",
+                "conclusion / impression",
+                "impression / conclusion",
+                "interpretation",
+            ):
                 continue  # handled by the dedicated conclusion box
             if pt == "H":
                 grid.addWidget(QLabel(f"<b>{name}</b>"), row_i, 0, 1, 3)
@@ -724,7 +732,8 @@ class WorklistPage(QWidget):
         # Load each parameter once per distinct test on this receipt (a single query)
         # instead of one SELECT per editor plus a second full pass in the snapshot step.
         items = c.execute(
-            "SELECT id, test_id FROM receipt_items WHERE receipt_id=?",
+            "SELECT ri.id, ri.test_id, t.is_culture FROM receipt_items ri "
+            "JOIN tests t ON t.id=ri.test_id WHERE ri.receipt_id=?",
             (self.current_receipt,),
         ).fetchall()
         test_ids = list({it["test_id"] for it in items})
@@ -780,16 +789,21 @@ class WorklistPage(QWidget):
             item_id: box.toPlainText().strip()
             for item_id, box in self._conclusion.items()
         }
-        # Refuse to save a completely blank report: at least one value (or an
-        # impression / remark) must be entered. This is what stops an all-empty
-        # report from being saved — and thereafter previewed, printed or sent.
-        # Culture-only receipts have no editors here (result_rows is empty; they're
-        # entered on the Microbiology screen), so they are never blocked by this.
-        if result_rows and not _has_enterable_content(result_rows, remarks, conclusion):
+        # Refuse to save/finalize a report with nothing entered on this screen: at
+        # least one value (or an impression / remark) must be present. This also stops
+        # a CULTURE-ONLY receipt (no editors here — cultures are entered on the
+        # Microbiology screen) from being stamped 'reported' with no data and, with
+        # whatsapp_auto on, auto-sending an empty report.
+        if not _has_enterable_content(result_rows, remarks, conclusion):
+            culture_only = bool(items) and all(
+                it["is_culture"] for it in items if "is_culture" in it.keys()
+            )
             toast_warn(
                 self,
                 "Nothing to save",
-                "Enter at least one result before saving the report.",
+                "Enter culture results on the Microbiology screen."
+                if culture_only
+                else "Enter at least one result before saving the report.",
             )
             return
         static_rows = self._static_line_rows(sex, items, params_by_test)
@@ -817,9 +831,15 @@ class WorklistPage(QWidget):
             )
             return
         toast_info(self, "Results", "✓ Results saved.")
-        # optional auto-send on WhatsApp — runs in the background, reports when done
-        if db.get_setting(c, "whatsapp_auto", "0") == "1":
-            rid = self.current_receipt
+        rid = self.current_receipt
+        # optional auto-send on WhatsApp — gated SILENTLY first (config + recipient),
+        # so an opted-out patient / missing number / unconfigured gateway is a quiet
+        # skip, not a red error toast on every save (matches the receipt path).
+        if (
+            db.get_setting(c, "whatsapp_auto", "0") == "1"
+            and whatsapp.config_ready(c)[0]
+            and whatsapp.recipient_ready(c, rid)[0]
+        ):
             wa.send_async(
                 self,
                 c,
@@ -833,6 +853,9 @@ class WorklistPage(QWidget):
                 ),
             )
         self.refresh_list()
+        # re-render the entry panel so it reflects the now-finalised (locked) state
+        # instead of staying editable until the next interaction.
+        self.load_receipt()
 
     def _static_line_rows(self, sex: str, items, params_by_test) -> list[dict]:
         """H/L/continuation lines (no editor) so reports render fully. Reuses the
@@ -840,6 +863,8 @@ class WorklistPage(QWidget):
         inserts these with INSERT OR IGNORE."""
         rows: list[dict] = []
         for it in items:
+            if "is_culture" in it.keys() and it["is_culture"]:
+                continue  # cultures are entered on the Microbiology screen — no static rows
             for p in params_by_test.get(it["test_id"], []):
                 pt = (p["part_type"] or "N").upper()
                 if pt in ("L", "H") or not (p["name"] or "").strip():

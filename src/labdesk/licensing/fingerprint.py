@@ -83,10 +83,18 @@ def _disk_serial() -> str | None:
     if not blockdir.is_dir():
         return None
     skip = ("loop", "ram", "dm-", "zram", "sr", "md")
+
+    def _removable(dev: str) -> int:
+        with contextlib.suppress(OSError):
+            return 1 if (blockdir / dev / "removable").read_text().strip() == "1" else 0
+        return 0
+
     with contextlib.suppress(OSError):
-        for dev in sorted(p.name for p in blockdir.iterdir()):
-            if dev.startswith(skip):
-                continue
+        devs = [p.name for p in blockdir.iterdir() if not p.name.startswith(skip)]
+        # prefer NON-removable (internal) disks, then by name — so plugging in a USB
+        # drive that enumerates as 'sda' can't flip the machine signal and cause a
+        # spurious "wrong machine" licence lockout.
+        for dev in sorted(devs, key=lambda d: (_removable(d), d)):
             for rel in ("device/serial", "device/wwid", "serial"):
                 with contextlib.suppress(OSError):
                     val = (blockdir / dev / rel).read_text(encoding="utf-8").strip()

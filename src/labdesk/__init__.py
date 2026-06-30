@@ -9,4 +9,4 @@ except PackageNotFoundError:
     # The AppImage/vendored layout copies this package into site-packages without
     # its .dist-info, so importlib.metadata can't find it and this fallback is the
     # authoritative version at runtime. Keep it == pyproject.toml [project].version.
-    __version__ = "1.1.13"
+    __version__ = "1.1.14"

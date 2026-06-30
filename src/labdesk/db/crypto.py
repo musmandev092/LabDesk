@@ -50,13 +50,12 @@ def _verify_password(password: str, stored: str, legacy_salt: str) -> bool:
     return hmac.compare_digest(h, stored)
 
 
-_DUMMY_HASH = ""  # lazily-built scrypt string used only to equalise login timing
+# Built once at import (NOT lazily on first miss) so the very first unknown-username
+# attempt isn't measurably slower than later ones — which would itself leak.
+_DUMMY_HASH, _ = hash_password("login-timing-equaliser")
 
 
 def _dummy_verify(password: str) -> None:
     """Run one scrypt hash on the user-miss path so an unknown/inactive username
     costs about the same as a real one — defeats username-enumeration via timing."""
-    global _DUMMY_HASH
-    if not _DUMMY_HASH:
-        _DUMMY_HASH, _ = hash_password("login-timing-equaliser")
     _verify_password(password, _DUMMY_HASH, "")

@@ -266,31 +266,50 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
         self.dues_only.setChecked(bool(dues))
         self.refresh()
 
+    _ROW_CAP = 1000  # most-recent rows shown in the table (kept responsive)
+
     def refresh(self) -> None:
         q = like_term(self.search.text())
-        sql = (
-            "SELECT * FROM receipts WHERE (COALESCE(patient_name,'') LIKE ? ESCAPE '\\' "
+        where = (
+            "(COALESCE(patient_name,'') LIKE ? ESCAPE '\\' "
             "OR COALESCE(lab_no,'') LIKE ? ESCAPE '\\' OR COALESCE(mr_no,'') LIKE ? ESCAPE '\\')"
         )
         args = [q, q, q]
         st = self.status.currentData()
         if st and st != "All":
-            sql += " AND status=?"
+            where += " AND status=?"
             args.append(st)
         if self.today_only.isChecked():
-            sql += f" AND {db.RECEIVED_TODAY}"
+            where += f" AND {db.RECEIVED_TODAY}"
         dc, dargs = self._date_clause()
         if dc:
-            sql += f" AND {dc}"
+            where += f" AND {dc}"
             args += dargs
         if self.dues_only.isChecked():
-            sql += f" AND due>0.005 AND {db.NOT_VOIDED}"
-        sql += " ORDER BY id DESC LIMIT 1000"
-        rows = self.con.execute(sql, args).fetchall()
+            where += f" AND due>0.005 AND {db.NOT_VOIDED}"
+        rows = self.con.execute(
+            f"SELECT * FROM receipts WHERE {where} ORDER BY id DESC LIMIT {self._ROW_CAP}",
+            args,
+        ).fetchall()
+        # Totals + count over ALL matching rows (not just the capped page), so a lab
+        # with >1000 receipts doesn't see understated totals presented as complete.
+        agg = self.con.execute(
+            f"SELECT COUNT(*) AS n, "
+            f"COALESCE(SUM(CASE WHEN {db.NOT_VOIDED} THEN net_amount ELSE 0 END),0) AS net, "
+            f"COALESCE(SUM(CASE WHEN {db.NOT_VOIDED} THEN paid ELSE 0 END),0) AS paid, "
+            f"COALESCE(SUM(CASE WHEN {db.NOT_VOIDED} THEN due ELSE 0 END),0) AS due "
+            f"FROM receipts WHERE {where}",
+            args,
+        ).fetchone()
+        total_n, tot_net, tot_paid, tot_due = (
+            agg["n"],
+            agg["net"],
+            agg["paid"],
+            agg["due"],
+        )
         cur = db.currency(self.con)
         self.table.setRowCount(0)
         self._ids = []
-        tot_net = tot_paid = tot_due = 0.0
         for r in rows:
             i = self.table.rowCount()
             self.table.insertRow(i)
@@ -306,14 +325,16 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
             )
             voided = "voided" in r.keys() and r["voided"]
             self.table.setItem(i, 7, status_badge(r["status"] or "", voided))
-            if not voided:  # voided bills don't count toward the money totals
-                tot_net += r["net_amount"] or 0
-                tot_paid += r["paid"] or 0
-                tot_due += r["due"] or 0
-        self.sub.setText(f"{len(rows)} receipt(s)")
+        capped = total_n > len(rows)
+        shown = (
+            f"Showing first {len(rows):,} of {total_n:,}"
+            if capped
+            else f"{total_n:,} receipt(s)"
+        )
+        self.sub.setText(shown)
         self.sub.show()
         self.summary.setText(
-            f"Showing {len(rows)} receipt(s)   •   Net {money(tot_net, cur)}   •   "
+            f"{shown}   •   Net {money(tot_net, cur)}   •   "
             f"Paid {money(tot_paid, cur)}   •   Due {money(tot_due, cur)}"
         )
         self._update_buttons()

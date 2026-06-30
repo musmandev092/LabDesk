@@ -40,6 +40,7 @@ CAP_MIN_LEVEL = {
     # money/receipt mutations (enforced in the service+query layer, not just the UI)
     "create_receipt": 2,  # create a bill at reception — receptionist+
     "void_receipt": 4,  # void a bill + reverse the ledger — manager/admin
+    "record_expense": 4,  # add an expense + ledger debit — Accounts page (manager/admin)
     "receive_payment": 2,  # record a (partial) due payment — receptionist+
     "deliver_report": 2,  # mark a report delivered — receptionist+
     # clinical result/culture mutations (Worklist + Microbiology pages, level 3)

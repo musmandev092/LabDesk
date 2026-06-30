@@ -103,11 +103,21 @@ NUMERIC_FIELDS: dict[str, tuple] = {
         100.0,
         "Special-day discount % must be a number between 0 and 100.",
     ),
+    # range matches the runtime clamp in whatsapp._cfg (5–120) so a saved value is
+    # never silently changed afterwards.
     "whatsapp_timeout": (
         "int",
+        5,
+        120,
+        "WhatsApp upload timeout must be a whole number of seconds (5–120).",
+    ),
+    # digits only — a malformed code (e.g. '+92') otherwise makes every send fail and
+    # wrongly blames the patient's number.
+    "whatsapp_country_code": (
+        "int",
         1,
-        600,
-        "WhatsApp upload timeout must be a whole number of seconds (1–600).",
+        9999,
+        "Country code must be digits only, e.g. 92 (no '+', spaces or dashes).",
     ),
     "idle_lock_minutes": (
         "int",

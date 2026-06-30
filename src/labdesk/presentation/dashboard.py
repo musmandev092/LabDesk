@@ -76,12 +76,11 @@ class DashboardPage(QWidget):
         n_rec = c.execute(
             f"SELECT COUNT(*) FROM receipts WHERE {db.NOT_VOIDED} AND {db.RECEIVED_TODAY}"
         ).fetchone()[0]
-        # income = money actually earned, capped at the bill (MIN(paid, net_amount)) —
-        # an over-payment is change returned to the patient, not revenue.
-        income = c.execute(
-            f"SELECT COALESCE(SUM(MIN(paid, net_amount)),0) FROM receipts "
-            f"WHERE {db.NOT_VOIDED} AND {db.RECEIVED_TODAY}"
-        ).fetchone()[0]
+        # income today = cash actually booked today, from the LEDGER by event date
+        # (matches the Accounts page; a due collected today counts today, not on the
+        # original bill's date). See db.income_between.
+        today = c.execute("SELECT date('now','localtime')").fetchone()[0]
+        income = db.income_between(c, today, today)
         pending = c.execute(
             "SELECT COUNT(*) FROM receipts WHERE status IN ('pending','in_progress') "
             f"AND {db.NOT_VOIDED}"

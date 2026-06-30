@@ -257,8 +257,7 @@ def _db_damaged_notice(exc: Exception) -> None:
             "did not fully match.\n\n"
             "Your data is not necessarily lost — timestamped backups are kept in:\n"
             f"{backups}\n\n"
-            "Reopen LabDesk and use Settings → Backup & restore → “Restore from file…”, "
-            "or contact support.",
+            "You can restore a backup now (on the next screen), or contact support.",
         )
     except Exception:
         pass
@@ -337,10 +336,14 @@ def _maybe_rescale_for_screen(app) -> None:
         return
     if os.environ.get("QT_SCALE_FACTOR") or os.environ.get("QT_SCREEN_SCALE_FACTORS"):
         return  # respect an explicit override
-    if os.environ.get("LABDESK_AUTOSCALED") == "1" or os.environ.get(
-        "LABDESK_NO_AUTOSCALE"
-    ):
-        return  # already scaled once, or opted out
+    opted_out = os.environ.get("LABDESK_NO_AUTOSCALE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if os.environ.get("LABDESK_AUTOSCALED") == "1" or opted_out:
+        return  # already scaled once, or explicitly opted out
     screen = app.primaryScreen()
     if screen is None:
         return
@@ -397,23 +400,25 @@ def run(argv: list[str]) -> int:
     if not _selftest():
         lock, activation_srv = _acquire_single_instance()
         if lock is None:
-            running = _ping_running_instance()  # bring the existing window to front
+            # Nudge the running instance to raise its window IF it has one. We can't
+            # claim it was raised — the first instance may still be at the unlock/login
+            # dialog (it starts listening before its main window exists) — so keep the
+            # message neutral rather than asserting a front-raise that didn't happen.
+            _ping_running_instance()
             QMessageBox.information(
                 None,
                 PRODUCT_NAME,
                 "LabDesk is already running.\n\n"
-                + (
-                    "Its window has been brought to the front."
-                    if running
-                    else "Look for its existing window (check your taskbar)."
-                ),
+                "Look for its existing window (check your taskbar); if it's just "
+                "started, it may still be on the password or sign-in screen.",
             )
             return 0
         app._labdesk_lock = lock  # keep the lock file alive for the run
         app._labdesk_activation_srv = activation_srv
 
-    # Brief splash so startup (incl. the one-time catalog sync after an update,
-    # ~1s) shows feedback instead of a blank window. Flashes by on normal launches.
+    # Brief splash so the pre-unlock startup shows feedback instead of a blank window;
+    # it's closed before the password dialog. (The one-time post-update catalog sync
+    # runs later, inside init_db, after the splash is already gone.)
     splash = None
     if not _selftest() and APP_ICON.exists():
         from PySide6.QtCore import Qt
@@ -535,14 +540,40 @@ def run(argv: list[str]) -> int:
 
     try:
         con = db.init_db()
-    except Exception as e:  # corrupt/unreadable DB → guide recovery, don't hard-crash
+    except Exception as e:  # corrupt/unreadable DB → offer recovery, don't hard-crash
         if _selftest():
             import traceback
 
             traceback.print_exc()
             return 1
+        if splash is not None:
+            splash.close()
         _db_damaged_notice(e)
-        return 1
+        # Offer an in-app restore right here. The Settings → Restore path needs a
+        # running MainWindow, which can't be built on a broken DB, so without this the
+        # user dead-ends on every relaunch with no way back in but deleting the file.
+        from .db.backup import install_restored
+        from .presentation.unlock import RestoreBackupDialog
+
+        rdlg = RestoreBackupDialog()
+        if rdlg.exec() != QDialog.Accepted:
+            return 1
+        if not install_restored(rdlg.path, rdlg.passphrase):
+            QMessageBox.critical(
+                None,
+                "LabDesk",
+                "Could not restore that backup. The file may be damaged or the "
+                "password was wrong. Your computer was not changed.",
+            )
+            return 1
+        db.unlock(rdlg.passphrase)
+        if rdlg.remember:
+            keyvault.store_key(rdlg.passphrase)
+        try:
+            con = db.init_db()
+        except Exception as e2:
+            _db_damaged_notice(e2)
+            return 1
 
     # Recovery: `labdesk --unlock` clears any brute-force lockout so a locked-out
     # admin can sign in again without waiting out the window. It runs only after the

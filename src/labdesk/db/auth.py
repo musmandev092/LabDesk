@@ -95,21 +95,23 @@ def verify_user(con: sqlite3.Connection, username: str, password: str):
             pass
         return row
     # wrong password → count the failure, then lock with an exponentially
-    # growing window once past _MAX_FAILS (60s, 120s, 240s … capped).
+    # growing window once past _MAX_FAILS (60s, 120s, 240s … capped). Increment
+    # ATOMICALLY in SQL (not read-modify-write) so two concurrent instances — which
+    # the app explicitly supports via a shared DB — can't lose an increment.
     try:
-        fa = (
-            row["failed_attempts"]
-            if "failed_attempts" in cols and row["failed_attempts"]
-            else 0
-        ) + 1
-        lock = None
+        con.execute(
+            "UPDATE users SET failed_attempts=COALESCE(failed_attempts,0)+1 WHERE id=?",
+            (row["id"],),
+        )
+        fa = con.execute(
+            "SELECT failed_attempts FROM users WHERE id=?", (row["id"],)
+        ).fetchone()[0]
         if fa >= _MAX_FAILS:
             backoff = min(_LOCK_SECONDS * (2 ** (fa - _MAX_FAILS)), _LOCK_MAX_SECONDS)
-            lock = str(time.time() + backoff)
-        con.execute(
-            "UPDATE users SET failed_attempts=?, locked_until=? WHERE id=?",
-            (fa, lock, row["id"]),
-        )
+            con.execute(
+                "UPDATE users SET locked_until=? WHERE id=?",
+                (str(time.time() + backoff), row["id"]),
+            )
         con.commit()
     except sqlite3.Error as e:
         # The wrong-password attempt is still DENIED (we return None below). But if the

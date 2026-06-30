@@ -362,32 +362,79 @@ def _sync_catalog_from_seed(con: sqlite3.Connection) -> None:
     else:
         con.execute("ATTACH DATABASE ? AS seed", (str(SEED_DB),))
     try:
-        # ADDITIVE ONLY: insert tests/params the seed has but this DB doesn't
-        # (matched by id). No UPDATE, no DELETE — the lab's edits are sacrosanct.
+        # ADDITIVE ONLY, matched by STABLE keys — NOT the autoincrement id, which the
+        # live DB reassigns when a lab adds custom tests. id-matching silently (and
+        # permanently) dropped shipped rows whose ids had been reused. Tests match on
+        # legacy_no; parameters on (test, seq, name) so the 34 seed params with no
+        # legacy_id are handled too and re-runs stay idempotent. No UPDATE/DELETE —
+        # the lab's own edits are sacrosanct.
         tcols = [r[1] for r in con.execute('PRAGMA table_info("tests")')]
         scols = {r[1] for r in con.execute("PRAGMA seed.table_info('tests')")}
-        cols = ", ".join(f'"{c}"' for c in tcols if c in scols)
-        con.execute(
-            f"INSERT INTO tests ({cols}) SELECT {cols} FROM seed.tests "
-            f"WHERE id NOT IN (SELECT id FROM tests)"
-        )
-        pcols = [r[1] for r in con.execute('PRAGMA table_info("test_parameters")')]
-        spcols = {
-            r[1] for r in con.execute("PRAGMA seed.table_info('test_parameters')")
+        tcols = [c for c in tcols if c in scols and c != "id"]  # don't force the id
+        tlist = ", ".join(f'"{c}"' for c in tcols)
+        tph = ", ".join("?" for _ in tcols)
+        have_t = {
+            r[0]
+            for r in con.execute("SELECT legacy_no FROM tests WHERE legacy_no IS NOT NULL")
         }
-        cols = ", ".join(f'"{c}"' for c in pcols if c in spcols)
-        con.execute(
-            f"INSERT INTO test_parameters ({cols}) SELECT {cols} FROM seed.test_parameters "
-            f"WHERE id NOT IN (SELECT id FROM test_parameters)"
-        )
+        id_map: dict = {}  # seed tests.id -> live tests.id (every seed test present)
+        for srow in con.execute(
+            f'SELECT id, legacy_no, {tlist} FROM seed.tests ORDER BY id'
+        ).fetchall():
+            sid, legacy = srow[0], srow[1]
+            if legacy is not None and legacy in have_t:
+                live = con.execute(
+                    "SELECT id FROM tests WHERE legacy_no=? LIMIT 1", (legacy,)
+                ).fetchone()
+                if live:
+                    id_map[sid] = live[0]
+                continue
+            cur2 = con.execute(
+                f"INSERT INTO tests ({tlist}) VALUES ({tph})", tuple(srow[2:])
+            )
+            id_map[sid] = cur2.lastrowid
+            if legacy is not None:
+                have_t.add(legacy)
+
+        pcols = [r[1] for r in con.execute('PRAGMA table_info("test_parameters")')]
+        spcols = {r[1] for r in con.execute("PRAGMA seed.table_info('test_parameters')")}
+        pcols = [c for c in pcols if c in spcols and c != "id"]  # keeps test_id
+        plist = ", ".join(f'"{c}"' for c in pcols)
+        pph = ", ".join("?" for _ in pcols)
+        ti, si, ni = pcols.index("test_id"), pcols.index("seq"), pcols.index("name")
+        have_p = {
+            (r[0], r[1], r[2] or "")
+            for r in con.execute("SELECT test_id, seq, name FROM test_parameters")
+        }
+        for prow in con.execute(
+            f"SELECT {plist} FROM seed.test_parameters ORDER BY id"
+        ).fetchall():
+            vals = list(prow)
+            new_tid = id_map.get(vals[ti])
+            if new_tid is None:
+                continue  # parent test not shipped/mapped — skip orphan param
+            vals[ti] = new_tid
+            key = (new_tid, vals[si], (vals[ni] or ""))
+            if key in have_p:
+                continue
+            con.execute(f"INSERT INTO test_parameters ({plist}) VALUES ({pph})", tuple(vals))
+            have_p.add(key)
+
+        # bump catalog_version ONLY after the rows actually landed, so a partial /
+        # failed sync retries on the next launch instead of being marked done.
         con.execute(
             "INSERT INTO settings(key,value) VALUES ('catalog_version',?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (str(seed_ver),),
         )
         con.commit()  # must commit before DETACH (no open transaction allowed)
+    except sqlite3.Error:
+        # leave catalog_version unbumped so the sync retries next launch
+        with contextlib.suppress(sqlite3.Error):
+            con.rollback()
     finally:
-        con.execute("DETACH seed")
+        with contextlib.suppress(sqlite3.Error):
+            con.execute("DETACH seed")
 
 
 def _ensure_columns(con: sqlite3.Connection) -> None:

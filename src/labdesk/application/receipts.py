@@ -62,7 +62,12 @@ def _upsert_patient(
     mr_no = d.mr_no
     if pid:  # returning patient → reuse row + permanent MR, refresh details
         row = con.execute("SELECT mr_no FROM patients WHERE id=?", (pid,)).fetchone()
-        mr_no = mr_no or (row["mr_no"] if row else "") or db.format_patient_id(pid)
+        # Prefer the STORED permanent MR over a typed one: an auto-matched returning
+        # patient must not have its canonical Patient ID overwritten by whatever was
+        # typed for what looked like a new registration. A typed value only fills in
+        # when the patient has no stored MR yet.
+        stored = (row["mr_no"] if row else "") or ""
+        mr_no = stored or mr_no or db.format_patient_id(pid)
         con.execute(
             "UPDATE patients SET title=?,name=?,age=?,age_desc=?,sex=?,telephone=?,"
             "address=?,mr_no=?,wa_optout=?,wa_consent_at=? WHERE id=?",

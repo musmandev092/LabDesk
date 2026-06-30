@@ -124,6 +124,32 @@ def receive_due(
     return (r["lab_no"], new_paid, new_due)
 
 
+def income_between(con: sqlite3.Connection, from_date: str, to_date: str) -> float:
+    """Period income from the LEDGER: cash actually booked (credits minus refund/void
+    debits), dated by the EVENT date. Excludes expenses. This is correct across later
+    due-recovery, bill edits and voids — unlike SUM(MIN(paid,net)) keyed on
+    receipts.received_at, which retroactively mis-states already-closed months."""
+    return con.execute(
+        "SELECT COALESCE(SUM(COALESCE(credit,0)-COALESCE(debit,0)),0) FROM ledger "
+        "WHERE COALESCE(kind,'')<>'expense' AND date(date) BETWEEN ? AND ?",
+        (from_date, to_date),
+    ).fetchone()[0]
+
+
+def income_by_method(con: sqlite3.Connection, from_date: str, to_date: str):
+    """Per-payment-method cash for the period, from the ledger joined to each
+    referenced receipt's method. Same event-date basis as income_between()."""
+    return con.execute(
+        "SELECT COALESCE(NULLIF(TRIM(rc.payment_method),''),'Cash') AS m, "
+        "COUNT(DISTINCT l.ref_id) AS n, "
+        "COALESCE(SUM(COALESCE(l.credit,0)-COALESCE(l.debit,0)),0) AS total "
+        "FROM ledger l LEFT JOIN receipts rc ON rc.id=l.ref_id "
+        "WHERE COALESCE(l.kind,'')<>'expense' AND date(l.date) BETWEEN ? AND ? "
+        "GROUP BY m HAVING total<>0 ORDER BY total DESC",
+        (from_date, to_date),
+    ).fetchall()
+
+
 # ---- in-app parameter editor ------------------------------------------------
 class ParameterInUseError(Exception):
     """Raised when the editor tries to remove a parameter that already has saved

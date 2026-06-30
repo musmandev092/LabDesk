@@ -154,7 +154,10 @@ def _looks_like_labdesk_db(path: Path, key: str | None = None) -> bool:
     When omitted, the current session/env key is used.
     """
     try:
-        probe = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        # Build the file: URI via Path.as_uri() (percent-encodes the path) instead of
+        # an f-string, so a backup folder/file containing '?' or '#' isn't mangled
+        # into a bogus URI that opens the wrong/empty target.
+        probe = sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True)
         try:
             _apply_key(probe, key if key is not None else _resolve_key())
             tables = {

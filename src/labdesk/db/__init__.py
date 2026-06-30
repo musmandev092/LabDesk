@@ -105,6 +105,8 @@ from .patient_id import (
 from .queries import (
     ParameterInUseError,
     delete_panel,
+    income_between,
+    income_by_method,
     list_panels,
     panel_tests,
     receive_due,
@@ -176,6 +178,8 @@ __all__ = [
     "log_audit",
     "migrate_plaintext_to_encrypted",
     "panel_tests",
+    "income_between",
+    "income_by_method",
     "receive_due",
     "rechain_audit",
     "rekey_database",

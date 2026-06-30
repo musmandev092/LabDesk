@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -249,6 +251,7 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         # A discount needs manager/admin rights; a cashier must get it approved.
         self._can_discount = roles.can(self.user["role"], "apply_discount")
         self._discount_approved_by = None
+        self._discount_approved_pct = 0.0  # ceiling a manager approved for a cashier
         self.discount_lock = QPushButton("🔒 Approve")
         self.discount_lock.setObjectName("ghost")
         self.discount_lock.setToolTip("A discount needs manager/admin approval")
@@ -372,10 +375,32 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
                 "Invalid credentials, or that user can't approve discounts.",
             )
             return
+        # Bind the approval to a concrete amount the manager authorises — otherwise
+        # the cashier could be approved for "a discount" and then type any value.
+        pct, ok = QInputDialog.getDouble(
+            self,
+            "Approve discount",
+            "Approved discount %:",
+            float(self.discount.value()),
+            0.0,
+            100.0,
+            2,
+        )
+        if not ok:
+            return
         self._discount_approved_by = approver["username"]
+        self._discount_approved_pct = pct
+        self.discount.setValue(pct)
+        self.discount.setMaximum(pct)  # hard-cap the field to what was approved
         self.discount.setEnabled(True)
-        self.discount_lock.setText(f"✓ {roles.role_label(approver['role'])}")
+        self.discount_lock.setText(f"✓ {roles.role_label(approver['role'])} — {pct:g}%")
         self.discount_lock.setEnabled(False)
+        db.log_audit(
+            self.con,
+            self.user["username"],
+            "discount_approved",
+            f"by {approver['username']} — {pct:g}%",
+        )
         self.discount.setFocus()
 
     def _promo_pct(self) -> float:
@@ -441,8 +466,9 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         name = format_person_name(self.name.text())
         if name:
             self.name.setText(name)  # reflect the tidy form back in the field
-        if not name:
-            toast_warn(self, "Reception", "Patient name is required.")
+        # require a real name — not blank, and not digits/punctuation only
+        if not name or not re.search(r"[^\W\d_]", name):
+            toast_warn(self, "Reception", "Enter a valid patient name.")
             return
         if not self.cart:
             toast_warn(self, "Reception", "Add at least one test.")
@@ -450,33 +476,41 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         # Re-validate the discount at save (defence-in-depth — don't trust only the
         # widget's enabled state). A discount ABOVE the auto-applied promo needs the
         # apply_discount capability or a recorded manager approval.
-        if self.discount.value() > self._promo_pct() + 1e-9 and not (
-            roles.can(self.user["role"], "apply_discount") or self._discount_approved_by
+        if self.discount.value() > self._promo_pct() + 1e-9 and not roles.can(
+            self.user["role"], "apply_discount"
         ):
-            toast_warn(
-                self,
-                "Discount",
-                "A discount above the promo needs manager/admin approval.",
-            )
-            return
+            # a cashier needs an approval, AND the discount must not exceed the amount
+            # the manager actually approved (not merely "a discount was approved").
+            ceiling = max(self._promo_pct(), self._discount_approved_pct)
+            if not self._discount_approved_by or self.discount.value() > ceiling + 1e-9:
+                toast_warn(
+                    self,
+                    "Discount",
+                    "A discount above the promo needs manager/admin approval "
+                    "for that amount.",
+                )
+                return
         c = self.con
         title = self.title.currentText().strip()
         mr_no = self.mr_no.text().strip()
-        # A manually-entered Patient ID in the new YY-…-NN<L> format is checked for
-        # typos via its trailing check letter; legacy 'MR…'/free-form ids pass through.
-        if (
-            mr_no
-            and mr_no[:2].isdigit()
-            and "-" in mr_no
-            and not db.validate_patient_id(mr_no)
-        ):
-            toast_warn(
-                self,
-                "Patient ID",
-                "That Patient ID looks mistyped — its check letter doesn't match.\n"
-                "Leave it blank to auto-generate one, or re-enter it correctly.",
-            )
-            return
+        # A manually-entered Patient ID in the new YY-…-NN<L> format is typo-checked via
+        # its trailing check letter. Accept it typed WITHOUT the dashes (e.g. 2600043K)
+        # by re-inserting them, and store our-format ids in canonical UPPER-dashed form.
+        # Legacy 'MR…' / free-form ids pass through unchanged.
+        cand = mr_no.upper()
+        m = re.fullmatch(r"(\d{2})(\d{3})(\d{2})([A-Z])", cand)
+        if m:
+            cand = f"{m.group(1)}-{m.group(2)}-{m.group(3)}{m.group(4)}"
+        if cand[:2].isdigit() and "-" in cand:  # looks like our new Patient-ID format
+            if not db.validate_patient_id(cand):
+                toast_warn(
+                    self,
+                    "Patient ID",
+                    "That Patient ID looks mistyped — its check letter doesn't match.\n"
+                    "Leave it blank to auto-generate one, or re-enter it correctly.",
+                )
+                return
+            mr_no = cand  # canonical form
         specimen = self.specimen.currentText().strip()
         cc = db.get_setting(c, "whatsapp_country_code", "92") or "92"
         tel = normalize_phone(self.tel.text(), cc)
@@ -601,8 +635,11 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         self.paid.setValue(0)
         self.wa_consent.setChecked(True)
         self.payment_method.setCurrentIndex(0)
-        # reset the discount-approval lock for cashiers, then re-apply any promo
+        # reset the discount-approval lock + approved ceiling for cashiers, then
+        # re-apply any promo
         self._discount_approved_by = None
+        self._discount_approved_pct = 0.0
+        self.discount.setMaximum(100)  # undo the per-approval cap
         if not self._can_discount:
             self.discount.setEnabled(False)
             self.discount_lock.setText("🔒 Approve")

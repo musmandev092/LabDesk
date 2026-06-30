@@ -404,7 +404,7 @@ wheels = [
 
 [[package]]
 name = "labdesk"
-version = "1.1.13"
+version = "1.1.14"
 source = { editable = "." }
 dependencies = [
     { name = "jeepney" },
