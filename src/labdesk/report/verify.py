@@ -67,7 +67,12 @@ def report_fingerprint(
     ).fetchone()
     if not r:
         return ""
-    parts = [version, r["lab_no"] or "", r["patient_name"] or "", r["reported_at"] or ""]
+    parts = [
+        version,
+        r["lab_no"] or "",
+        r["patient_name"] or "",
+        r["reported_at"] or "",
+    ]
     for row in con.execute(
         "SELECT name, value, hidden FROM results res "
         "JOIN receipt_items ri ON ri.id = res.receipt_item_id "

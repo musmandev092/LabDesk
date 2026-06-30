@@ -88,7 +88,9 @@ class TestDialog(QDialog):
             self.sample.setCurrentText(data["sample_required"] or "")
             self.head.setText(data["report_head"] or "")
             self.method.setPlainText(data["method_note"] or "")
-            rc = (data["render_category"] if "render_category" in data.keys() else "") or ""
+            rc = (
+                data["render_category"] if "render_category" in data.keys() else ""
+            ) or ""
             idx = self.render_cat.findData(rc)
             self.render_cat.setCurrentIndex(idx if idx >= 0 else 0)
         btns = QHBoxLayout()

@@ -116,7 +116,7 @@ def test_real_lock_within_window_still_honoured(db, con):
     _make_user(db, con)
     con.execute(
         "UPDATE users SET locked_until=? WHERE username='bob'",
-        (str(time.time() + db._LOCK_SECONDS), ),
+        (str(time.time() + db._LOCK_SECONDS),),
     )
     con.commit()
     assert db.lock_remaining(con, "bob") > 0

@@ -415,7 +415,9 @@ class SettingsPage(
         # defence-in-depth: settings writes are admin-level; gate the action too
         # (consistent with the other mutating actions, not just page visibility).
         if not can(self.user["role"], "edit_settings"):
-            toast_warn(self, "Settings", "You don't have permission to change settings.")
+            toast_warn(
+                self, "Settings", "You don't have permission to change settings."
+            )
             return
         # reject non-numeric / out-of-range numeric fields before anything is written
         num_err = self._validate_numeric()

@@ -203,7 +203,9 @@ def is_local_url(url: str) -> bool:
 def wa_number(raw: str, cc: str) -> str | None:
     """Local phone → wuzapi recipient (digits, country code, no +/@), e.g.
     03001234567 → 923001234567. Returns None if the number isn't plausible."""
-    cc = "".join(ch for ch in (cc or "") if ch.isdigit()) or "92"  # tolerate '+92'/' 92'
+    cc = (
+        "".join(ch for ch in (cc or "") if ch.isdigit()) or "92"
+    )  # tolerate '+92'/' 92'
     local = normalize_phone(raw, cc)  # canonical 03XXXXXXXXX
     if not local:
         return None

@@ -331,7 +331,10 @@ def test_drop_orphan_subheads_pure():
     rows = [
         {"kind": "subhead", "text": "A"},  # has a row under it -> kept
         {"kind": "row", "name": "x"},
-        {"kind": "subhead", "text": "B"},  # immediately followed by another head -> drop
+        {
+            "kind": "subhead",
+            "text": "B",
+        },  # immediately followed by another head -> drop
         {"kind": "subhead", "text": "C"},  # has a row under it -> kept
         {"kind": "row", "name": "y"},
         {"kind": "subhead", "text": "D"},  # nothing after it -> drop
@@ -374,7 +377,9 @@ def test_numeric_blank_with_history_is_labelled_no_result(con):
     ).fetchone()
     pid, pname = p["id"], p["name"]
     con.execute("INSERT INTO patients(id,name,sex) VALUES (88,'P','Male')")
-    con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES ('show_history','1')")
+    con.execute(
+        "INSERT OR REPLACE INTO settings(key,value) VALUES ('show_history','1')"
+    )
     # previous visit carries a value for this parameter
     con.execute(
         "INSERT INTO receipts(id,lab_no,patient_id,received_at,reported_at,status) "

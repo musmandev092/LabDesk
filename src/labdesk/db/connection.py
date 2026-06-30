@@ -375,11 +375,13 @@ def _sync_catalog_from_seed(con: sqlite3.Connection) -> None:
         tph = ", ".join("?" for _ in tcols)
         have_t = {
             r[0]
-            for r in con.execute("SELECT legacy_no FROM tests WHERE legacy_no IS NOT NULL")
+            for r in con.execute(
+                "SELECT legacy_no FROM tests WHERE legacy_no IS NOT NULL"
+            )
         }
         id_map: dict = {}  # seed tests.id -> live tests.id (every seed test present)
         for srow in con.execute(
-            f'SELECT id, legacy_no, {tlist} FROM seed.tests ORDER BY id'
+            f"SELECT id, legacy_no, {tlist} FROM seed.tests ORDER BY id"
         ).fetchall():
             sid, legacy = srow[0], srow[1]
             if legacy is not None and legacy in have_t:
@@ -397,7 +399,9 @@ def _sync_catalog_from_seed(con: sqlite3.Connection) -> None:
                 have_t.add(legacy)
 
         pcols = [r[1] for r in con.execute('PRAGMA table_info("test_parameters")')]
-        spcols = {r[1] for r in con.execute("PRAGMA seed.table_info('test_parameters')")}
+        spcols = {
+            r[1] for r in con.execute("PRAGMA seed.table_info('test_parameters')")
+        }
         pcols = [c for c in pcols if c in spcols and c != "id"]  # keeps test_id
         plist = ", ".join(f'"{c}"' for c in pcols)
         pph = ", ".join("?" for _ in pcols)
@@ -417,7 +421,9 @@ def _sync_catalog_from_seed(con: sqlite3.Connection) -> None:
             key = (new_tid, vals[si], (vals[ni] or ""))
             if key in have_p:
                 continue
-            con.execute(f"INSERT INTO test_parameters ({plist}) VALUES ({pph})", tuple(vals))
+            con.execute(
+                f"INSERT INTO test_parameters ({plist}) VALUES ({pph})", tuple(vals)
+            )
             have_p.add(key)
 
         # bump catalog_version ONLY after the rows actually landed, so a partial /

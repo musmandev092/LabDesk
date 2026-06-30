@@ -43,7 +43,9 @@ def test_income_by_method_joins_receipt_method(db, con):
 def test_verify_covers_impression_and_keeps_v1_valid(con):
     rid = make_receipt(con, status="reported")
     iid = make_item(con, rid, test_id=678, test_name="USG")
-    con.execute("UPDATE receipt_items SET conclusion='Normal study.' WHERE id=?", (iid,))
+    con.execute(
+        "UPDATE receipt_items SET conclusion='Normal study.' WHERE id=?", (iid,)
+    )
     con.execute(
         "INSERT INTO results(receipt_item_id,parameter_id,seq,part_type,name,value) "
         "VALUES(?,NULL,0,'N','Result','x')",
@@ -80,20 +82,29 @@ def test_catalog_resync_recovers_id_collision(db, con):
 
     C._sync_catalog_from_seed(con)
     # shipped test recovered (by legacy_no) AND the custom test survived
-    assert con.execute(
-        "SELECT COUNT(*) FROM tests WHERE legacy_no=?", (legacy,)
-    ).fetchone()[0] == 1
-    assert con.execute(
-        "SELECT COUNT(*) FROM tests WHERE name='My Custom Test'"
-    ).fetchone()[0] == 1
+    assert (
+        con.execute(
+            "SELECT COUNT(*) FROM tests WHERE legacy_no=?", (legacy,)
+        ).fetchone()[0]
+        == 1
+    )
+    assert (
+        con.execute(
+            "SELECT COUNT(*) FROM tests WHERE name='My Custom Test'"
+        ).fetchone()[0]
+        == 1
+    )
 
     # idempotent: a second sync adds no duplicates
     con.execute("UPDATE settings SET value='1' WHERE key='catalog_version'")
     con.commit()
     C._sync_catalog_from_seed(con)
-    assert con.execute(
-        "SELECT COUNT(*) FROM tests WHERE legacy_no=?", (legacy,)
-    ).fetchone()[0] == 1
+    assert (
+        con.execute(
+            "SELECT COUNT(*) FROM tests WHERE legacy_no=?", (legacy,)
+        ).fetchone()[0]
+        == 1
+    )
 
 
 # --------------------------------------------------------------------------

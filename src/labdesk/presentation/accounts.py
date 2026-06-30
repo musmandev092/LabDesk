@@ -346,7 +346,11 @@ class AccountsPage(QWidget):
             return
         try:
             db.receive_due(
-                self.con, rid, amount, self.user["username"], actor_role=self.user["role"]
+                self.con,
+                rid,
+                amount,
+                self.user["username"],
+                actor_role=self.user["role"],
             )
         except PermissionError:
             QMessageBox.warning(
