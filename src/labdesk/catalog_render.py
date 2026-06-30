@@ -158,7 +158,7 @@ def classify(test: object, params: list) -> str:
 
     # 1b. Obstetric ultrasound — biometry table (measurements + units) + impression,
     #     checked before the generic descriptive-imaging rule below.
-    if any(k in tname for k in _OBSTETRIC) or (any(k in head for k in _OBSTETRIC)):
+    if any(k in tname for k in _OBSTETRIC) or any(k in head for k in _OBSTETRIC):
         return "obstetric"
 
     # 2. Descriptive / imaging / narrative — strong head/name signal wins outright.

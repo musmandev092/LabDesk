@@ -27,8 +27,6 @@ REPORT_READY = ("reported", "delivered")
 from .receipt_dialogs import _EditReceiptDialog
 import contextlib
 
-REPORT_READY = ("reported", "delivered")
-
 
 class ReceiptsMutationsMixin:
     def receive_due(self) -> None:

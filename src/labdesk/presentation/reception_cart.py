@@ -155,5 +155,3 @@ class ReceptionCartMixin:
         self.change.setText(money(change, cur))
         self.change_lbl.setVisible(change > 0)
         self.change.setVisible(change > 0)
-        self._net = net
-        self._sub = sub

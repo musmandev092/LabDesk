@@ -126,8 +126,6 @@ class AccountsPage(QWidget):
         cur = db.currency(c)
         f = self.from_date.date().toString("yyyy-MM-dd")
         t = self.to_date.date().toString("yyyy-MM-dd")
-        # income = earned revenue, capped at the bill (MIN(paid, net_amount)); an
-        # over-payment is change handed back, not income.
         # income = cash actually booked in the period, from the LEDGER by event date,
         # so a due collected / bill edited / voided later counts in the month it
         # happened (not the month the bill was created). See db.income_between.

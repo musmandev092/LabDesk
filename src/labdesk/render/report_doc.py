@@ -251,7 +251,7 @@ def _ref_lines(res, sex: str | None) -> tuple[list[str], str]:
     one = m or f
     if one:
         return [one], one
-    return [ln for ln in ref_text.split("\n")] or [""], ref_text
+    return ref_text.split("\n") or [""], ref_text
 
 
 def _measure_test(d: Doc, con, item, sex: str | None, receipt) -> dict[str, object]:
@@ -326,7 +326,7 @@ def _measure_test(d: Doc, con, item, sex: str | None, receipt) -> dict[str, obje
                 "name": name,
                 "ref_lines": ref_ls,
                 "flag": flag,
-                "unit": res["units"] or "",
+                "unit": unit,
                 "pid": pid,
                 "value": res["value"],
                 "hist": hist,
@@ -1465,7 +1465,7 @@ def build_report(
     total_pages = _count_report_pages(con, g, r, sex, layouts)
 
     page_no = 0
-    for idx, (kind, lay) in enumerate(layouts):
+    for kind, lay in layouts:
         if page_no > 0:
             d.new_page()
         page_no += 1

@@ -24,8 +24,6 @@ REPORT_READY = ("reported", "delivered")
 
 from .receipt_dialogs import _PreviewDialog
 
-REPORT_READY = ("reported", "delivered")
-
 
 class ReceiptsOutputMixin:
     def _preview(self, kind: str) -> None:

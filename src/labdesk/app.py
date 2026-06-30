@@ -202,7 +202,6 @@ def _integrate_appimage(con) -> str | None:
 def _setup_crash_logging() -> None:
     """Log uncaught exceptions to a rotating file under the data dir and show the
     user where to find the details, instead of the app vanishing silently."""
-    import logging
     from logging.handlers import RotatingFileHandler
 
     logdir = db.data_dir() / "logs"
@@ -243,8 +242,6 @@ def _db_damaged_notice(exc: Exception) -> None:
     """Show a clear, recoverable message when the database can't be opened/read
     (corruption, or a key that decrypts the header but not all pages) instead of the
     generic crash dialog. Points the user at their backups + the Restore action."""
-    import logging
-
     logging.getLogger("labdesk").error("Database open/read failed: %r", exc)
     if _selftest():
         return
@@ -421,7 +418,6 @@ def run(argv: list[str]) -> int:
     # runs later, inside init_db, after the splash is already gone.)
     splash = None
     if not _selftest() and APP_ICON.exists():
-        from PySide6.QtCore import Qt
         from PySide6.QtGui import QPixmap
         from PySide6.QtWidgets import QSplashScreen
 
@@ -440,8 +436,6 @@ def run(argv: list[str]) -> int:
     # restore a backup or start anew only once the copy is licensed for this machine.
     # Activation needs no DB (it reads license.lic from the data dir). Gated by
     # licensing.enforced() so dev runs and the self-test are never blocked.
-    from . import licensing
-
     license_just_activated = False
     if not _selftest() and licensing.enforced():
         if splash is not None:

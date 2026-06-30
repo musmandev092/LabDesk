@@ -33,7 +33,7 @@ def format_patient_id(seq: int, year: int | None = None) -> str:
     `year` defaults to the current local year."""
     yy = f"{(year if year is not None else int(time.strftime('%Y'))) % 100:02d}"
     s = f"{int(seq):05d}"
-    head, tail = s[:-2], s[-2:]  # all but last 2, then last 2
+    head, tail = s[:-2], s[-2:]
     letter = _pid_check_letter(yy + s)
     return f"{yy}-{head}-{tail}{letter}"
 

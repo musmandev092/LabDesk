@@ -45,7 +45,6 @@ from .widgets import (
 _LABEL_W = 200  # shared label-column width so all settings cards align
 
 
-# (key, label) — plain text settings grouped per section
 from .settings_backup import BackupSettingsMixin
 from .settings_fields import (
     LAB_FIELDS,

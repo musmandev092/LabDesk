@@ -591,7 +591,6 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
             return
         rid = res.receipt_id
         lab_no = res.lab_no
-        self._last_receipt = rid
         # non-blocking inline confirmation (no modal to dismiss → save feels instant)
         self.statusBar_message(f"✓ Receipt {lab_no} saved.")
         if do_print:

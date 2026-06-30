@@ -122,7 +122,6 @@ class DoctorsPage(QWidget):
         self.table.doubleClicked.connect(self.edit)
         self.table.itemSelectionChanged.connect(self._update_buttons)
         lay.addWidget(self.table, 1)
-        self._ids = []
 
     def _update_buttons(self) -> None:
         has = self.table.currentRow() >= 0 and self.table.currentRow() < len(self._ids)

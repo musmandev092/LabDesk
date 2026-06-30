@@ -53,7 +53,7 @@ class ActivationDialog(QDialog):
 
         msg = QLabel(_STATE_MESSAGE.get(initial_state, _STATE_MESSAGE["unactivated"]))
         msg.setWordWrap(True)
-        if initial_state not in ("unactivated",):
+        if initial_state != "unactivated":
             msg.setStyleSheet("color:#c0392b; font-weight:600;")
         root.addWidget(msg)
 
