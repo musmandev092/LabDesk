@@ -33,19 +33,15 @@ from labdesk.licensing import _ed25519  # noqa: E402
 
 
 def signing_key_dir() -> Path:
-    """Where the vendor's signing key lives. OUTSIDE the repo, and by default OUTSIDE
-    commonly cloud-synced folders (Documents/Desktop) — a leaked private key lets
-    anyone mint licenses. Override with LABDESK_SIGNING_KEY_DIR. The legacy
-    ~/Documents location is still honoured if a key already exists there (so existing
-    vendors aren't broken), but new keys go to the XDG data dir."""
+    """Where the vendor's signing key lives — by default ~/Documents/LabDesk-signing-key/,
+    OUTSIDE the repo so the secret never sits next to the code. Override with
+    LABDESK_SIGNING_KEY_DIR. NOTE: Documents is often cloud-synced/backed-up; a leaked
+    private key lets anyone mint licenses, so keep any backup OFFLINE (the run prints a
+    warning) — or point LABDESK_SIGNING_KEY_DIR at a non-synced folder."""
     env = os.environ.get("LABDESK_SIGNING_KEY_DIR")
     if env:
         return Path(env).expanduser()
-    legacy = Path.home() / "Documents" / "LabDesk-signing-key"
-    if (legacy / "private.key").exists():
-        return legacy
-    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
-    return Path(base) / "labdesk-signing-key"
+    return Path.home() / "Documents" / "LabDesk-signing-key"
 
 
 # Keys live OUTSIDE the repo so the secret never sits next to the code.

@@ -40,7 +40,7 @@ class ReceiptsOutputMixin:
 
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            pages = render.render_pages(self.con, rid, kind)
+            pages = render.render_pages(self.con, rid, kind, pack=self._pack())
         # deliberate UI safety net: any render failure surfaces as a message, not a crash
         except Exception as e:
             toast_warn(self, "Preview", f"Could not build preview:\n{e}")
@@ -49,6 +49,12 @@ class ReceiptsOutputMixin:
             QApplication.restoreOverrideCursor()
         db.log_audit(self.con, self.user["username"], "previewed_" + kind, labno)
         _PreviewDialog(pages, self, title).exec()
+
+    def _pack(self) -> bool:
+        """Whether the report should pack multiple tests onto a shared page — the
+        inverse of the (per-print, non-persisted) 'One test per page' toggle."""
+        chk = getattr(self, "one_per_page_chk", None)
+        return not chk.isChecked() if chk is not None else True
 
     def preview(self) -> None:
         self._preview("report")
@@ -98,7 +104,14 @@ class ReceiptsOutputMixin:
         labno = self._lab_no(rid)
         try:
             report.print_doc(
-                self.con, rid, kind, self, title, printer, letterhead=letterhead
+                self.con,
+                rid,
+                kind,
+                self,
+                title,
+                printer,
+                letterhead=letterhead,
+                pack=self._pack(),
             )
             action = "printed_" + kind + ("" if letterhead else "_plain")
             db.log_audit(self.con, self.user["username"], action, labno)
@@ -172,9 +185,6 @@ class ReceiptsOutputMixin:
         )
         if not path:
             return
-        export = (
-            report.export_receipt_pdf if kind == "receipt" else report.export_report_pdf
-        )
         clicked = self.pdf_rcpt_btn if kind == "receipt" else self.pdf_rpt_btn
 
         def done(ok: bool, result) -> None:
@@ -189,9 +199,16 @@ class ReceiptsOutputMixin:
             else:
                 toast_warn(self, "PDF", f"Could not save the PDF:\n{result}")
 
+        pack = self._pack()  # read the (UI-only) toggle before the bg task runs
+
+        def work(con):
+            if kind == "receipt":
+                return report.export_receipt_pdf(con, rid, path)
+            return report.export_report_pdf(con, rid, path, pack=pack)
+
         tasks.run_in_background(
             self,
-            lambda con: export(con, rid, path),
+            work,
             done,
             clicked=clicked,
             busy_text="Saving…",

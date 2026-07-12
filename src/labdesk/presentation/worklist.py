@@ -480,12 +480,10 @@ class WorklistPage(QWidget):
                 grid.addWidget(QLabel(f"<b>{name}</b>"), row_i, 0, 1, 5)
                 row_i += 1
                 continue
+            # legacy static 'L' legend rows are never fillable and their text did not
+            # survive the catalog migration — not shown here or on the report
+            # (see render.report_doc._measure_qual). A nameless row has nothing to enter.
             if pt == "L" or not name:
-                grid.addWidget(QLabel(f"<i>{name}</i>"), row_i, 1)
-                grid.addWidget(
-                    QLabel(f"<span style='color:#555'>{ref}</span>"), row_i, 4
-                )
-                row_i += 1
                 continue
             cb = self._make_check()
             cb.setChecked(not (had and hidden.get(p["id"])))
@@ -571,15 +569,7 @@ class WorklistPage(QWidget):
                 row_i += 1
                 continue
             if pt == "L" or not name:
-                grid.addWidget(
-                    QLabel(f"<span style='color:#555'>{name or ref}</span>"),
-                    row_i,
-                    1,
-                    1,
-                    3,
-                )
-                row_i += 1
-                continue
+                continue  # legacy static legend row — not shown (see report_doc)
             cb = self._make_check()
             cb.setChecked(not (had and hidden.get(p["id"])))
             grid.addWidget(cb, row_i, 0, Qt.AlignCenter)
@@ -609,9 +599,7 @@ class WorklistPage(QWidget):
                 row_i += 1
                 continue
             if pt == "L" or not name:
-                grid.addWidget(QLabel(f"<i>{name}</i>"), row_i, 1, 1, 2)
-                row_i += 1
-                continue
+                continue  # legacy static legend row — not shown (see report_doc)
             cb = self._make_check()
             cb.setChecked(not (had and hidden.get(p["id"])))
             grid.addWidget(cb, row_i, 0, Qt.AlignCenter)

@@ -40,7 +40,7 @@ from .fingerprint import collect_signals, fingerprint_code
 # create your key pair; it fills this in. The matching PRIVATE key stays on the
 # vendor's machine and is NEVER shipped.
 # ---------------------------------------------------------------------------
-PUBLIC_KEY_B64 = "zWm5TKfRejr+uTrqpoN3te64NAWwLR6KO3y3nWswyeA="
+PUBLIC_KEY_B64 = "PY6JRxT2SXwadi0fgLZnrcqHK9VtB1quDNZTJZKhG5I="
 
 _LICENSE_NAME = "license.lic"
 _SEEN_NAME = ".license-seen"  # clock-rollback high-water mark (anti-cheat for expiry)

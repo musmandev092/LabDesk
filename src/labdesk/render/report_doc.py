@@ -698,6 +698,36 @@ def _measure_descriptive(d: Doc, con, item, sex: str | None, receipt) -> dict:
     }
 
 
+def _split_text_by_height(
+    d: Doc, text: str, font: QFont, width: float, max_h: float
+) -> tuple[str, str]:
+    """Split ``text`` at a word boundary so the head's wrapped height (in a
+    ``width``-mm box) fits within ``max_h`` mm. Returns ``(head, tail)`` with
+    ``tail == ""`` when everything fits. Words are never cut mid-character, and
+    the head always carries at least one word so pagination is guaranteed to
+    make progress even when not a single line fits in ``max_h``."""
+    import re
+
+    tokens = re.findall(r"\S+\s*", text)  # words with their trailing whitespace
+    if len(tokens) <= 1:
+        return text, ""
+    if d.text_height(text, font, width, wrap=True) <= max_h:
+        return text, ""
+    # wrapped height is monotonic in the prefix length → binary-search the
+    # largest whole-word prefix that fits (floor of 1 token = forced progress).
+    lo, hi, best = 1, len(tokens) - 1, 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if d.text_height("".join(tokens[:mid]).rstrip(), font, width, True) <= max_h:
+            best = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    head = "".join(tokens[:best]).rstrip()
+    tail = "".join(tokens[best:]).strip()
+    return head, tail
+
+
 def _draw_descriptive_table(
     d: Doc, lay: dict, x0: float, y: float
 ) -> tuple[float, list]:
@@ -735,7 +765,38 @@ def _draw_descriptive_table(
     while i < len(rows):
         row = rows[i]
         rh = row["h"]
-        if y + rh > body_bottom and i > 0:
+        if row["kind"] == "narrative" and y + rh > body_bottom:
+            # An oversized narrative paragraph (histopathology / biopsy free text)
+            # is a single row and cannot rely on the row-level page break — split
+            # it at a word boundary: draw what fits here, hand the rest back as a
+            # new narrative row so it continues on the next page.
+            avail = body_bottom - y - 3
+            line_h = d.text_height("Xg", find_f, d.content_w - 6, wrap=False)
+            if avail < line_h and i > 0:
+                break  # not even one line fits — move the whole row to next page
+            head, tail = _split_text_by_height(
+                d, row["text"], find_f, d.content_w - 6, avail
+            )
+            if tail:
+                hh = d.text_height(head, find_f, d.content_w - 6)
+                d.text(
+                    x0 + 2,
+                    y + 1,
+                    d.content_w - 4,
+                    hh + 2,
+                    head,
+                    find_f,
+                    INK,
+                    Qt.AlignLeft | Qt.AlignTop,
+                    wrap=True,
+                )
+                y += hh + 3
+                th = d.text_height(tail, find_f, d.content_w - 6)
+                rest = [{"kind": "narrative", "text": tail, "h": th + 3}]
+                return y, rest + list(rows[i + 1 :])
+            # the whole paragraph fits in the remaining space after all — fall
+            # through and draw it as a normal narrative row.
+        elif y + rh > body_bottom and i > 0:
             break
         if row["kind"] == "narrative":
             d.text(
@@ -823,8 +884,17 @@ def _measure_qual(d: Doc, con, item, sex: str | None, receipt) -> dict:
         if pt == "H":
             rows.append({"kind": "subhead", "text": name, "h": 5.2})
             continue
-        if pt == "L" or not name:
-            note = name or ref
+        # 'L' rows are legacy static "legend/interpretation" lines carried over from
+        # the VB6 catalog (e.g. Typhidot's "IgG Positive only:", Mantoux's
+        # "INTERPRETATION:"). They are never fillable — the worklist shows them
+        # read-only — and the explanatory text that once followed each label did NOT
+        # survive the catalog migration, so they printed as orphan half-lines under
+        # the result table. Drop them: a real interpretation belongs in the test's
+        # method note or the descriptive INTERPRETATION block, not as bare fragments.
+        if pt == "L":
+            continue
+        if not name:
+            note = ref
             if not note and not val:
                 continue
             h = d.text_height(note, ref_f, d.content_w - 6)
@@ -983,8 +1053,12 @@ def _measure_blood_bank(d: Doc, con, item, sex: str | None, receipt) -> dict:
         if pt == "H":
             rows.append({"kind": "subhead", "text": name, "h": 5.2})
             continue
-        if pt == "L" or not name:
-            note = name or (res["ref_text"] or "")
+        # Drop legacy static 'L' legend rows (see _measure_qual). On blood-bank
+        # reports these were cross-match placeholder dashes ("-") — pure noise.
+        if pt == "L":
+            continue
+        if not name:
+            note = res["ref_text"] or ""
             if not note and not val:
                 continue
             h = d.text_height(note, name_f, d.content_w - 6)
@@ -1307,7 +1381,7 @@ def _build_layouts(d: Doc, con, items, sex, r) -> list:
     for it in items:
         cat = category_for_test(con, it["test_id"])
         if cat == "culture":
-            layouts.append(("culture", it))
+            layouts.append(("culture", _measure_culture(d, con, it)))
         elif cat == "descriptive":
             layouts.append(("descriptive", _measure_descriptive(d, con, it, sex, r)))
         elif cat == "qualitative":
@@ -1319,63 +1393,135 @@ def _build_layouts(d: Doc, con, items, sex, r) -> list:
     return layouts
 
 
-def _draw_letterfree_item(d: Doc, con, g, r, sex, kind, lay, top: float) -> float:
-    """Draw the patient card + one test's body with NO clinic letterhead and NO
-    footer — the content a lab prints onto its own pre-printed letterhead pad.
-    Returns the end y."""
+# Vertical gap (mm) inserted between two test blocks that share a page.
+_PACK_GAP_MM = 5.0
+
+
+def _block_height(con, kind, lay) -> tuple[float, bool]:
+    """Intrinsic height (mm) of one test block — title bar + table + any conclusion/
+    method blocks, or the whole culture block — drawn from the page top, plus whether it
+    overflows a single page. Measured on a throwaway buffer; row heights are absolute mm
+    so the figure is independent of where the block is finally placed. A block that does
+    not fit on one fresh page (``multipage``) must start its own page and is drawn via
+    the per-table remaining-rows spill path."""
+    tmp = Doc(margin_mm=(8, 8, 8, 8))
+    y0 = tmp.mt
+    page_bottom = A4_H_MM - tmp.mb - REPORT_FOOTER_MM
+    draw = _draw_culture if kind == "culture" else _DRAW_BY_KIND[kind]
+    try:
+        y, remaining = draw(tmp, lay, tmp.ml, y0)
+        if remaining:
+            return (A4_H_MM, True)  # taller than a page → own page, then spill
+        # culture draws its own remarks/notes inline; other kinds have after-blocks.
+        end = y if kind == "culture" else _draw_blocks_after_table(tmp, lay, tmp.ml, y)
+        return (max(0.0, end - y0), end > page_bottom)
+    finally:
+        with contextlib.suppress(Exception):
+            tmp.tobytes()  # finalise the throwaway painter/buffer
+
+
+def _after_height(lay) -> float:
+    """Height (mm) of the conclusion/remarks/method blocks drawn below a test table,
+    measured on a throwaway buffer (0 for a culture layout, which has none)."""
+    if "item" not in lay:  # culture layouts carry no after-table blocks
+        return 0.0
+    tmp = Doc(margin_mm=(8, 8, 8, 8))
+    y0 = tmp.mt
+    try:
+        return max(0.0, _draw_blocks_after_table(tmp, lay, tmp.ml, y0) - y0)
+    finally:
+        with contextlib.suppress(Exception):
+            tmp.tobytes()
+
+
+def _measure_blocks(d: Doc, con, items, sex, r) -> list:
+    """Build ``(kind, layout, height_mm, spans_multiple_pages)`` for each receipt item,
+    ready for the packing pass."""
+    blocks = []
+    for kind, lay in _build_layouts(d, con, items, sex, r):
+        h, multipage = _block_height(con, kind, lay)
+        blocks.append((kind, lay, h, multipage))
+    return blocks
+
+
+def _paginate_report(
+    d: Doc, con, blocks, *, pack: bool, total_pages, header_fn, footer_fn, empty_msg
+) -> int:
+    """Single source of truth for report pagination + drawing. Walks the pre-measured
+    blocks in receipt order and, when ``pack`` is True, stacks as many test blocks onto a
+    page as fit (first-fit) to save paper: a block that does not fit in the space left
+    starts a fresh page, and a block taller than a page spills via the per-table
+    remaining-rows path. When ``pack`` is False every test starts its own page (the 'one
+    test per page' option). ``header_fn(d) -> body_top_y`` paints the page header and
+    returns the first content y; ``footer_fn(d, page_no, total)`` paints the footer (a
+    no-op for the plain letterhead-free copy). Returns the total page count.
+
+    Run once against a throwaway Doc to learn the page count, then again against the real
+    Doc with that ``total_pages`` so every footer's 'X of Y' agrees."""
+    body_bottom = A4_H_MM - d.mb - REPORT_FOOTER_MM
+    x0 = d.ml
+    if not blocks:
+        body_top = header_fn(d)
+        if empty_msg:
+            d.text(x0, body_top + 10, d.content_w, 10, empty_msg, _font(10), MUTED)
+        footer_fn(d, 1, 1)
+        return 1
+    page_no = 1
+    y = header_fn(d)
+    first_on_page = True
+    for kind, lay, h, multipage in blocks:
+        if not first_on_page:
+            need_break = (not pack) or multipage or (y + _PACK_GAP_MM + h > body_bottom)
+            if need_break:
+                footer_fn(d, page_no, max(total_pages or page_no, page_no))
+                d.new_page()
+                page_no += 1
+                y = header_fn(d)
+                first_on_page = True
+            else:
+                y += _PACK_GAP_MM
+        draw = _draw_culture if kind == "culture" else _DRAW_BY_KIND[kind]
+        yy, remaining = draw(d, lay, x0, y)
+        while remaining:
+            footer_fn(d, page_no, max(total_pages or page_no, page_no))
+            d.new_page()
+            page_no += 1
+            body_top = header_fn(d)
+            lay2 = dict(lay)
+            lay2["rows"] = remaining
+            yy, remaining = draw(d, lay2, x0, body_top)
+        # culture draws its own remarks/notes inline; other kinds have conclusion/
+        # remarks/method blocks below the table. If the table spilled to the very
+        # bottom of its last page, move those blocks to a fresh page instead of
+        # painting them over the signature/footer band.
+        if kind != "culture":
+            after_h = _after_height(lay)
+            if after_h and yy + after_h > body_bottom:
+                footer_fn(d, page_no, max(total_pages or page_no, page_no))
+                d.new_page()
+                page_no += 1
+                yy = header_fn(d)
+            yy = _draw_blocks_after_table(d, lay, x0, yy)
+        y = yy
+        first_on_page = False
+    footer_fn(d, page_no, max(total_pages or page_no, page_no))
+    return page_no
+
+
+def _build_report_letterfree(con, r, items, sex, g, device, images, pack: bool = True):
+    """Render the report with no clinic letterhead and no footer, so it can be printed
+    onto the lab's own pre-printed letterhead paper. Tests pack onto shared pages just
+    like the normal copy; each page opens with the patient card."""
     from . import report as R
 
-    x0 = d.ml
-    ch = _patient_card(
-        d,
-        x0,
-        top,
-        R._patient_pairs(r),
-        card_pad=(2.4, 5),
-        gap=(1.6, 4),
-        l_pt=6.6,
-        v_pt=8.4,
-        radius=5,
-        border=BORDER,
-    )
-    y = top + ch + 4
-    if kind == "culture":
-        return _draw_culture(d, con, lay, x0, y)
-    draw = _DRAW_BY_KIND[kind]
-    y, remaining = draw(d, lay, x0, y)
-    while remaining:  # a long test spilling onto more pages (rare); keep no footer
-        d.new_page()
-        lay2 = dict(lay)
-        lay2["rows"] = remaining
-        y, remaining = draw(d, lay2, x0, d.mt)
-    return _draw_blocks_after_table(d, lay, x0, y)
-
-
-def _letterfree_height(con, g, r, sex, kind, lay) -> float | None:
-    """Height (mm) of a single-page letterhead-free item, or None if it spans more
-    than one page. Measured on a throwaway in-memory page so the real render can
-    vertically centre single-page content."""
-    tmp = Doc(margin_mm=(8, 8, 8, 8), images=True)
-    end = _draw_letterfree_item(tmp, con, g, r, sex, kind, lay, tmp.mt)
-    imgs = tmp.finish()  # commits the page(s); list length == page count
-    if isinstance(imgs, list) and len(imgs) == 1:
-        return max(0.0, end - tmp.mt)
-    return None
-
-
-def _build_report_letterfree(con, r, items, sex, g, device, images):
-    """Render the report with no clinic letterhead and no footer, content vertically
-    centred, so it can be printed onto the lab's own pre-printed letterhead paper."""
     d = Doc(margin_mm=(8, 8, 8, 8), device=device, images=images)
-    layouts = _build_layouts(d, con, items, sex, r)
-    if not layouts:
-        from . import report as R
+    blocks = _measure_blocks(d, con, items, sex, r)
 
-        x0 = d.ml
+    def header_fn(dd: Doc) -> float:
         ch = _patient_card(
-            d,
-            x0,
-            d.mt + 30,
+            dd,
+            dd.ml,
+            dd.mt,
             R._patient_pairs(r),
             card_pad=(2.4, 5),
             gap=(1.6, 4),
@@ -1384,59 +1530,34 @@ def _build_report_letterfree(con, r, items, sex, g, device, images):
             radius=5,
             border=BORDER,
         )
-        d.text(
-            x0,
-            d.mt + 34 + ch,
-            d.content_w,
-            10,
-            "No tests on this receipt.",
-            _font(10),
-            MUTED,
-        )
-        return d.tobytes()
-    usable = A4_H_MM - d.mt - d.mb
-    page_no = 0
-    for kind, lay in layouts:
-        if page_no > 0:
-            d.new_page()
-        page_no += 1
-        h = _letterfree_height(con, g, r, sex, kind, lay)
-        top = d.mt + (usable - h) / 2.0 if (h and 0 < h < usable) else d.mt + 4
-        _draw_letterfree_item(d, con, g, r, sex, kind, lay, top)
+        return dd.mt + ch + 4
+
+    def footer_fn(dd: Doc, page_no: int, total: int) -> None:
+        return None
+
+    _paginate_report(
+        d,
+        con,
+        blocks,
+        pack=pack,
+        total_pages=1,
+        header_fn=header_fn,
+        footer_fn=footer_fn,
+        empty_msg="No tests on this receipt.",
+    )
     return d.tobytes()
 
 
-def _count_report_pages(con, g, r, sex, layouts) -> int:
-    """How many pages the report will span — a throwaway pagination pass that mirrors
-    the real draw loop (header + per-test body + overflow), so footer 'X of Y' totals
-    are consistent. Uses a buffer Doc (no image rasterisation); reuses the prebuilt
-    layouts (row heights are absolute mm), so it only replays the pagination math."""
-    tmp = Doc(margin_mm=(8, 8, 8, 8))
-    n = 0
-    for kind, lay in layouts:
-        if n > 0:
-            tmp.new_page()
-        n += 1
-        if kind == "culture":
-            continue
-        draw = _DRAW_BY_KIND[kind]
-        body_top = _report_header(tmp, con, g, r)
-        _, remaining = draw(tmp, lay, tmp.ml, body_top)
-        while remaining:
-            tmp.new_page()
-            n += 1
-            body_top = _report_header(tmp, con, g, r)
-            lay2 = dict(lay)
-            lay2["rows"] = remaining
-            _, remaining = draw(tmp, lay2, tmp.ml, body_top)
-    with contextlib.suppress(Exception):
-        tmp.tobytes()  # finalise the painter/buffer
-    return max(1, n)
-
-
 def build_report(
-    con, receipt_id: int, device=None, images: bool = False, letterhead: bool = True
+    con,
+    receipt_id: int,
+    device=None,
+    images: bool = False,
+    letterhead: bool = True,
+    pack: bool = True,
 ) -> bytes | list[QImage] | None:
+    """Render a patient's full report. With ``pack`` (default) several tests share a page
+    whenever they fit, to save paper; ``pack=False`` prints one test per page."""
     from . import report as R
 
     g = R._g(con)
@@ -1445,10 +1566,9 @@ def build_report(
         "SELECT * FROM receipt_items WHERE receipt_id=? ORDER BY id", (receipt_id,)
     ).fetchall()
     sex = r["sex"]
-    # "Plain" copy for a pre-printed letterhead pad: no clinic header, no footer,
-    # content centred on the page (admin-only action on the Receipts page).
+    # "Plain" copy for a pre-printed letterhead pad: no clinic header, no footer.
     if not letterhead:
-        return _build_report_letterfree(con, r, items, sex, g, device, images)
+        return _build_report_letterfree(con, r, items, sex, g, device, images, pack)
     # verification code in the footer — only for a finalised report (results in)
     code = (
         R.verification_code(con, receipt_id)
@@ -1457,84 +1577,62 @@ def build_report(
     )
 
     d = Doc(margin_mm=(8, 8, 8, 8), device=device, images=images)
-    layouts = _build_layouts(d, con, items, sex, r)
-    # True page count via a throwaway pagination pass, so EVERY footer's "X of Y"
-    # agrees even when a single long test overflows onto extra pages (the old code
-    # guessed total+1 on overflow pages and max(..) on the last, giving mismatched
-    # denominators like "1 of 3 / 2 of 2").
-    total_pages = _count_report_pages(con, g, r, sex, layouts)
+    blocks = _measure_blocks(d, con, items, sex, r)
 
-    page_no = 0
-    for kind, lay in layouts:
-        if page_no > 0:
-            d.new_page()
-        page_no += 1
-        body_top = _report_header(d, con, g, r)
-        if kind == "culture":
-            _draw_culture(d, con, lay, d.ml, body_top)
-        else:
-            draw = _DRAW_BY_KIND[kind]
-            y, remaining = draw(d, lay, d.ml, body_top)
-            while remaining:
-                _report_footer(d, con, g, page_no, total_pages, code)
-                d.new_page()
-                page_no += 1
-                body_top = _report_header(d, con, g, r)
-                lay2 = dict(lay)
-                lay2["rows"] = remaining
-                y, remaining = draw(d, lay2, d.ml, body_top)
-            _draw_blocks_after_table(d, lay, d.ml, y)
-        _report_footer(d, con, g, page_no, max(total_pages, page_no), code)
-    if not layouts:
-        body_top = _report_header(d, con, g, r)
-        d.text(
-            d.ml,
-            body_top + 10,
-            d.content_w,
-            10,
-            "No tests on this receipt.",
-            _font(10),
-            MUTED,
-        )
-        _report_footer(d, con, g, 1, 1, code)
+    def header_fn(dd: Doc) -> float:
+        return _report_header(dd, con, g, r)
+
+    def footer_fn(dd: Doc, page_no: int, total: int) -> None:
+        _report_footer(dd, con, g, page_no, total, code)
+
+    # A throwaway pagination pass first to learn the true page count, so EVERY footer's
+    # "X of Y" agrees even when packing / a long test spilling changes the total; then
+    # the real render with that total. The count pass uses the same ``images`` mode as
+    # the real render so both passes measure text with identical device metrics.
+    tmp = Doc(margin_mm=(8, 8, 8, 8), images=images)
+    total_pages = _paginate_report(
+        tmp,
+        con,
+        blocks,
+        pack=pack,
+        total_pages=None,
+        header_fn=lambda dd: _report_header(dd, con, g, r),
+        footer_fn=lambda dd, p, t: _report_footer(dd, con, g, p, t, code),
+        empty_msg="No tests on this receipt.",
+    )
+    with contextlib.suppress(Exception):
+        tmp.tobytes()  # finalise the throwaway painter/buffer
+    _paginate_report(
+        d,
+        con,
+        blocks,
+        pack=pack,
+        total_pages=total_pages,
+        header_fn=header_fn,
+        footer_fn=footer_fn,
+        empty_msg="No tests on this receipt.",
+    )
     return d.tobytes()
 
 
-def _draw_culture(d: Doc, con, item, x0: float, y: float) -> float:
+def _measure_culture(d: Doc, con, item) -> dict:
+    """Pre-measure a culture report into a row list (title + fixed fields + antibiotic
+    sensitivity grid + remarks) so it paginates like every other test kind. Row heights
+    are absolute mm; the draw side paints as many as fit and returns the rest."""
     head = con.execute(
         "SELECT report_head, method_note FROM tests WHERE id=?", (item["test_id"],)
     ).fetchone()
     title = smart_title(
         head["report_head"] if head and head["report_head"] else item["test_name"]
     )
-    d.fill_rect(x0, y, d.content_w, 6.5, TEAL)  # square edges, flush with the table
-    d.rect(x0, y, d.content_w, 6.5, TEAL_DARK, 1)
-    d.text(
-        x0 + 4,
-        y,
-        d.content_w - 8,
-        6.5,
-        title,
-        _font(11, bold=True),
-        "#ffffff",
-        Qt.AlignLeft | Qt.AlignVCenter,
-    )
-    y += 6.5
     cur = con.execute(
         "SELECT * FROM cultures WHERE receipt_item_id=? ORDER BY id DESC LIMIT 1",
         (item["id"],),
     ).fetchone()
+    rows: list = []
     if not cur:
-        d.text(
-            x0 + 2,
-            y + 2,
-            d.content_w,
-            6,
-            "No culture result entered.",
-            _font(8.6),
-            MUTED,
-        )
-        return y + 8
+        rows.append({"kind": "empty", "h": 8.0})
+        return {"title": title, "rows": rows}
     for label, val in (
         ("Specimen", cur["specimen"]),
         ("Growth", cur["growth"]),
@@ -1545,78 +1643,140 @@ def _draw_culture(d: Doc, con, item, x0: float, y: float) -> float:
     ):
         if not val:
             continue
-        # Wrap long values (specimen / organism / remarks-style text) instead of
-        # clipping them at the right edge; grow the row to fit.
+        # Wrap long values instead of clipping at the right edge; grow the row to fit.
         valw = d.content_w * 0.7 - 4
         th = d.text_height(str(val), _font(8.6, bold=True), valw, wrap=True)
-        rh = max(6.5, th + 2.6)
-        d.rect(x0, y, d.content_w * 0.3, rh, BORDER, 1)
-        d.text(
-            x0 + 2,
-            y + 1,
-            d.content_w * 0.3 - 4,
-            rh - 1,
-            label,
-            _font(8.6),
-            INK,
-            Qt.AlignLeft | Qt.AlignTop,
+        rows.append(
+            {
+                "kind": "field",
+                "label": label,
+                "value": str(val),
+                "h": max(6.5, th + 2.6),
+            }
         )
-        d.rect(x0 + d.content_w * 0.3, y, d.content_w * 0.7, rh, BORDER, 1)
-        d.text(
-            x0 + d.content_w * 0.3 + 2,
-            y + 1,
-            valw,
-            rh - 1,
-            str(val),
-            _font(8.6, bold=True),
-            INK,
-            Qt.AlignLeft | Qt.AlignTop,
-            wrap=True,
-        )
-        y += rh
     sens = con.execute(
         "SELECT antibiotic, result FROM culture_sensitivity WHERE culture_id=? ORDER BY antibiotic",
         (cur["id"],),
     ).fetchall()
     if sens:
-        y += 3
-        colour = {"S": GREEN, "I": AMBER, "R": RED}
-        full = {"S": "Sensitive", "I": "Intermediate", "R": "Resistant"}
-        d.fill_rect(x0, y, d.content_w, 7, TEAL)
-        d.text(
-            x0 + 2,
-            y,
-            d.content_w * 0.5,
-            7,
-            "ANTIBIOTIC",
-            _font(7, bold=True),
-            "#ffffff",
-            Qt.AlignLeft | Qt.AlignVCenter,
-        )
-        d.text(
-            x0 + d.content_w * 0.5,
-            y,
-            d.content_w * 0.5,
-            7,
-            "SENSITIVITY",
-            _font(7, bold=True),
-            "#ffffff",
-            Qt.AlignLeft | Qt.AlignVCenter,
-        )
-        y += 7
+        rows.append({"kind": "senshead", "h": 10.0})  # 3mm gap + 7mm header band
         for s in sens:
-            res = (s["result"] or "").upper()
             ab = s["antibiotic"] or ""
             abw = d.content_w * 0.5 - 4
             th = d.text_height(ab, _font(8.6), abw, wrap=True)
-            rh = max(6.5, th + 2.6)
+            rows.append(
+                {
+                    "kind": "sensrow",
+                    "ab": ab,
+                    "res": (s["result"] or "").upper(),
+                    "h": max(6.5, th + 2.6),
+                }
+            )
+    # Culture remarks (entered on the Microbiology screen) render as a wrapped block.
+    if cur["remarks"]:
+        rw = d.content_w - 4
+        th = d.text_height(cur["remarks"], _font(8.4), rw, wrap=True)
+        rows.append({"kind": "remarks", "text": cur["remarks"], "h": 3 + 5 + th + 2})
+    return {"title": title, "rows": rows}
+
+
+def _draw_culture(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, list]:
+    """Draw the culture title bar + as many pre-measured rows as fit; returns
+    (y_after, remaining_rows) so an oversized antibiotic panel continues on the next
+    page (the title bar and the ANTIBIOTIC/SENSITIVITY header repeat)."""
+    body_bottom = A4_H_MM - d.mb - REPORT_FOOTER_MM
+    d.fill_rect(x0, y, d.content_w, 6.5, TEAL)  # square edges, flush with the table
+    d.rect(x0, y, d.content_w, 6.5, TEAL_DARK, 1)
+    d.text(
+        x0 + 4,
+        y,
+        d.content_w - 8,
+        6.5,
+        lay["title"],
+        _font(11, bold=True),
+        "#ffffff",
+        Qt.AlignLeft | Qt.AlignVCenter,
+    )
+    y += 6.5
+    colour = {"S": GREEN, "I": AMBER, "R": RED}
+    full = {"S": "Sensitive", "I": "Intermediate", "R": "Resistant"}
+    rows = lay["rows"]
+    i = 0
+    while i < len(rows):
+        row = rows[i]
+        rh = row["h"]
+        if y + rh > body_bottom and i > 0:
+            break  # overflow → continue on the next page
+        kind = row["kind"]
+        if kind == "empty":
+            d.text(
+                x0 + 2,
+                y + 2,
+                d.content_w,
+                6,
+                "No culture result entered.",
+                _font(8.6),
+                MUTED,
+            )
+            y += rh
+        elif kind == "field":
+            d.rect(x0, y, d.content_w * 0.3, rh, BORDER, 1)
+            d.text(
+                x0 + 2,
+                y + 1,
+                d.content_w * 0.3 - 4,
+                rh - 1,
+                row["label"],
+                _font(8.6),
+                INK,
+                Qt.AlignLeft | Qt.AlignTop,
+            )
+            d.rect(x0 + d.content_w * 0.3, y, d.content_w * 0.7, rh, BORDER, 1)
+            d.text(
+                x0 + d.content_w * 0.3 + 2,
+                y + 1,
+                d.content_w * 0.7 - 4,
+                rh - 1,
+                row["value"],
+                _font(8.6, bold=True),
+                INK,
+                Qt.AlignLeft | Qt.AlignTop,
+                wrap=True,
+            )
+            y += rh
+        elif kind == "senshead":
+            y += 3
+            d.fill_rect(x0, y, d.content_w, 7, TEAL)
+            d.text(
+                x0 + 2,
+                y,
+                d.content_w * 0.5,
+                7,
+                "ANTIBIOTIC",
+                _font(7, bold=True),
+                "#ffffff",
+                Qt.AlignLeft | Qt.AlignVCenter,
+            )
+            d.text(
+                x0 + d.content_w * 0.5,
+                y,
+                d.content_w * 0.5,
+                7,
+                "SENSITIVITY",
+                _font(7, bold=True),
+                "#ffffff",
+                Qt.AlignLeft | Qt.AlignVCenter,
+            )
+            y += 7
+        elif kind == "sensrow":
+            res = row["res"]
             d.rect(x0, y, d.content_w * 0.5, rh, BORDER, 1)
             d.text(
                 x0 + 2,
                 y + 1,
-                abw,
+                d.content_w * 0.5 - 4,
                 rh - 1,
-                ab,
+                row["ab"],
                 _font(8.6),
                 INK,
                 Qt.AlignLeft | Qt.AlignTop,
@@ -1634,33 +1794,36 @@ def _draw_culture(d: Doc, con, item, x0: float, y: float) -> float:
                 Qt.AlignLeft | Qt.AlignTop,
             )
             y += rh
-    # Culture remarks (entered on the Microbiology screen) were never printed —
-    # render them as a wrapped block so technician notes reach the report.
-    if cur["remarks"]:
-        y += 3
-        d.text(
-            x0 + 2,
-            y,
-            d.content_w - 4,
-            5,
-            "Remarks",
-            _font(8.6, bold=True),
-            TEAL,
-            Qt.AlignLeft | Qt.AlignTop,
-        )
-        y += 5
-        rw = d.content_w - 4
-        th = d.text_height(cur["remarks"], _font(8.4), rw, wrap=True)
-        d.text(
-            x0 + 2,
-            y,
-            rw,
-            th + 1,
-            cur["remarks"],
-            _font(8.4),
-            INK,
-            Qt.AlignLeft | Qt.AlignTop,
-            wrap=True,
-        )
-        y += th + 2
-    return y
+        elif kind == "remarks":
+            y += 3
+            d.text(
+                x0 + 2,
+                y,
+                d.content_w - 4,
+                5,
+                "Remarks",
+                _font(8.6, bold=True),
+                TEAL,
+                Qt.AlignLeft | Qt.AlignTop,
+            )
+            y += 5
+            rw = d.content_w - 4
+            th = d.text_height(row["text"], _font(8.4), rw, wrap=True)
+            d.text(
+                x0 + 2,
+                y,
+                rw,
+                th + 1,
+                row["text"],
+                _font(8.4),
+                INK,
+                Qt.AlignLeft | Qt.AlignTop,
+                wrap=True,
+            )
+            y += th + 2
+        i += 1
+    remaining = rows[i:]
+    # If we broke mid-grid, repeat the ANTIBIOTIC/SENSITIVITY header on the next page.
+    if remaining and remaining[0]["kind"] == "sensrow":
+        remaining = [{"kind": "senshead", "h": 10.0}, *remaining]
+    return y, remaining

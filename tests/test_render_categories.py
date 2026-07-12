@@ -52,6 +52,23 @@ def test_classify_culture(con):
     assert classify(_test(con, cult), _params(con, cult)) == "culture"
 
 
+def test_occult_blood_tests_are_qualitative_not_culture(con):
+    """Regression: 'Stool/Vomitus For Occult Blood' were wrongly flagged is_culture=1
+    in the shipped catalog and routed through the culture renderer. They are simple
+    qualitative Negative/Positive tests."""
+    for name in ("Stool For Occult Blood", "Vomitus For Occult Blood"):
+        row = con.execute("SELECT id FROM tests WHERE name=?", (name,)).fetchone()
+        assert row is not None, name
+        tid = row["id"]
+        assert (
+            con.execute("SELECT is_culture FROM tests WHERE id=?", (tid,)).fetchone()[
+                "is_culture"
+            ]
+            == 0
+        )
+        assert category_for_test(con, tid) == "qualitative"
+
+
 def test_category_for_test_honours_override(con):
     # A non-NULL render_category overrides classification.
     con.execute("UPDATE tests SET render_category='qualitative' WHERE id=683")
@@ -423,6 +440,46 @@ def test_qualitative_blank_result_row_omitted(con):
     lay = report_doc._measure_qual(Doc(images=True), con, item, "Male", rcpt)
     names = [r.get("name") for r in lay["rows"] if r["kind"] == "row"]
     assert names == ["Typhidot IgG"]
+
+
+def test_qualitative_legacy_L_legend_rows_not_rendered(con):
+    """Legacy static 'L' legend/interpretation rows (e.g. Typhidot's
+    "IgG Positive only:" / "CLINICAL INTERPRETATION" fragments) are never fillable
+    and their explanatory text did not survive the catalog migration, so they must
+    NOT print as orphan note lines under the serology table (regression)."""
+    from labdesk.render.primitives import Doc
+
+    rid = make_receipt(con, status="reported")
+    iid = make_item(con, rid, test_id=597, test_name="Typhidot IgG")
+    _insert_result(con, iid, 0, "N", "Typhidot IgG", "Negative")
+    _insert_result(con, iid, 1, "L", "IgG Positive only:", "")
+    _insert_result(con, iid, 2, "L", "IgG & IgM Positive:", "")
+    _insert_result(con, iid, 3, "L", "IgM Positive only:", "")
+    _insert_result(con, iid, 4, "L", "IgG & IgM Negative:", "")
+    con.commit()
+    rcpt = con.execute("SELECT * FROM receipts WHERE id=?", (rid,)).fetchone()
+    item = con.execute("SELECT * FROM receipt_items WHERE id=?", (iid,)).fetchone()
+    lay = report_doc._measure_qual(Doc(images=True), con, item, "Female", rcpt)
+    kinds = [r["kind"] for r in lay["rows"]]
+    assert "note" not in kinds  # no orphan legend lines
+    assert [r["name"] for r in lay["rows"] if r["kind"] == "row"] == ["Typhidot IgG"]
+
+
+def test_blood_bank_legacy_L_legend_rows_not_rendered(con):
+    """Same guarantee for the blood-bank layout, where legacy 'L' rows were
+    cross-match placeholder dashes ('-')."""
+    from labdesk.render.primitives import Doc
+
+    rid = make_receipt(con, status="reported")
+    iid = make_item(con, rid, test_id=226, test_name="Cross Matching")
+    _insert_result(con, iid, 0, "N", "Blood Group", "B Positive")
+    _insert_result(con, iid, 1, "L", "-", "")
+    con.commit()
+    rcpt = con.execute("SELECT * FROM receipts WHERE id=?", (rid,)).fetchone()
+    item = con.execute("SELECT * FROM receipt_items WHERE id=?", (iid,)).fetchone()
+    lay = report_doc._measure_blood_bank(Doc(images=True), con, item, "Male", rcpt)
+    assert "note" not in [r["kind"] for r in lay["rows"]]
+    assert [r["name"] for r in lay["rows"] if r["kind"] == "row"] == ["Blood Group"]
 
 
 def test_has_enterable_content_helper():

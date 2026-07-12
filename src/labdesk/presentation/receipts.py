@@ -80,6 +80,10 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
         self.pdf_rpt_btn = _btn("Save report PDF", self.save_report_pdf)
         self.wa_rpt_btn = _btn("WhatsApp report", self.whatsapp_report)
         self.verify_rpt_btn = _btn("Verify report", self.verify_report)
+        # Per-print, non-persisted paper-saving toggle: unchecked (default) packs
+        # several tests onto a shared page; checked prints one test per page.
+        # Read directly by ReceiptsOutputMixin at preview/print/save time.
+        self.one_per_page_chk = QCheckBox("One test per page")
         self.pay_btn = _btn("Receive due", self.receive_due)
         self.deliver_btn = _btn("Mark delivered", self.mark_delivered)
         self.edit_btn = _btn("Edit bill", self.edit_receipt)
@@ -116,6 +120,8 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
         tb.addWidget(rpt_lbl)
         for b in self._report_btns:
             tb.addWidget(b)
+        # visible to every role — a per-print choice, not an admin setting
+        tb.addWidget(self.one_per_page_chk)
         # the "Print on letterhead" plain copy is an admin-only action
         if can(self.user["role"], "manage_users"):
             tb.addWidget(self.print_plain_btn)

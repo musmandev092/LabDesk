@@ -53,8 +53,10 @@ def build_test_page(printer_name: str = "", device=None) -> bytes | list[QImage]
     return d.tobytes()
 
 
-def render_pages(con, receipt_id: int, kind: str) -> bytes | list[QImage] | None:
+def render_pages(
+    con, receipt_id: int, kind: str, pack: bool = True
+) -> bytes | list[QImage] | None:
     """Render a document to a list of QImage pages (on-screen preview; no QtPdf)."""
     if kind == "receipt":
         return build_receipt(con, receipt_id, images=True)
-    return build_report(con, receipt_id, images=True)
+    return build_report(con, receipt_id, images=True, pack=pack)

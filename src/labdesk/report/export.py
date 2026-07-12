@@ -24,9 +24,11 @@ def _pdf_target(path: str) -> Path:
     return p
 
 
-def export_report_pdf(con, receipt_id: int, path: str) -> None:
+def export_report_pdf(con, receipt_id: int, path: str, pack: bool = True) -> None:
     # build_* is polymorphic on device/images; the default path always returns bytes.
-    _pdf_target(path).write_bytes(cast(bytes, render.build_report(con, receipt_id)))
+    _pdf_target(path).write_bytes(
+        cast(bytes, render.build_report(con, receipt_id, pack=pack))
+    )
 
 
 def export_receipt_pdf(con, receipt_id: int, path: str) -> None:
@@ -36,8 +38,8 @@ def export_receipt_pdf(con, receipt_id: int, path: str) -> None:
 # Build the PDF bytes natively (QPainter → QPdfWriter). Safe to run on a
 # background thread (see ui/tasks.py); the bytes are printed/previewed on the UI
 # thread. QPainter/QPdfWriter do not require the GUI thread.
-def build_report_bytes(con, receipt_id: int) -> bytes:
-    return cast(bytes, render.build_report(con, receipt_id))
+def build_report_bytes(con, receipt_id: int, pack: bool = True) -> bytes:
+    return cast(bytes, render.build_report(con, receipt_id, pack=pack))
 
 
 def build_receipt_bytes(con, receipt_id: int) -> bytes:
@@ -67,7 +69,14 @@ def _make_printer(parent, title, printer_name):
 
 
 def print_doc(
-    con, receipt_id, kind, parent, title, printer_name="", letterhead=True
+    con,
+    receipt_id,
+    kind,
+    parent,
+    title,
+    printer_name="",
+    letterhead=True,
+    pack: bool = True,
 ) -> None:
     """Render a document straight onto the chosen printer — vector output, no
     QtPdf round-trip and no patient-PII temp file. MUST run on the UI thread
@@ -82,10 +91,12 @@ def print_doc(
     elif kind == "receipt":
         render.build_receipt(con, receipt_id, device=printer)
     else:
-        render.build_report(con, receipt_id, device=printer, letterhead=letterhead)
+        render.build_report(
+            con, receipt_id, device=printer, letterhead=letterhead, pack=pack
+        )
 
 
-def print_report(con, receipt_id: int, parent=None) -> None:
+def print_report(con, receipt_id: int, parent=None, pack: bool = True) -> None:
     print_doc(
         con,
         receipt_id,
@@ -93,6 +104,7 @@ def print_report(con, receipt_id: int, parent=None) -> None:
         parent,
         "Print Report",
         db.get_setting(con, "default_printer", ""),
+        pack=pack,
     )
 
 
@@ -112,7 +124,7 @@ def print_test_page(parent=None, printer_name: str = "") -> None:
     print_doc(None, None, "testpage", parent, "Print Test Page", printer_name)
 
 
-def save_report_pdf(con, receipt_id: int, parent=None) -> str | None:
+def save_report_pdf(con, receipt_id: int, parent=None, pack: bool = True) -> str | None:
     from PySide6.QtWidgets import QFileDialog
 
     r = con.execute("SELECT lab_no FROM receipts WHERE id=?", (receipt_id,)).fetchone()
@@ -121,6 +133,6 @@ def save_report_pdf(con, receipt_id: int, parent=None) -> str | None:
         parent, "Save report PDF", default, "PDF (*.pdf)"
     )
     if path:
-        export_report_pdf(con, receipt_id, path)
+        export_report_pdf(con, receipt_id, path, pack=pack)
         return path
     return None
