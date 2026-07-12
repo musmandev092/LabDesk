@@ -159,6 +159,10 @@ class ParametersDialog(QDialog):
         # rows must be tall enough for the styled "Type" dropdown (padding + rounded
         # border) — otherwise it gets squished to a thin text-less oval.
         self.table.verticalHeader().setDefaultSectionSize(40)
+        # cell editors are QLineEdits; the app-wide 8px input padding squeezes their
+        # text region inside a table row until it clips vertically. Give the in-table
+        # editors a tighter padding so the typed text is fully visible.
+        self.table.setStyleSheet("QLineEdit { padding: 1px 6px; }")
         lay.addWidget(self.table, 1)
 
         bar = QHBoxLayout()
