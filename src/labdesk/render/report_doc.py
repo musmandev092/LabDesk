@@ -1408,7 +1408,7 @@ def _after_height(lay) -> float:
     measured on a throwaway buffer (0 for a culture layout, which has none)."""
     if "item" not in lay:  # culture layouts carry no after-table blocks
         return 0.0
-    tmp = Doc(margin_mm=(8, 8, 8, 8))
+    tmp = Doc(margin_mm=(8, 8, 8, 8), measure=True)
     y0 = tmp.mt
     try:
         return max(0.0, _draw_blocks_after_table(tmp, lay, tmp.ml, y0) - y0)
@@ -1425,7 +1425,7 @@ def _block_height(con, kind, lay) -> tuple[float, bool, float]:
     trailing conclusion/remarks/method blocks (needed to decide, when a long table
     spills, whether those trailing blocks still fit). Row heights are absolute mm, so
     the figures are independent of where the block is finally placed."""
-    tmp = Doc(margin_mm=(8, 8, 8, 8))
+    tmp = Doc(margin_mm=(8, 8, 8, 8), measure=True)
     y0 = tmp.mt
     page_bottom = A4_H_MM - tmp.mb - REPORT_FOOTER_MM
     draw = _draw_culture if kind == "culture" else _DRAW_BY_KIND[kind]
@@ -1608,7 +1608,7 @@ def build_report(
     # — that would double preview/print cost for zero benefit; page breaks come from the
     # pre-measured absolute-mm block heights, and the footer total is clamped to
     # ``max(total, page_no)`` so it can never read less than the current page.
-    tmp = Doc(margin_mm=(8, 8, 8, 8))
+    tmp = Doc(margin_mm=(8, 8, 8, 8), measure=True)
     total_pages = _paginate_report(
         tmp,
         con,

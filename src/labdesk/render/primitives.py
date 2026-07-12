@@ -33,8 +33,14 @@ class Doc:
         device=None,
         images: bool = False,
         img_scale: float = 1.0,
+        measure: bool = False,
     ) -> None:
         _ensure_app()
+        # Measure mode: the painting primitives (text/rect/fill/image…) become no-ops
+        # while all GEOMETRY (font metrics, text_height, y-advancement, image sizing)
+        # stays exact. Used to pre-measure block heights and to count pages without
+        # rasterising a single glyph — layout is byte-identical to a real render.
+        self._measure = measure
         self._images_mode = images
         # On-screen preview can rasterise at a fraction of print resolution: the pixel
         # buffer shrinks by ``img_scale`` (so ~1/scale² the work + memory) while the
@@ -125,11 +131,15 @@ class Doc:
         return QFontMetricsF(font, self.p.device())
 
     def fill_rect(self, x: float, y: float, w: float, h: float, color: str) -> None:
+        if self._measure:
+            return
         self.p.fillRect(QRectF(mm(x), mm(y), mm(w), mm(h)), QColor(color))
 
     def rect(
         self, x: float, y: float, w: float, h: float, color: str, width_px: float = 1.0
     ) -> None:
+        if self._measure:
+            return
         self.p.setBrush(Qt.NoBrush)
         self.p.setPen(QPen(QColor(color), mm(px(width_px))))
         self.p.drawRect(QRectF(mm(x), mm(y), mm(w), mm(h)))
@@ -145,6 +155,8 @@ class Doc:
         border: str | None = None,
         border_px: float = 1.0,
     ) -> None:
+        if self._measure:
+            return
         r = mm(px(radius_px))
         path = QPainterPath()
         path.addRoundedRect(QRectF(mm(x), mm(y), mm(w), mm(h)), r, r)
@@ -159,6 +171,8 @@ class Doc:
         self, x: float, y: float, w: float, h: float, radius_px: float, fill: str
     ) -> None:
         """Rectangle with only the top two corners rounded (title bar)."""
+        if self._measure:
+            return
         r = mm(px(radius_px))
         path = QPainterPath()
         path.moveTo(mm(x), mm(y + h))
@@ -173,6 +187,8 @@ class Doc:
     def hline(
         self, x: float, y: float, w: float, color: str, width_px: float = 1.0
     ) -> None:
+        if self._measure:
+            return
         self.p.setPen(QPen(QColor(color), mm(px(width_px))))
         self.p.drawLine(
             QRectF(mm(x), mm(y), mm(w), 0).topLeft(),
@@ -191,6 +207,8 @@ class Doc:
         align=Qt.AlignLeft | Qt.AlignVCenter,
         wrap: bool = False,
     ) -> None:
+        if self._measure:
+            return
         self.p.setFont(font)
         self.p.setPen(QColor(color))
         flags = int(align)
@@ -212,13 +230,14 @@ class Doc:
         for s, font, color in runs:
             fmpx = self.fm(font)
             adv = fmpx.horizontalAdvance(s) / DPI * 25.4
-            self.p.setFont(font)
-            self.p.setPen(QColor(color))
-            self.p.drawText(
-                QRectF(mm(cx), mm(y), mm(adv + 1), mm(h)),
-                int(Qt.AlignLeft | Qt.AlignVCenter),
-                s,
-            )
+            if not self._measure:  # width still needed for layout; skip only the paint
+                self.p.setFont(font)
+                self.p.setPen(QColor(color))
+                self.p.drawText(
+                    QRectF(mm(cx), mm(y), mm(adv + 1), mm(h)),
+                    int(Qt.AlignLeft | Qt.AlignVCenter),
+                    s,
+                )
             cx += adv
         return cx - x
 
@@ -239,9 +258,10 @@ class Doc:
         w_mm = scaled.width() / DPI * 25.4
         if center_w is not None:  # horizontally centre within [x, x+center_w]
             x = x + (center_w - w_mm) / 2
-        self.p.drawImage(
-            QRectF(mm(x), mm(y), scaled.width(), scaled.height()).topLeft(), scaled
-        )
+        if not self._measure:  # width still needed for layout; skip only the blit
+            self.p.drawImage(
+                QRectF(mm(x), mm(y), scaled.width(), scaled.height()).topLeft(), scaled
+            )
         return w_mm  # drawn width in mm
 
     def text_height(
