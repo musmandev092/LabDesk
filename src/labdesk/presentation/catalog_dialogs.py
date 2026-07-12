@@ -156,6 +156,9 @@ class ParametersDialog(QDialog):
         for c in range(2, 6):
             h.setSectionResizeMode(c, QHeaderView.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
+        # rows must be tall enough for the styled "Type" dropdown (padding + rounded
+        # border) — otherwise it gets squished to a thin text-less oval.
+        self.table.verticalHeader().setDefaultSectionSize(40)
         lay.addWidget(self.table, 1)
 
         bar = QHBoxLayout()
@@ -199,6 +202,7 @@ class ParametersDialog(QDialog):
             cb.addItem(lbl, code)
         idx = cb.findData((value or "N").upper())
         cb.setCurrentIndex(idx if idx >= 0 else 0)
+        cb.setMinimumHeight(30)  # so the label text isn't clipped inside the cell
         return cb
 
     def _render(self) -> None:
