@@ -1352,17 +1352,23 @@ def _draw_blocks_after_table(d: Doc, lay: dict, x0: float, y: float) -> float:
         note = re.sub(r"[ \t]*\n[ \t]*\n+", "\n", head["method_note"].replace("\r", ""))
         note = re.sub(r"[ \t]{2,}", " ", note).strip()
         y += 2.5
+        text = f"Method / Comments: {note}"
+        mf = _font(7.5)
+        # measure the real wrapped height and ADVANCE y past it — otherwise the block's
+        # reported height is short by the note and the next packed test overlaps it.
+        mh = d.text_height(text, mf, d.content_w, wrap=True)
         d.text(
             x0,
             y,
             d.content_w,
-            40,
-            f"Method / Comments: {note}",
-            _font(7.5),
+            mh + 2,
+            text,
+            mf,
             MUTED,
             Qt.AlignLeft | Qt.AlignTop,
             wrap=True,
         )
+        y += mh + 2
     return y
 
 
@@ -1397,29 +1403,6 @@ def _build_layouts(d: Doc, con, items, sex, r) -> list:
 _PACK_GAP_MM = 5.0
 
 
-def _block_height(con, kind, lay) -> tuple[float, bool]:
-    """Intrinsic height (mm) of one test block — title bar + table + any conclusion/
-    method blocks, or the whole culture block — drawn from the page top, plus whether it
-    overflows a single page. Measured on a throwaway buffer; row heights are absolute mm
-    so the figure is independent of where the block is finally placed. A block that does
-    not fit on one fresh page (``multipage``) must start its own page and is drawn via
-    the per-table remaining-rows spill path."""
-    tmp = Doc(margin_mm=(8, 8, 8, 8))
-    y0 = tmp.mt
-    page_bottom = A4_H_MM - tmp.mb - REPORT_FOOTER_MM
-    draw = _draw_culture if kind == "culture" else _DRAW_BY_KIND[kind]
-    try:
-        y, remaining = draw(tmp, lay, tmp.ml, y0)
-        if remaining:
-            return (A4_H_MM, True)  # taller than a page → own page, then spill
-        # culture draws its own remarks/notes inline; other kinds have after-blocks.
-        end = y if kind == "culture" else _draw_blocks_after_table(tmp, lay, tmp.ml, y)
-        return (max(0.0, end - y0), end > page_bottom)
-    finally:
-        with contextlib.suppress(Exception):
-            tmp.tobytes()  # finalise the throwaway painter/buffer
-
-
 def _after_height(lay) -> float:
     """Height (mm) of the conclusion/remarks/method blocks drawn below a test table,
     measured on a throwaway buffer (0 for a culture layout, which has none)."""
@@ -1434,13 +1417,41 @@ def _after_height(lay) -> float:
             tmp.tobytes()
 
 
+def _block_height(con, kind, lay) -> tuple[float, bool, float]:
+    """Measure one test block on a throwaway buffer, in a SINGLE draw pass. Returns
+    ``(height_mm, spans_multiple_pages, after_blocks_height_mm)`` — the block's intrinsic
+    height (title bar + table + any conclusion/remarks/method blocks, or the whole
+    culture block), whether it overflows one fresh page, and the height of just the
+    trailing conclusion/remarks/method blocks (needed to decide, when a long table
+    spills, whether those trailing blocks still fit). Row heights are absolute mm, so
+    the figures are independent of where the block is finally placed."""
+    tmp = Doc(margin_mm=(8, 8, 8, 8))
+    y0 = tmp.mt
+    page_bottom = A4_H_MM - tmp.mb - REPORT_FOOTER_MM
+    draw = _draw_culture if kind == "culture" else _DRAW_BY_KIND[kind]
+    try:
+        y, remaining = draw(tmp, lay, tmp.ml, y0)
+        if remaining:
+            # taller than a page → own page; after-blocks measured separately (rare).
+            after = 0.0 if kind == "culture" else _after_height(lay)
+            return (A4_H_MM, True, after)
+        if kind == "culture":  # culture draws its own remarks/notes inline
+            return (max(0.0, y - y0), y > page_bottom, 0.0)
+        end = _draw_blocks_after_table(tmp, lay, tmp.ml, y)
+        return (max(0.0, end - y0), end > page_bottom, max(0.0, end - y))
+    finally:
+        with contextlib.suppress(Exception):
+            tmp.tobytes()  # finalise the throwaway painter/buffer
+
+
 def _measure_blocks(d: Doc, con, items, sex, r) -> list:
-    """Build ``(kind, layout, height_mm, spans_multiple_pages)`` for each receipt item,
-    ready for the packing pass."""
+    """Build ``(kind, layout, height_mm, spans_multiple_pages, after_blocks_height)``
+    for each receipt item, ready for the packing pass. Everything is measured ONCE
+    here so the two pagination passes (count + real) do no extra measurement."""
     blocks = []
     for kind, lay in _build_layouts(d, con, items, sex, r):
-        h, multipage = _block_height(con, kind, lay)
-        blocks.append((kind, lay, h, multipage))
+        h, multipage, after_h = _block_height(con, kind, lay)
+        blocks.append((kind, lay, h, multipage, after_h))
     return blocks
 
 
@@ -1469,7 +1480,7 @@ def _paginate_report(
     page_no = 1
     y = header_fn(d)
     first_on_page = True
-    for kind, lay, h, multipage in blocks:
+    for kind, lay, h, multipage, after_h in blocks:
         if not first_on_page:
             need_break = (not pack) or multipage or (y + _PACK_GAP_MM + h > body_bottom)
             if need_break:
@@ -1493,9 +1504,8 @@ def _paginate_report(
         # culture draws its own remarks/notes inline; other kinds have conclusion/
         # remarks/method blocks below the table. If the table spilled to the very
         # bottom of its last page, move those blocks to a fresh page instead of
-        # painting them over the signature/footer band.
+        # painting them over the signature/footer band. (after_h precomputed once.)
         if kind != "culture":
-            after_h = _after_height(lay)
             if after_h and yy + after_h > body_bottom:
                 footer_fn(d, page_no, max(total_pages or page_no, page_no))
                 d.new_page()
@@ -1508,13 +1518,15 @@ def _paginate_report(
     return page_no
 
 
-def _build_report_letterfree(con, r, items, sex, g, device, images, pack: bool = True):
+def _build_report_letterfree(
+    con, r, items, sex, g, device, images, pack: bool = True, img_scale: float = 1.0
+):
     """Render the report with no clinic letterhead and no footer, so it can be printed
     onto the lab's own pre-printed letterhead paper. Tests pack onto shared pages just
     like the normal copy; each page opens with the patient card."""
     from . import report as R
 
-    d = Doc(margin_mm=(8, 8, 8, 8), device=device, images=images)
+    d = Doc(margin_mm=(8, 8, 8, 8), device=device, images=images, img_scale=img_scale)
     blocks = _measure_blocks(d, con, items, sex, r)
 
     def header_fn(dd: Doc) -> float:
@@ -1555,9 +1567,12 @@ def build_report(
     images: bool = False,
     letterhead: bool = True,
     pack: bool = True,
+    img_scale: float = 1.0,
 ) -> bytes | list[QImage] | None:
     """Render a patient's full report. With ``pack`` (default) several tests share a page
-    whenever they fit, to save paper; ``pack=False`` prints one test per page."""
+    whenever they fit, to save paper; ``pack=False`` prints one test per page.
+    ``img_scale`` (< 1.0, images mode only) rasterises at a fraction of print resolution
+    for a faster on-screen preview — layout is identical, only the pixel buffer shrinks."""
     from . import report as R
 
     g = R._g(con)
@@ -1568,7 +1583,9 @@ def build_report(
     sex = r["sex"]
     # "Plain" copy for a pre-printed letterhead pad: no clinic header, no footer.
     if not letterhead:
-        return _build_report_letterfree(con, r, items, sex, g, device, images, pack)
+        return _build_report_letterfree(
+            con, r, items, sex, g, device, images, pack, img_scale
+        )
     # verification code in the footer — only for a finalised report (results in)
     code = (
         R.verification_code(con, receipt_id)
@@ -1576,7 +1593,7 @@ def build_report(
         else ""
     )
 
-    d = Doc(margin_mm=(8, 8, 8, 8), device=device, images=images)
+    d = Doc(margin_mm=(8, 8, 8, 8), device=device, images=images, img_scale=img_scale)
     blocks = _measure_blocks(d, con, items, sex, r)
 
     def header_fn(dd: Doc) -> float:
@@ -1587,9 +1604,11 @@ def build_report(
 
     # A throwaway pagination pass first to learn the true page count, so EVERY footer's
     # "X of Y" agrees even when packing / a long test spilling changes the total; then
-    # the real render with that total. The count pass uses the same ``images`` mode as
-    # the real render so both passes measure text with identical device metrics.
-    tmp = Doc(margin_mm=(8, 8, 8, 8), images=images)
+    # the real render with that total. The count pass NEVER rasterises (no images/device)
+    # — that would double preview/print cost for zero benefit; page breaks come from the
+    # pre-measured absolute-mm block heights, and the footer total is clamped to
+    # ``max(total, page_no)`` so it can never read less than the current page.
+    tmp = Doc(margin_mm=(8, 8, 8, 8))
     total_pages = _paginate_report(
         tmp,
         con,

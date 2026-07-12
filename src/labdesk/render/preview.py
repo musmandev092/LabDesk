@@ -56,7 +56,10 @@ def build_test_page(printer_name: str = "", device=None) -> bytes | list[QImage]
 def render_pages(
     con, receipt_id: int, kind: str, pack: bool = True
 ) -> bytes | list[QImage] | None:
-    """Render a document to a list of QImage pages (on-screen preview; no QtPdf)."""
+    """Render a document to a list of QImage pages (on-screen preview; no QtPdf).
+    Reports rasterise at half print resolution (``img_scale=0.5``) — 4x fewer pixels
+    and memory for a snappier preview; the on-screen layout is identical, and print /
+    PDF export still render at full 300 dpi."""
     if kind == "receipt":
         return build_receipt(con, receipt_id, images=True)
-    return build_report(con, receipt_id, images=True, pack=pack)
+    return build_report(con, receipt_id, images=True, pack=pack, img_scale=0.5)

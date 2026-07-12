@@ -32,9 +32,15 @@ class Doc:
         margin_mm: tuple[float, float, float, float] = (8, 8, 8, 8),
         device=None,
         images: bool = False,
+        img_scale: float = 1.0,
     ) -> None:
         _ensure_app()
         self._images_mode = images
+        # On-screen preview can rasterise at a fraction of print resolution: the pixel
+        # buffer shrinks by ``img_scale`` (so ~1/scale² the work + memory) while the
+        # LOGICAL DPI stays 300, so every mm/font measurement — and therefore all
+        # pagination — is byte-for-byte identical to the full-resolution render.
+        self._img_scale = img_scale if images else 1.0
         self._images: list[QImage] = []
         self._owns = device is None and not images
         self.w: QPdfWriter = None  # type: ignore[assignment]  # may be QPrinter/None
@@ -74,12 +80,22 @@ class Doc:
         self.p.setRenderHint(QPainter.SmoothPixmapTransform, True)
 
     def _start_image(self) -> None:
-        img = QImage(int(mm(A4_W_MM)), int(mm(A4_H_MM)), QImage.Format_RGB888)
+        s = self._img_scale
+        img = QImage(
+            max(1, int(mm(A4_W_MM) * s)),
+            max(1, int(mm(A4_H_MM) * s)),
+            QImage.Format_RGB888,
+        )
         img.fill(QColor("#ffffff"))
+        # keep the LOGICAL dpi at 300 so QFontMetricsF / text_height are unchanged;
+        # only the physical pixel buffer is smaller. The painter is scaled so all
+        # mm()-based (300-dpi) coordinates map into the smaller image unchanged.
         img.setDotsPerMeterX(int(DPI / 25.4 * 1000))
         img.setDotsPerMeterY(int(DPI / 25.4 * 1000))
         self._cur_img = img
         self.p = QPainter(img)
+        if s != 1.0:
+            self.p.scale(s, s)
         self._hints()
 
     # -- finish: PDF bytes (owned QPdfWriter), list[QImage] (images), or None --

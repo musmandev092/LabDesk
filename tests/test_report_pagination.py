@@ -235,6 +235,59 @@ def test_page_count_stable_across_successive_builds(con):
     assert p1 >= 2
 
 
+# ── method-note / after-block accounting (overlap regression) ───────────────
+
+
+def test_method_note_counted_in_block_height(con):
+    """Regression: a test's 'Method / Comments' note must be included in the measured
+    block height, otherwise the next packed test draws its title bar over the note."""
+    rid = make_receipt(con, status="reported")
+    note = "Performed by an immunochromatographic method with high sensitivity. " * 4
+    tid = con.execute(
+        "INSERT INTO tests(name,charges,category,report_head,method_note,is_culture) "
+        "VALUES ('HBsAg X',1,'Special','SCREENING REPORT',?,0)",
+        (note,),
+    ).lastrowid
+    iid = make_item(con, rid, test_id=tid, test_name="HBsAg X")
+    con.execute(
+        "INSERT INTO results(receipt_item_id,parameter_id,seq,part_type,name,units,"
+        "ref_text,value) VALUES (?,?,?,?,?,?,?,?)",
+        (iid, None, 0, "N", "HBsAg X", "", "Non-Reactive", "Non-Reactive"),
+    )
+    con.commit()
+    r = con.execute("SELECT * FROM receipts WHERE id=?", (rid,)).fetchone()
+    items = con.execute(
+        "SELECT * FROM receipt_items WHERE receipt_id=? ORDER BY id", (rid,)
+    ).fetchall()
+    import contextlib
+
+    from labdesk.render.primitives import Doc
+
+    d = Doc(margin_mm=(8, 8, 8, 8))
+    try:
+        blocks = report_doc._measure_blocks(d, con, items, "M", r)
+        after_h = blocks[0][4]
+    finally:
+        with contextlib.suppress(Exception):
+            d.tobytes()  # finalise the measuring Doc's painter (else Qt aborts on GC)
+    # a multi-line method note is ~3 lines tall — after-blocks height must reflect it
+    assert after_h > 8, f"method note not counted in block height (after_h={after_h})"
+
+
+def test_preview_half_scale_matches_full_page_count(con):
+    """On-screen preview rasterises at reduced resolution (faster) but must produce the
+    SAME layout/pagination as the full-resolution render."""
+    from labdesk.render import preview
+
+    rid = make_receipt(con, status="reported")
+    _add_small_qual(con, rid, 8)
+    full = report_doc.build_report(con, rid, images=True)
+    prev = preview.render_pages(con, rid, "report")
+    assert isinstance(full, list) and isinstance(prev, list)
+    assert len(prev) == len(full)  # same pagination
+    assert prev[0].width() < full[0].width()  # smaller pixel buffer
+
+
 # ── letterfree (pre-printed pad) copy also packs ────────────────────────────
 
 
