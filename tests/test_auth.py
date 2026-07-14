@@ -94,6 +94,32 @@ def test_correct_password_clears_lock_after_window(db, con):
     assert row["failed_attempts"] == 0 and row["locked_until"] is None
 
 
+def test_expired_lock_gives_a_fresh_window_not_instant_relock(db, con):
+    """After the lockout window elapses the failure counter resets, so a single
+    mistype does NOT instantly re-lock the account (the 'endless lockout loop')."""
+
+    _make_user(db, con)
+    for _ in range(db._MAX_FAILS):  # lock the account
+        db.verify_user(con, "bob", "wrong")
+    assert db.lock_remaining(con, "bob") > 0
+    # window elapses (back-date locked_until)
+    con.execute(
+        "UPDATE users SET locked_until=? WHERE username='bob'", (str(time.time() - 1),)
+    )
+    con.commit()
+    # ONE wrong attempt after waiting must NOT re-lock — the counter got a fresh start
+    db.verify_user(con, "bob", "still-wrong")
+    assert db.lock_remaining(con, "bob") == 0
+    assert (
+        con.execute(
+            "SELECT failed_attempts FROM users WHERE username='bob'"
+        ).fetchone()["failed_attempts"]
+        == 1  # fresh window: one failure, well below the threshold
+    )
+    # and the correct password still works (never corrupted by the lockout)
+    assert db.verify_user(con, "bob", "s3cret-pass") is not None
+
+
 def test_far_future_lock_is_self_healing(db, con):
     """A locked_until written under a wrong/ahead clock (days in the future) must
     NOT trap the account: it is ignored so the correct password gets through. A

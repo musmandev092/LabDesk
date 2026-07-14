@@ -74,8 +74,24 @@ def verify_user(con: sqlite3.Connection, username: str, password: str):
     cols = row.keys()
     # locked out from too many recent failures? (self-healing: a past-due or
     # implausibly-far locked_until counts as not locked — see _remaining_seconds.)
-    if "locked_until" in cols and _remaining_seconds(row["locked_until"]) > 0:
-        return None
+    if "locked_until" in cols:
+        if _remaining_seconds(row["locked_until"]) > 0:
+            return None  # still inside the lockout window
+        if row["locked_until"]:
+            # The window has ELAPSED → clear it AND reset the failure counter, so the
+            # user gets a fresh set of attempts. Without this reset the counter stays
+            # at/above the threshold, so a single mistype right after waiting re-locks
+            # instantly and each repeat escalates the window toward an hour — the
+            # "endless lockout loop". Safe: user login already sits behind the
+            # database-unlock password, so this isn't the primary brute-force barrier.
+            try:
+                con.execute(
+                    "UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id=?",
+                    (row["id"],),
+                )
+                con.commit()
+            except sqlite3.Error:
+                pass
     legacy_salt = row["salt"] if "salt" in cols else ""
     if _verify_password(password, row["pass_hash"], legacy_salt):
         try:
