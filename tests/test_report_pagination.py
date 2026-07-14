@@ -317,15 +317,17 @@ def _first_content_row(img):
     return 1.0
 
 
-def test_letterfree_short_report_is_vertically_centred(con):
-    """A short 'print without header' report must be centred vertically (clear of the
-    pre-printed letterhead), NOT jammed against the top of the page (regression)."""
-    rid = make_receipt(con, status="reported")
-    _add_small_qual(con, rid, 2)  # a short report → should centre
-    plain = report_doc.build_report(con, rid, images=True, letterhead=False)
-    normal = report_doc.build_report(con, rid, images=True, letterhead=True)
-    assert isinstance(plain, list) and len(plain) == 1
-    # the plain copy's content starts well below the top (centred)…
-    assert _first_content_row(plain[0]) > 0.18
-    # …and clearly lower than the normal copy, which starts near the top (letterhead)
-    assert _first_content_row(plain[0]) > _first_content_row(normal[0]) + 0.1
+def test_letterfree_content_anchored_below_letterhead(con):
+    """The 'print without header' copy starts content at a fixed top offset (clear of
+    the pre-printed letterhead) and top-aligns — NOT floating in the page centre — so a
+    short and a long report begin at the SAME position."""
+    short = make_receipt(con, status="reported")
+    _add_small_qual(con, short, 1)  # tiny report
+    long = make_receipt(con, status="reported", lab_no="LAB-9")
+    _add_small_qual(con, long, 6)  # taller report
+    s = report_doc.build_report(con, short, images=True, letterhead=False)
+    ln = report_doc.build_report(con, long, images=True, letterhead=False)
+    assert len(s) == 1 and len(ln) == 1
+    fs, fl = _first_content_row(s[0]), _first_content_row(ln[0])
+    assert 0.08 < fs < 0.22  # anchored below the letterhead band, not centred/floating
+    assert abs(fs - fl) < 0.03  # short and long start at the same top offset

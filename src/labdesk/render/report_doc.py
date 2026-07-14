@@ -1429,7 +1429,10 @@ def _paginate_report(
 def _build_report_letterfree(
     con, r, items, sex, g, device, images, pack: bool = True, img_scale: float = 1.0
 ):
-    """Render the report with no clinic letterhead/footer for pre-printed letterhead paper; vertically centres content when it fits on one page."""
+    """Render with no clinic letterhead/footer for pre-printed letterhead paper. Content
+    starts just below where the letterhead sits (offset = the lab's own configured
+    letterhead height) and top-aligns from there on every page, so short and long reports
+    begin at the same consistent position clear of the pre-printed header."""
     from . import report as R
 
     d = Doc(margin_mm=(8, 8, 8, 8), device=device, images=images, img_scale=img_scale)
@@ -1439,32 +1442,19 @@ def _build_report_letterfree(
         card_pad=(2.4, 5), gap=(1.6, 4), l_pt=6.6, v_pt=8.4, radius=5, border=BORDER
     )
 
-    # centre content vertically when it fits on one page; measured against the drawable band so it never dips past the bottom margin
-    card_top = d.mt
-    if blocks and not any(b[3] for b in blocks) and (pack or len(blocks) == 1):
-        md = Doc(margin_mm=(8, 8, 8, 8), measure=True)
-        card_h = _patient_card(md, md.ml, md.mt, R._patient_pairs(r), **_card_kw)
-        with contextlib.suppress(Exception):
-            md.tobytes()
-        total = (
-            card_h
-            + 4
-            + sum(b[2] for b in blocks)
-            + max(0, len(blocks) - 1) * _PACK_GAP_MM
-        )
-        drawable = A4_H_MM - d.mb - REPORT_FOOTER_MM - d.mt
-        if total <= drawable:
-            usable = A4_H_MM - d.mt - d.mb
-            center = d.mt + (usable - total) / 2.0
-            card_top = max(d.mt, min(center, d.mt + drawable - total))
-
-    first_page = [True]
+    # Reserve the top for the pre-printed letterhead: start content where the lab's own
+    # letterhead (logo/name/address/rule) ends — the same y the normal copy uses — so
+    # both copies position content identically, just with/without the printed header.
+    md = Doc(margin_mm=(8, 8, 8, 8), measure=True)
+    # floor at 40mm so there's room for a real pre-printed letterhead even when the
+    # app's own letterhead is left minimal/blank.
+    card_top = max(_report_letterhead(md, g, md.ml, md.mt) + 3, 40.0)
+    with contextlib.suppress(Exception):
+        md.tobytes()
 
     def header_fn(dd: Doc) -> float:
-        top = card_top if first_page[0] else dd.mt  # only page 1 is centred
-        first_page[0] = False
-        ch = _patient_card(dd, dd.ml, top, R._patient_pairs(r), **_card_kw)
-        return top + ch + 4
+        ch = _patient_card(dd, dd.ml, card_top, R._patient_pairs(r), **_card_kw)
+        return card_top + ch + 4
 
     def footer_fn(dd: Doc, page_no: int, total: int) -> None:
         return None
