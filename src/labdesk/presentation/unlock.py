@@ -1,9 +1,4 @@
-"""Database unlock / first-run password dialogs, shown before the main window.
-
-The live database is encrypted with SQLCipher; these collect the passphrase that
-unlocks it. There is NO recovery — a lost passphrase means the data is gone — so the
-set/confirm dialog warns clearly.
-"""
+"""Database unlock / first-run password dialogs, shown before the main window."""
 
 from __future__ import annotations
 
@@ -27,9 +22,7 @@ from .widgets import toast_warn
 
 
 def _remember_checkbox() -> QCheckBox | None:
-    """A 'remember on this computer' checkbox, or None when no system wallet is
-    available (KDE Wallet / GNOME Keyring). Stores the key so the password isn't
-    retyped every launch — protected by the OS login session."""
+    """A 'remember on this computer' checkbox, or None if no system wallet is available."""
     if not keyvault.available():
         return None
     cb = QCheckBox("Remember on this computer (uses your system wallet)")
@@ -41,8 +34,7 @@ def _remember_checkbox() -> QCheckBox | None:
 
 
 class FirstRunDialog(QDialog):
-    """First run (after activation): start a brand-new laboratory, or restore from a
-    backup (e.g. moving to a new computer). Sets ``self.choice`` to 'new' | 'restore'."""
+    """First run: start a new laboratory or restore from backup. Sets ``self.choice``."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -82,9 +74,7 @@ class FirstRunDialog(QDialog):
 
 
 class RestoreBackupDialog(QDialog):
-    """Pick a LabDesk backup file + the password it was saved with, validated before
-    accepting. Exposes ``path``, ``passphrase`` and ``remember`` for the caller to
-    install the backup as the live DB."""
+    """Pick a LabDesk backup file and its password, validated before accepting."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -279,8 +269,7 @@ class SetPasswordDialog(QDialog):
 
 
 class ChangePasswordDialog(QDialog):
-    """Change the database password: current + new + confirm, with the
-    backup-compatibility warning."""
+    """Change the database password: current + new + confirm."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)

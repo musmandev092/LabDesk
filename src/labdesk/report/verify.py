@@ -1,16 +1,4 @@
-"""Per-lab report verification code (keyed HMAC over the report's content).
-
-Each finalised report's footer carries a short code = HMAC(lab_key, fingerprint),
-where the fingerprint is a canonical serialization of the receipt's identity plus
-its snapshotted results/cultures. The lab re-verifies a presented printout against
-its own database (Receipts → Verify report): a value altered on the paper makes the
-recomputed code differ, and forging a matching code needs the lab's secret key.
-
-The key lives in settings (so it survives backup/restore), NOT the 0600 secrets
-file: the threat is a tampered *printout*, not an attacker who already holds the
-whole database. This is "verify against the issuing lab" — there is no public
-verifier, so the lab's own DB is the source of truth.
-"""
+"""Per-lab report verification code: keyed HMAC over a canonical fingerprint of the report's content."""
 
 from __future__ import annotations
 
@@ -21,7 +9,7 @@ import secrets
 from .. import db
 from ..db import sqlite3
 
-_SEP = "\x1f"  # unit separator — won't occur in normal field text
+_SEP = "\x1f"  # unit separator, won't occur in field text
 _CULT_COLS = (
     "specimen",
     "growth",
@@ -34,10 +22,7 @@ _CULT_COLS = (
 
 
 def _verify_key(con: sqlite3.Connection) -> str:
-    """The per-lab HMAC key (hex), generated once on first use and persisted.
-
-    Uses INSERT OR IGNORE + re-read so two first-time writers (e.g. a background
-    PDF build racing a verify) converge on the same key instead of diverging."""
+    """The per-lab HMAC key (hex), generated once on first use and persisted."""
     key = db.get_setting(con, "report_verify_key", "")
     if not key:
         con.execute(
@@ -47,20 +32,14 @@ def _verify_key(con: sqlite3.Connection) -> str:
         con.commit()
         key = db.get_setting(
             con, "report_verify_key", ""
-        )  # re-read: another writer may have won
+        )  # another writer may have won
     return key
 
 
 def report_fingerprint(
     con: sqlite3.Connection, receipt_id: int, version: str = "v2"
 ) -> str:
-    """Canonical, reproducible serialization of a report's verifiable content.
-    Stable across reprints; changes only when the underlying content does.
-
-    version "v2" (current) ALSO covers the printed Impression/Conclusion and per-item
-    Remarks — for imaging/serology the impression is the clinical payload, so it must
-    be tamper-evident. "v1" is the legacy scheme (results+cultures only), kept so
-    reports already issued before the v2 change still verify (see verify())."""
+    """Canonical, reproducible serialization of a report's verifiable content. "v2" also covers per-item impression/remarks; "v1" is the legacy scheme."""
     r = con.execute(
         "SELECT lab_no, patient_name, reported_at FROM receipts WHERE id=?",
         (receipt_id,),
@@ -82,7 +61,6 @@ def report_fingerprint(
     ):
         parts.append(f"{row['name'] or ''}={row['value'] or ''}#{row['hidden'] or 0}")
     if version != "v1":
-        # per-item impression/conclusion + remarks (printed, so must be covered)
         for it in con.execute(
             "SELECT id, conclusion, remarks FROM receipt_items "
             "WHERE receipt_id=? ORDER BY id",
@@ -109,8 +87,7 @@ def report_fingerprint(
 def verification_code(
     con: sqlite3.Connection, receipt_id: int, version: str = "v2"
 ) -> str:
-    """The footer code, e.g. '7F3A-9C21'. Returns '' when there's nothing to verify.
-    New reports print the v2 code (covers the impression too)."""
+    """The footer code, e.g. '7F3A-9C21'. Returns '' when there's nothing to verify."""
     fp = report_fingerprint(con, receipt_id, version)
     if not fp:
         return ""
@@ -120,9 +97,7 @@ def verification_code(
 
 
 def verify(con: sqlite3.Connection, receipt_id: int, code: str) -> bool:
-    """True iff `code` matches the recomputed code for this receipt (constant-time,
-    separator/space/case-insensitive). Accepts the current v2 code AND the legacy v1
-    code, so reports printed before the v2 fingerprint change still verify."""
+    """True iff `code` matches the recomputed v2 or legacy v1 code for this receipt (constant-time)."""
     given = "".join((code or "").upper().split()).replace("-", "")
     if not given:
         return False

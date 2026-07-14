@@ -13,22 +13,14 @@ _log = logging.getLogger("labdesk")
 
 
 def _remaining_seconds(locked_until) -> int:
-    """Seconds left on a lockout, self-healing against bad data and clock skew.
-
-    A lock written by this module is never more than _LOCK_MAX_SECONDS in the
-    future. A value beyond that can only come from the system clock being
-    wrong/ahead at the moment the lock was written (dead RTC battery, no NTP — a
-    common state on lab PCs) or a corrupted/edited row. Honouring it would trap
-    the account for days, refusing even the correct password (the countdown never
-    reaches zero). Treat any past-due OR implausibly-far value as "not locked" so
-    the next correct password gets through and clears it.
-    """
+    """Seconds left on a lockout. Self-healing: a lock is never written more than
+    _LOCK_MAX_SECONDS ahead, so anything further out (clock skew, corrupted row)
+    is treated as not-locked rather than trapping the account for days."""
     if not locked_until:
         return 0
     try:
         rem = float(locked_until) - time.time()
     except (TypeError, ValueError, OverflowError):
-        # OverflowError: a non-finite (inf) timestamp from a corrupted/edited DB.
         return 0
     if rem <= 0 or rem > _LOCK_MAX_SECONDS:
         return 0
@@ -46,10 +38,8 @@ def lock_remaining(con: sqlite3.Connection, username: str) -> int:
 
 
 def clear_lockouts(con: sqlite3.Connection, username: str | None = None) -> int:
-    """Recovery: drop the brute-force lockout (and failure counter) for one user,
-    or every user when *username* is None. Does NOT touch passwords. Returns the
-    number of rows cleared. Used by the `--unlock` maintenance command so a locked
-    admin can be let back in without waiting out the window."""
+    """Drop the brute-force lockout + failure counter for one user, or all users
+    if None. Returns the number of rows cleared. Used by the `--unlock` command."""
     if username:
         cur = con.execute(
             "UPDATE users SET failed_attempts=0, locked_until=NULL WHERE username=?",
@@ -72,18 +62,12 @@ def verify_user(con: sqlite3.Connection, username: str, password: str):
         _dummy_verify(password)  # equalise timing so missing users aren't detectable
         return None
     cols = row.keys()
-    # locked out from too many recent failures? (self-healing: a past-due or
-    # implausibly-far locked_until counts as not locked — see _remaining_seconds.)
     if "locked_until" in cols:
         if _remaining_seconds(row["locked_until"]) > 0:
             return None  # still inside the lockout window
         if row["locked_until"]:
-            # The window has ELAPSED → clear it AND reset the failure counter, so the
-            # user gets a fresh set of attempts. Without this reset the counter stays
-            # at/above the threshold, so a single mistype right after waiting re-locks
-            # instantly and each repeat escalates the window to its cap — the
-            # "endless lockout loop". Safe: user login already sits behind the
-            # database-unlock password, so this isn't the primary brute-force barrier.
+            # window elapsed: reset the counter too, else a mistype right after
+            # waiting re-locks instantly and escalates again (endless lockout loop)
             try:
                 con.execute(
                     "UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id=?",
@@ -95,7 +79,6 @@ def verify_user(con: sqlite3.Connection, username: str, password: str):
     legacy_salt = row["salt"] if "salt" in cols else ""
     if _verify_password(password, row["pass_hash"], legacy_salt):
         try:
-            # transparently upgrade legacy sha256 hashes to scrypt
             if not (row["pass_hash"] or "").startswith("scrypt$"):
                 newh, _ = hash_password(password)
                 con.execute(
@@ -110,10 +93,8 @@ def verify_user(con: sqlite3.Connection, username: str, password: str):
         except (ValueError, sqlite3.Error):
             pass
         return row
-    # wrong password → count the failure, then lock with an exponentially
-    # growing window once past _MAX_FAILS (60s, 120s, 240s … capped). Increment
-    # ATOMICALLY in SQL (not read-modify-write) so two concurrent instances — which
-    # the app explicitly supports via a shared DB — can't lose an increment.
+    # atomic SQL increment (not read-modify-write) so concurrent instances can't
+    # lose a count; lock with an exponentially growing window past _MAX_FAILS
     try:
         con.execute(
             "UPDATE users SET failed_attempts=COALESCE(failed_attempts,0)+1 WHERE id=?",
@@ -130,9 +111,7 @@ def verify_user(con: sqlite3.Connection, username: str, password: str):
             )
         con.commit()
     except sqlite3.Error as e:
-        # The wrong-password attempt is still DENIED (we return None below). But if the
-        # failure COUNTER can't be persisted, lockout throttling is effectively
-        # bypassed — so make that visible rather than swallowing it silently.
+        # attempt is still denied below; log since a lost counter bypasses throttling
         _log.warning(
             "brute-force lockout counter update failed for user id %s: %r", row["id"], e
         )

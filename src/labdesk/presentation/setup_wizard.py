@@ -1,8 +1,4 @@
-"""First-run setup wizard — collects each lab's branding + admin password.
-
-Shown once, when settings.configured != "1". Makes the product fully white-label:
-nothing is hardcoded to a particular lab.
-"""
+"""First-run setup wizard — collects each lab's branding + admin password."""
 
 from __future__ import annotations
 
@@ -31,9 +27,7 @@ class SetupWizard(QDialog):
         super().__init__(parent)
         self.con = con
         self.setWindowTitle(f"Welcome to {PRODUCT_NAME}")
-        # A 760-px minimum height made the first-run wizard impossible to fit on a
-        # 1366x768 laptop. The form lives in a QScrollArea (below), so a small floor
-        # is safe — it scrolls instead of overflowing.
+        # small floor fits a 1366x768 laptop; the form scrolls (QScrollArea below)
         self.setMinimumSize(560, 480)
         fit_to_screen(self, 700, 880)
 
@@ -41,7 +35,6 @@ class SetupWizard(QDialog):
         root.setContentsMargins(40, 32, 40, 28)
         root.setSpacing(6)
 
-        # brand mark
         mark = QLabel(PRODUCT_NAME[:2].upper())
         mark.setObjectName("brandMark")
         mark.setFixedSize(64, 64)
@@ -61,7 +54,6 @@ class SetupWizard(QDialog):
         root.addWidget(sub)
         root.addSpacing(10)
 
-        # scrollable form inside a card
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         host = QFrame()
@@ -111,7 +103,6 @@ class SetupWizard(QDialog):
         self.fields["currency"].setText("Rs.")
         self.fields["lab_no_prefix"].setText("LAB")
 
-        # logo
         grid.addWidget(field_label("Logo (optional)"), r, 0)
         logo_row = QHBoxLayout()
         self.logo = QLineEdit()
@@ -127,8 +118,7 @@ class SetupWizard(QDialog):
         grid.addWidget(lw, r, 1)
         r += 1
 
-        # backup destination (optional) — ideally a USB stick or a network folder so
-        # a copy survives a disk failure. Blank uses the Documents fallback.
+        # blank uses the Documents fallback
         grid.addWidget(field_label("Backup folder (optional)"), r, 0)
         bk_row = QHBoxLayout()
         self.backup_dir = QLineEdit()
@@ -144,7 +134,6 @@ class SetupWizard(QDialog):
         grid.addWidget(bw, r, 1)
         r += 1
 
-        # admin account
         sep = QLabel("Administrator account")
         sep.setStyleSheet("font-weight:700; margin-top:8px;")
         grid.addWidget(sep, r, 0, 1, 2)
@@ -174,7 +163,6 @@ class SetupWizard(QDialog):
         scroll.setWidget(host)
         root.addWidget(scroll, 1)
 
-        # actions
         btns = QHBoxLayout()
         btns.addStretch(1)
         finish = QPushButton("Finish setup  →")

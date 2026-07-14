@@ -4,25 +4,19 @@ from __future__ import annotations
 
 from .._resources import package_root
 
-# checkmark glyph for ticked checkboxes (white check, reads on the teal fill in
-# both themes). Path is injected into the QSS; falls back gracefully if missing.
+# checkmark glyph for ticked checkboxes; injected into the QSS, falls back if missing
 _CHECK = package_root() / "assets" / "checkmark.png"
 
-# Product (white-label) identity. The *lab's* own name is configured per-install
-# via the first-run wizard; this is only the neutral product brand.
+# neutral product brand; the lab's own name is set per-install via the setup wizard
 PRODUCT_NAME = "LabDesk"
 PRODUCT_TAGLINE = "Laboratory Management System"
 
-# Developer / author credit (the lab's own branding is white-label; this is the
-# fixed credit for whoever built the software). Single source of truth — shown in
-# the sidebar footer, the login/setup screen and the Settings → About card.
+# developer credit — single source of truth for sidebar/login/About
 DEVELOPER = "M Usman"
 DEVELOPER_GITHUB = "github.com/mosman092"
 DEVELOPER_EMAILS = ("musmaniqbalbaloch@gmail.com", "mosman092@hotmail.com")
 
-# Brand / accent colours — used directly by some widgets (dashboard stat cards,
-# report colours). They read well on both light and dark surfaces, so they stay
-# fixed; only the *surfaces* (backgrounds/text/borders) change between themes.
+# brand/accent colours stay fixed across themes; only surfaces change
 PRIMARY = "#0e7c86"
 PRIMARY_DARK = "#0a5f67"
 PRIMARY_LIGHT = "#e6f4f5"
@@ -37,9 +31,7 @@ BORDER = "#dde3e8"
 SIDE_TOP = "#0c6b73"
 SIDE_BOT = "#084a51"
 
-# ---------------------------------------------------------------------------
-# Theme palettes. Surface colours differ; the teal brand stays constant.
-# ---------------------------------------------------------------------------
+# theme palettes — surface colours differ; the teal brand stays constant
 _LIGHT = {
     "bg": "#eef1f4",
     "card": "#ffffff",
@@ -292,13 +284,8 @@ QSplitter::handle {{ background: transparent; width: 14px; }}
 
 
 def apply_theme(app, theme: str = "light") -> None:
-    """Apply a theme fully: the stylesheet AND a matching QPalette.
-
-    The stylesheet alone leaves *unstyled* container widgets (scroll-area
-    viewports, bare QWidgets used as layout hosts) painting with the default
-    palette — which is white, so they wash out under the dark theme. Setting the
-    palette too makes those surfaces follow the theme.
-    """
+    """Apply a theme fully: the stylesheet AND a matching QPalette (else unstyled
+    container widgets keep painting with the default white palette)."""
     from PySide6.QtGui import QColor, QPalette
 
     p = THEMES.get(theme, _LIGHT)
@@ -321,12 +308,8 @@ def apply_theme(app, theme: str = "light") -> None:
     pal.setColor(QPalette.Disabled, QPalette.Text, QColor(p["muted"]))
     pal.setColor(QPalette.Disabled, QPalette.ButtonText, QColor(p["muted"]))
     app.setPalette(pal)
-    # A LIVE theme switch must repaint widgets that were already shown under the
-    # previous theme. Qt does not re-propagate an app palette change to widgets
-    # already realised, so their palette-based backgrounds (page containers /
-    # scroll-area viewports) keep the OLD theme's colour — e.g. a dark backdrop
-    # lingers after switching dark -> light. Force every widget to adopt the new
-    # palette and re-evaluate the stylesheet so the switch fully repaints.
+    # Qt doesn't re-propagate a palette change to already-realised widgets, so
+    # force every widget to adopt it and re-evaluate the stylesheet
     style = app.style()
     for w in app.allWidgets():
         w.setPalette(pal)

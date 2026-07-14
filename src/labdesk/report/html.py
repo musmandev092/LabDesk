@@ -1,10 +1,5 @@
-"""HTML document builders for the lab report and cash receipt.
-
-The HTML builders here are retained for content tests and are not used for
-rendering (rendering is native Qt; see :mod:`..render`).
-
-Imports :mod:`.constants`, :mod:`.formatting` and :mod:`.content`.
-"""
+"""HTML document builders for the lab report and cash receipt (used for content
+tests; rendering is native Qt, see :mod:`..render`)."""
 
 from __future__ import annotations
 
@@ -24,9 +19,6 @@ from .content import (
 from .formatting import _amount_in_words, _esc, _file_url, _img
 
 
-# ---------------------------------------------------------------------------
-# CSS (colours inlined; only the Inter font URL is injected)
-# ---------------------------------------------------------------------------
 def _font_face() -> str:
     if INTER_TTF.exists():
         return (
@@ -152,9 +144,6 @@ def _doc(css_body: str, body: str) -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# Lab report
-# ---------------------------------------------------------------------------
 def build_report_html(con, receipt_id: int) -> str:
     r = con.execute("SELECT * FROM receipts WHERE id=?", (receipt_id,)).fetchone()
     items = con.execute(
@@ -206,9 +195,6 @@ def build_report_html(con, receipt_id: int) -> str:
     return _doc(_REPORT_CSS, rhead + rfoot + "".join(blocks))
 
 
-# ---------------------------------------------------------------------------
-# Cash receipt
-# ---------------------------------------------------------------------------
 def build_receipt_html(con, receipt_id: int) -> str:
     r = con.execute("SELECT * FROM receipts WHERE id=?", (receipt_id,)).fetchone()
     items = con.execute(

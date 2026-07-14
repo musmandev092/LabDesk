@@ -6,21 +6,7 @@ from PySide6.QtGui import QImage, qAlpha, qBlue, qGreen, qRed
 
 
 def autocrop_image(img: QImage) -> QImage:
-    """Trim near-white / transparent padding baked into a logo so its content fills
-    the space it's drawn in, instead of floating tiny inside its own margins. Shared
-    by the sidebar brand mark AND the printed report/receipt letterhead.
-
-    Safe for white-label use (every lab uploads a different logo):
-      * background sampled from the 4 corners (majority) — a logo touching one corner
-        won't fool it;
-      * a colour TOLERANCE treats JPEG noise / off-white as background;
-      * ONLY near-white or transparent padding is trimmed — a solid-COLOUR badge tile
-        is part of the design and is kept (trimming it could leave a white mark
-        invisible on the white page);
-      * returns the original if there's no clear margin, so it's never worse.
-
-    QImage-only (no QPixmap) so it is safe to call from the off-thread PDF builder.
-    """
+    """Trim near-white/transparent padding from a logo so its content fills the drawn space; returns original if no clear margin."""
     img = img.convertToFormat(QImage.Format_ARGB32)
     w, h = img.width(), img.height()
     if w < 8 or h < 8:

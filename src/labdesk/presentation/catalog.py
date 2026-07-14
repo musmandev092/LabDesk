@@ -89,11 +89,9 @@ class CatalogPage(QWidget):
         self.tests = QTableWidget(0, 3)
         self.tests.setHorizontalHeaderLabels(["Test", "Charges (Rs.)", "Category"])
         _th = self.tests.horizontalHeader()
-        _th.setSectionResizeMode(0, QHeaderView.Stretch)  # Test name fills
-        _th.setSectionResizeMode(
-            1, QHeaderView.ResizeToContents
-        )  # "Charges (Rs.)" no longer clipped
-        _th.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Category
+        _th.setSectionResizeMode(0, QHeaderView.Stretch)
+        _th.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        _th.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.tests.setSelectionBehavior(QTableWidget.SelectRows)
         self.tests.setEditTriggers(QTableWidget.NoEditTriggers)
         self.tests.itemSelectionChanged.connect(self.show_params)
@@ -108,9 +106,9 @@ class CatalogPage(QWidget):
             ["#", "Parameter", "Units", "Ref (M)", "Ref (F)"]
         )
         ph = self.params.horizontalHeader()
-        ph.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # narrow #
-        ph.setSectionResizeMode(1, QHeaderView.Stretch)  # parameter name
-        ph.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # units
+        ph.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        ph.setSectionResizeMode(1, QHeaderView.Stretch)
+        ph.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         ph.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         ph.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         self.params.verticalHeader().setVisible(False)

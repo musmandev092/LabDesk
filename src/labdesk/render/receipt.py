@@ -25,9 +25,6 @@ from .fonts import _font
 from .primitives import Doc
 
 
-# ---------------------------------------------------------------------------
-# Cash receipt
-# ---------------------------------------------------------------------------
 def build_receipt(
     con, receipt_id: int, device=None, images: bool = False
 ) -> bytes | list[QImage] | None:
@@ -54,9 +51,9 @@ def build_receipt(
     x0 = d.ml
     y = d.mt
 
-    # ---- header ---- clinic info LEFT, CASH RECEIPT RIGHT, logo CENTRED both ways
+    # header: clinic info left, CASH RECEIPT right, logo centred
     tx = x0
-    # shrink the lab name so a long one stops short of the centred logo (no overlap)
+    # shrink the lab name so it stops short of the centred logo
     logo_left = centered_logo_left(d, g("logo_path"), x0)
     title_w = 120.0 if logo_left is None else max(45.0, logo_left - tx - 4.0)
     h1 = fit_lab_name_font(d, g("lab_name"), 16, title_w, min_pt=11.0)
@@ -72,7 +69,6 @@ def build_receipt(
     for line in addr_lines:
         d.text(tx, cy, 130, 4, line, addr_f, MUTED)
         cy += 3.9
-    # right: CASH RECEIPT title + meta
     h2 = _font(11, bold=True, spacing_px=1.0)
     d.text(x0, y, d.content_w, 7, "CASH RECEIPT", h2, TEAL, Qt.AlignRight | Qt.AlignTop)
     meta_f = _font(9)
@@ -99,7 +95,6 @@ def build_receipt(
             Qt.AlignRight | Qt.AlignTop,
         )
         ry = y + 17
-    # centre: logo, horizontally AND vertically centred within the header band
     logo_path = (g("logo_path") or "").strip()
     if logo_path and Path(logo_path).exists():
         header_h = max(cy, ry) - y
@@ -109,14 +104,11 @@ def build_receipt(
     d.hline(x0, header_bottom, d.content_w, TEAL, 2)
     y = header_bottom + 5
 
-    # ---- patient card ----
-    # A cash receipt is a billing document issued at registration — results don't
-    # exist yet, so it never shows a "Reporting Date".
+    # billing document issued at registration — no "Reporting Date" yet
     pairs = R._patient_pairs(r, include_reporting=False)
     ch = _patient_card(d, x0, y, pairs)
     y += ch + 7
 
-    # ---- items table ----
     sr_w = d.content_w * 0.08
     rate_w = d.content_w * 0.22
     desc_w = d.content_w - sr_w - rate_w
@@ -175,11 +167,9 @@ def build_receipt(
         d.hline(x0, y, d.content_w, BORDER2, 1)
     y += 7
 
-    # ---- summary: notes (left 55%) + totals (right 45%) ----
-    notes_w = d.content_w * 0.55 - 10  # padding-right 10mm
+    notes_w = d.content_w * 0.55 - 10
     tot_x = x0 + d.content_w * 0.55
     tot_w = d.content_w * 0.45
-    # amount in words box
     words = R._amount_in_words(net)
     wf_lbl = _font(9.5, bold=True)
     wf_val = _font(9.5)
@@ -209,7 +199,7 @@ def build_receipt(
     ry = ny + wh + 6
     rem_lbl = _font(8.5, bold=True)
     rem_f = _font(8.5)
-    rem_txt = g("receipt_remarks")  # lab-editable in Settings → Receipt footer
+    rem_txt = g("receipt_remarks")
     d.text(x0, ry, notes_w, 4, "Remarks:", rem_lbl, MUTED)
     d.text(
         x0,
@@ -223,7 +213,6 @@ def build_receipt(
         wrap=True,
     )
 
-    # totals table
     tf = _font(10)
     tfb = _font(10, bold=True)
     lbl_x = tot_x
@@ -286,7 +275,6 @@ def build_receipt(
             "Change returned:", f"{cur} {change:,.2f}", lbl_color=GREEN, val_color=GREEN
         )
 
-    # ---- footer at page bottom ----
     fy = A4_H_MM - d.mb - 6
     d.hline(x0, fy, d.content_w, BORDER2, 1)
     ff = _font(8)
@@ -306,7 +294,7 @@ def build_receipt(
         fy + 1.5,
         d.content_w,
         5,
-        g("receipt_footer_note"),  # lab-editable in Settings
+        g("receipt_footer_note"),
         ffi,
         MUTED,
         Qt.AlignRight | Qt.AlignVCenter,

@@ -1,7 +1,4 @@
-"""Receipt/report preview, print, WhatsApp, PDF export + verify — split out of ReceiptsPage.
-
-A mixin (runs on the composed ReceiptsPage instance). Pure reorg, no behavior change.
-"""
+"""Receipt/report preview, print, WhatsApp, PDF export + verify — split out of ReceiptsPage."""
 
 from __future__ import annotations
 
@@ -27,21 +24,17 @@ from .receipt_dialogs import _PreviewDialog
 
 class ReceiptsOutputMixin:
     def _preview(self, kind: str) -> None:
-        """kind: 'report' or 'receipt'. Render to image pages natively and show
-        them in the preview dialog — no PDF temp file, no QtPdf viewer."""
+        """kind: 'report' or 'receipt'. Renders to image pages (no PDF temp file)."""
         rid = self._selected_id()
         if rid is None:
             return
         title = "Receipt preview" if kind == "receipt" else "Report preview"
         labno = self._lab_no(rid)
-        # Page rendering is synchronous on the UI thread; show a busy cursor so a
-        # multi-page report doesn't look like a frozen window while it builds.
         from PySide6.QtWidgets import QApplication
 
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             pages = render.render_pages(self.con, rid, kind, pack=self._pack())
-        # deliberate UI safety net: any render failure surfaces as a message, not a crash
         except Exception as e:
             toast_warn(self, "Preview", f"Could not build preview:\n{e}")
             return
@@ -51,8 +44,7 @@ class ReceiptsOutputMixin:
         _PreviewDialog(pages, self, title).exec()
 
     def _pack(self) -> bool:
-        """Whether the report should pack multiple tests onto a shared page — the
-        inverse of the (per-print, non-persisted) 'One test per page' toggle."""
+        """Inverse of the (per-print, non-persisted) 'One test per page' toggle."""
         chk = getattr(self, "one_per_page_chk", None)
         return not chk.isChecked() if chk is not None else True
 
@@ -67,7 +59,6 @@ class ReceiptsOutputMixin:
         if rid is None:
             return
         clicked = self.wa_rcpt_btn if kind == "receipt" else self.wa_rpt_btn
-        # runs on a background thread; disables both WhatsApp buttons until done
         wa.send_async(
             self,
             self.con,
@@ -90,9 +81,8 @@ class ReceiptsOutputMixin:
         self._send_whatsapp("report")
 
     def _print(self, kind: str, letterhead: bool = True) -> None:
-        """Render straight onto the printer (native, vector — no PDF round-trip).
-        ``letterhead=False`` prints a 'plain' report (no clinic header/footer, content
-        centred) for the lab's own pre-printed letterhead paper."""
+        """Render straight onto the printer. ``letterhead=False`` prints a 'plain'
+        report (no clinic header/footer, content centred) for pre-printed paper."""
         rid = self._selected_id()
         if rid is None:
             return
@@ -115,7 +105,6 @@ class ReceiptsOutputMixin:
             )
             action = "printed_" + kind + ("" if letterhead else "_plain")
             db.log_audit(self.con, self.user["username"], action, labno)
-        # deliberate UI safety net: any print failure surfaces as a message, not a crash
         except Exception as e:
             toast_warn(self, "Print", f"Could not print:\n{e}")
 
@@ -126,13 +115,11 @@ class ReceiptsOutputMixin:
         self._print("report")
 
     def print_report_plain(self) -> None:
-        """Admin-only: print the report with no letterhead/footer, centred — for the
-        lab's own pre-printed letterhead pad."""
+        """Admin-only: report with no letterhead/footer, centred, for pre-printed pads."""
         self._print("report", letterhead=False)
 
     def verify_report(self) -> None:
-        """Check the verification code printed on a report against our records.
-        A value altered on a presented printout makes the recomputed code differ."""
+        """Check the verification code printed on a report against our records."""
         rid = self._selected_id()
         if rid is None:
             return

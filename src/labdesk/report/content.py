@@ -1,8 +1,5 @@
 """Content builders: settings accessor, header data, patient card, cumulative
-history, value cells and the per-test report / culture sections + signatures.
-
-Imports :mod:`.formatting` and :mod:`..db`.
-"""
+history, value cells and the per-test report / culture sections + signatures."""
 
 from __future__ import annotations
 
@@ -24,8 +21,7 @@ def _g(con):
 
 
 def _user_display(con, username: str) -> str:
-    """Show the staff member's full name (falling back to the username) so the
-    receipt reads 'Registered by: Farhan Ali', not 'admin'."""
+    """Staff member's full name, falling back to the username."""
     username = (username or "").strip()
     if not username:
         return ""
@@ -36,9 +32,6 @@ def _user_display(con, username: str) -> str:
     return full or username
 
 
-# ---------------------------------------------------------------------------
-# Shared header data
-# ---------------------------------------------------------------------------
 def _contacts(g) -> str:
     return " | ".join(
         x
@@ -77,11 +70,7 @@ def _patient_pairs(r, *, include_reporting: bool = True):
         ("Patient ID", mr),
         ("Referred By", r["dr_name"]),
     ]
-    # The reporting date is real only once results are finalised — it is stamped
-    # on receipts.reported_at then and stays stable across reprints. NEVER
-    # fabricate "now": an unreported receipt or a pre-save preview must show no
-    # reporting time (blank → renders as "—"). The cash receipt (a billing doc)
-    # omits the field entirely via include_reporting=False.
+    # Reporting date is only real once results are finalised; never fabricate "now".
     if include_reporting:
         rep_raw = (
             r["reported_at"] if "reported_at" in r.keys() and r["reported_at"] else ""
@@ -99,17 +88,9 @@ def _patient_card(r, *, include_reporting: bool = True) -> str:
     return f'<div class="patient-card">{cells}</div>'
 
 
-# ---------------------------------------------------------------------------
-# Cumulative history (previous results for the same patient & test)
-# ---------------------------------------------------------------------------
 def _history_for_item(con, item, receipt):
-    """Up to 3 previous visits' results for the SAME patient & SAME test, oldest
-    first (the cumulative-report standard: current + last 3). Patients matched on
-    Patient ID (the cross-visit "same no"); falls back to patient_id. Gated by the
-    'show_history' lab setting. Returns (date_labels, [ {parameter_id: value}, … ])."""
-    # Cumulative/serial history is a per-lab choice: accredited centres print dated
-    # prior-value columns, while many smaller labs ship current-only reports. Honour
-    # the 'show_history' setting (default on); off ⇒ no prior columns at all.
+    """Up to 3 previous visits' results for the same patient & test, oldest first.
+    Returns (date_labels, [ {parameter_id: value}, … ])."""
     if (db.get_setting(con, "show_history", "1") or "1") != "1":
         return [], []
     rk = receipt.keys()
@@ -126,13 +107,7 @@ def _history_for_item(con, item, receipt):
         params.append(pid)
     if not conds:
         return [], []
-    # Only FINALISED, non-voided prior visits belong in the cumulative history:
-    #  * voided bills are cancelled — their numbers must never resurface;
-    #  * pending / in-progress bills have no confirmed results — they would show
-    #    an all-dashes column (or, worse, unverified work-in-progress values).
-    # Over-fetch (LIMIT 8) then keep the newest 4 that actually carry values, so a
-    # finalised visit that happened to leave this test blank can't crowd out a real
-    # one or add an empty column.
+    # Only finalised, non-voided prior visits; over-fetch then keep the newest 3 with values.
     q = f"""SELECT ri.id AS item_id, rc.received_at AS dt
              FROM receipt_items ri JOIN receipts rc ON rc.id = ri.receipt_id
              WHERE ri.test_id = ? AND rc.id != ? AND ({" OR ".join(conds)})
@@ -151,10 +126,10 @@ def _history_for_item(con, item, receipt):
         ).fetchall()
         vmap = {v["parameter_id"]: v["value"] for v in vals if v["value"]}
         if not vmap:
-            continue  # no entered values → no empty column
+            continue
         labels.append((row["dt"] or "")[:10])
         maps.append(vmap)
-        if len(maps) == 3:  # cumulative-report standard: current + up to 3 prior
+        if len(maps) == 3:
             break
     labels.reverse()
     maps.reverse()  # oldest → newest, left to right
@@ -162,9 +137,8 @@ def _history_for_item(con, item, receipt):
 
 
 def _prev_impression(con, item, receipt):
-    """The most recent PRIOR finalised impression/conclusion for the same patient &
-    same test (for a 'compared with previous study' note on imaging). Honours the
-    'show_history' setting. Returns (date, text) or None."""
+    """Most recent prior finalised impression/conclusion for the same patient & test.
+    Returns (date, text) or None."""
     if (db.get_setting(con, "show_history", "1") or "1") != "1":
         return None
     rk = receipt.keys()
@@ -245,8 +219,7 @@ def _report_section(con, item, sex, receipt) -> str:
         pid = res["parameter_id"] if "parameter_id" in res.keys() else None
         hist_cells = [m.get(pid) for m in hist_maps]
         has_hist = any(str(h).strip() for h in hist_cells if h is not None)
-        # Blank current value → omit the row, unless prior results exist (then keep
-        # the row for its history and label the current cell "No result").
+        # Blank current value → omit row, unless prior results exist (keep for history).
         if not val and not has_hist:
             continue
         ref_disp, ref_flag = _resolve_ref(res, sex)

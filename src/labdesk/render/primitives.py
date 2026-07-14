@@ -36,16 +36,10 @@ class Doc:
         measure: bool = False,
     ) -> None:
         _ensure_app()
-        # Measure mode: the painting primitives (text/rect/fill/image…) become no-ops
-        # while all GEOMETRY (font metrics, text_height, y-advancement, image sizing)
-        # stays exact. Used to pre-measure block heights and to count pages without
-        # rasterising a single glyph — layout is byte-identical to a real render.
+        # measure mode: painting primitives no-op, but geometry (font metrics, sizing) stays exact
         self._measure = measure
         self._images_mode = images
-        # On-screen preview can rasterise at a fraction of print resolution: the pixel
-        # buffer shrinks by ``img_scale`` (so ~1/scale² the work + memory) while the
-        # LOGICAL DPI stays 300, so every mm/font measurement — and therefore all
-        # pagination — is byte-for-byte identical to the full-resolution render.
+        # img_scale shrinks the pixel buffer for preview while logical DPI stays 300, so pagination is unchanged
         self._img_scale = img_scale if images else 1.0
         self._images: list[QImage] = []
         self._owns = device is None and not images
@@ -53,8 +47,7 @@ class Doc:
         self._dev: QBuffer = None  # type: ignore[assignment]
         self._buf: QByteArray = None  # type: ignore[assignment]
         if images:
-            # paint each page onto an A4 QImage at 300 dpi (for on-screen preview,
-            # so we need no QtPdf viewer). new_page() finalises one and starts next.
+            # paint each page onto an A4 QImage; new_page() finalises one and starts next
             self._buf = self._dev = self.w = None
         elif self._owns:
             self._buf = QByteArray()
@@ -62,8 +55,7 @@ class Doc:
             self._dev.open(QBuffer.WriteOnly)
             self.w = QPdfWriter(self._dev)
         else:
-            # an external QPagedPaintDevice (e.g. a QPrinter) — paint straight onto
-            # it so printing needs no QtPdf round-trip and emits vector output
+            # external QPagedPaintDevice (e.g. QPrinter) — paint straight onto it
             self._buf = self._dev = None
             self.w = device
         self.ml, self.mt, self.mr, self.mb = margin_mm
@@ -93,9 +85,7 @@ class Doc:
             QImage.Format_RGB888,
         )
         img.fill(QColor("#ffffff"))
-        # keep the LOGICAL dpi at 300 so QFontMetricsF / text_height are unchanged;
-        # only the physical pixel buffer is smaller. The painter is scaled so all
-        # mm()-based (300-dpi) coordinates map into the smaller image unchanged.
+        # logical dpi stays 300 (only the pixel buffer shrinks); painter scale maps mm() coords in unchanged
         img.setDotsPerMeterX(int(DPI / 25.4 * 1000))
         img.setDotsPerMeterY(int(DPI / 25.4 * 1000))
         self._cur_img = img
@@ -104,7 +94,6 @@ class Doc:
             self.p.scale(s, s)
         self._hints()
 
-    # -- finish: PDF bytes (owned QPdfWriter), list[QImage] (images), or None --
     def finish(self) -> list[QImage] | bytes | None:
         self.p.end()
         if self._images_mode:
@@ -126,7 +115,6 @@ class Doc:
         else:
             self.w.newPage()
 
-    # -- primitives (all args in mm) --
     def fm(self, font: QFont) -> QFontMetricsF:
         return QFontMetricsF(font, self.p.device())
 
@@ -224,8 +212,7 @@ class Doc:
         runs: list[tuple[str, QFont, str]],
         align_left: bool = True,
     ) -> float:
-        """Draw a sequence of (text, font, color) runs on one baseline-centred row,
-        left to right. Returns total width in mm. Used for value + colored arrow."""
+        """Draw a sequence of (text, font, color) runs left to right; returns total width in mm."""
         cx = x
         for s, font, color in runs:
             fmpx = self.fm(font)
@@ -252,17 +239,17 @@ class Doc:
         img = QImage(str(path))
         if img.isNull():
             return 0.0
-        img = autocrop_image(img)  # trim baked-in white/transparent margins
+        img = autocrop_image(img)
         target_h = mm(px(h_px))
         scaled = img.scaledToHeight(int(target_h), Qt.SmoothTransformation)
         w_mm = scaled.width() / DPI * 25.4
-        if center_w is not None:  # horizontally centre within [x, x+center_w]
+        if center_w is not None:
             x = x + (center_w - w_mm) / 2
         if not self._measure:  # width still needed for layout; skip only the blit
             self.p.drawImage(
                 QRectF(mm(x), mm(y), scaled.width(), scaled.height()).topLeft(), scaled
             )
-        return w_mm  # drawn width in mm
+        return w_mm
 
     def text_height(
         self, s: str | None, font: QFont, w: float, wrap: bool = True

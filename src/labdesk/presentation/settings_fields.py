@@ -1,5 +1,4 @@
-"""Settings-page field definitions — the per-section (key, label[, hint]) tuples and
-the numeric-validation rules. Pure data, separated from the page widget in settings.py."""
+"""Settings-page field definitions: per-section (key, label[, hint]) tuples and numeric-validation rules."""
 
 from __future__ import annotations
 
@@ -54,10 +53,8 @@ WHATSAPP_FIELDS: list[tuple[str, ...]] = [
     ),
 ]
 
-# Per-field character caps. A QLineEdit with setMaxLength stops the user typing
-# more than this many characters, so an over-long value (e.g. a very long lab name)
-# can't stretch across the whole width of the printed report/receipt header. Sized
-# to what fits the report layout; keys not listed have no cap.
+# Per-field character caps, sized to what fits the printed report/receipt layout;
+# keys not listed have no cap.
 MAX_LENGTHS: dict[str, int] = {
     # report / receipt header identity
     "lab_name": 35,
@@ -70,9 +67,7 @@ MAX_LENGTHS: dict[str, int] = {
     "lab_no_prefix": 8,
     "phc_reg_no": 25,
     "lab_reg_no": 25,
-    # report footer / signatories — the department band lists every section the lab
-    # reports (e.g. "HEMATOLOGY | CHEMICAL PATHOLOGY | HORMONES | MOLECULAR BIOLOGY |
-    # HISTOPATHOLOGY", ~77 chars), so give the footer fields room for the full text.
+    # report footer / signatories — dept_band can list many sections (~77 chars)
     "report_footer": 140,
     "dept_band": 140,
     "signatory_1_name": 35,
@@ -82,20 +77,18 @@ MAX_LENGTHS: dict[str, int] = {
     # receipt footer
     "receipt_remarks": 80,
     "receipt_footer_note": 140,
-    # whatsapp + misc (generous — URLs/tokens/captions can be long, but still bounded)
+    # whatsapp + misc
     "promo_until": 10,
     "whatsapp_url": 200,
     "whatsapp_api_key": 200,
     "whatsapp_country_code": 5,
     "whatsapp_report_caption": 200,
     "whatsapp_receipt_caption": 200,
-    # NOTE: logo_path / accred_logo_1 are file paths chosen via a picker (read-only,
-    # built by _logo_card not _add_field) — deliberately uncapped so a valid long
-    # path is never truncated.
+    # logo_path / accred_logo_1 (file-picker paths, built by _logo_card) are uncapped
 }
 
-# Numeric settings: (kind, min, max, error message). Drives both the live input
-# validator and the on-save range check, so a bad value can't be persisted.
+# Numeric settings: (kind, min, max, error message). Drives the live validator
+# and the on-save range check.
 NUMERIC_FIELDS: dict[str, tuple] = {
     "promo_discount_pct": (
         "float",
@@ -103,16 +96,13 @@ NUMERIC_FIELDS: dict[str, tuple] = {
         100.0,
         "Special-day discount % must be a number between 0 and 100.",
     ),
-    # range matches the runtime clamp in whatsapp._cfg (5–120) so a saved value is
-    # never silently changed afterwards.
+    # matches the runtime clamp in whatsapp._cfg (5-120)
     "whatsapp_timeout": (
         "int",
         5,
         120,
         "WhatsApp upload timeout must be a whole number of seconds (5–120).",
     ),
-    # digits only — a malformed code (e.g. '+92') otherwise makes every send fail and
-    # wrongly blames the patient's number.
     "whatsapp_country_code": (
         "int",
         1,

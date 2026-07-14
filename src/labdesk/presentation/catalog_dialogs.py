@@ -1,7 +1,4 @@
-"""Catalog dialogs (add/edit a test, edit its parameters, manage panels).
-
-Lifted out of catalog.py to thin the page module; behavior unchanged.
-"""
+"""Catalog dialogs: add/edit a test, edit its parameters, manage panels."""
 
 from __future__ import annotations
 
@@ -68,9 +65,7 @@ class TestDialog(QDialog):
         self.head = QLineEdit()
         self.method = QPlainTextEdit()
         self.method.setMaximumHeight(90)
-        # Report layout override — normally the layout is detected from the test's
-        # parameters; this lets an admin force a specific one if a test is
-        # misclassified. Empty data => "Auto (detect)".
+        # override the auto-detected report layout; "" = Auto
         self.render_cat = QComboBox()
         for label, code in RENDER_LAYOUTS:
             self.render_cat.addItem(label, code)
@@ -156,12 +151,9 @@ class ParametersDialog(QDialog):
         for c in range(2, 6):
             h.setSectionResizeMode(c, QHeaderView.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
-        # rows must be tall enough for the styled "Type" dropdown (padding + rounded
-        # border) — otherwise it gets squished to a thin text-less oval.
+        # tall enough for the styled "Type" dropdown, else it gets squished
         self.table.verticalHeader().setDefaultSectionSize(40)
-        # cell editors are QLineEdits; the app-wide 8px input padding squeezes their
-        # text region inside a table row until it clips vertically. Give the in-table
-        # editors a tighter padding so the typed text is fully visible.
+        # tighter padding so in-table QLineEdit text doesn't clip vertically
         self.table.setStyleSheet("QLineEdit { padding: 1px 6px; }")
         lay.addWidget(self.table, 1)
 
@@ -309,7 +301,6 @@ class PanelsDialog(QDialog):
         self._panel_id: int | None = None
 
         root = QHBoxLayout(self)
-        # left: list of panels
         left = QVBoxLayout()
         left.addWidget(QLabel("Panels"))
         self.panel_list = QListWidget()
@@ -327,7 +318,6 @@ class PanelsDialog(QDialog):
         left.addLayout(lb)
         root.addLayout(left, 2)
 
-        # right: editor
         right = QVBoxLayout()
         right.addWidget(QLabel("Panel name"))
         self.name = QLineEdit()

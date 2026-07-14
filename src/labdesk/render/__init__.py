@@ -1,22 +1,8 @@
-"""Native Qt rendering of the lab report & cash receipt (QPainter → QPdfWriter).
-
-A pixel-faithful reproduction of the former WeasyPrint HTML/CSS design, using only
-Qt (which the app already bundles) — no WeasyPrint / Pango / Cairo / fontTools /
-Pillow. All data/business logic still lives in report.py; this module only draws.
-
-Coordinate model: paint at 300 dpi, position everything in millimetres. Helpers
-mm() (mm→device units) and px() (CSS px@96 → mm) map the old CSS values exactly.
-
-This package was split out of a single render.py module; ``__init__`` re-exports the
-former public API (and the underscore helpers other modules reference) so ``from .
-import render`` / ``render.X`` / ``from .render import X`` keep working unchanged.
-"""
+"""Native Qt rendering of the lab report & cash receipt (QPainter → QPdfWriter); re-exports the former flat render.py API."""
 
 from __future__ import annotations
 
-# Bind the sibling ``report`` module as ``render.report`` so the lazy
-# ``from . import report as R`` inside the submodules resolves to labdesk.report
-# (it is a sibling module, not labdesk.render.report).
+# Bind as render.report so submodules' ``from . import report as R`` resolves to labdesk.report (a sibling, not labdesk.render.report).
 from .. import report as report
 from ._shared import _patient_card, _wrap_value
 from .constants import (
@@ -44,15 +30,11 @@ from .constants import (
     px,
 )
 
-# ``_FAMILY`` is module-level mutable state in fonts.py; expose it for parity with
-# the former flat module (some tools/tests introspect it).
 from .fonts import _FAMILY, _ensure_app, _family, _font, preload
 from .image import autocrop_image
 from .preview import build_test_page, render_pages
 from .primitives import Doc
 from .receipt import build_receipt
-
-# build_report lives in report_doc but is part of the public surface.
 from .report_doc import (
     _draw_blocks_after_table,
     _draw_culture,
@@ -70,8 +52,6 @@ from .report_doc import (
     build_report,
 )
 
-# ``__all__`` is the public API plus the underscore helpers other modules reach for
-# via ``render._x`` (it also tells ruff these re-exports are deliberate, not F401).
 __all__ = [
     # public API
     "A4_H_MM",

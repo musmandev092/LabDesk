@@ -1,9 +1,4 @@
-"""Connections + schema initialisation for LabDesk.
-
-Opens hardened sqlite3 connections, initialises the schema, applies post-v1
-column/index migrations, and additively syncs the shipped catalog into existing
-installs.
-"""
+"""Connections + schema initialisation for LabDesk."""
 
 from __future__ import annotations
 
@@ -23,26 +18,18 @@ from ._driver import ENCRYPTION_AVAILABLE, sqlite3
 from .crypto import _verify_password, hash_password
 from .paths import _harden_perms, db_path
 
-# ---------------------------------------------------------------------------
-# Session key (the DB passphrase). Held in memory only — NEVER written to disk;
-# SQLCipher keeps its KDF salt in the DB header, so the same passphrase reopens
-# the file. Set once at launch (unlock dialog / setup wizard); every connect()
-# on any thread then reads it. LABDESK_DB_KEY env is an override for headless
-# self-test / QA. There is no recovery: lose the passphrase, lose the data.
-# ---------------------------------------------------------------------------
+# Session key (DB passphrase): memory-only, never written to disk. Set once at
+# launch; LABDESK_DB_KEY env overrides for headless self-test/QA.
 _SESSION_KEY: str | None = None
 
 
 def _plaintext_allowed() -> bool:
-    """Plaintext (stdlib sqlite3) operation is a DEV-ONLY escape hatch. It must be
-    opted into explicitly so a mispackaged/stripped build — where sqlcipher3 fails to
-    load — can never silently write the patient database in cleartext."""
+    """DEV-ONLY escape hatch: must be explicitly opted into (never silent)."""
     return os.environ.get("LABDESK_ALLOW_PLAINTEXT") == "1"
 
 
 def _require_encryption() -> None:
-    """Fail closed: refuse to touch the database when the encryption engine is absent,
-    unless plaintext mode was explicitly opted into for development."""
+    """Fail closed if the cipher engine is absent and plaintext wasn't opted into."""
     if not ENCRYPTION_AVAILABLE and not _plaintext_allowed():
         raise RuntimeError(
             "SQLCipher is unavailable — refusing to open an UNENCRYPTED patient "
@@ -52,10 +39,7 @@ def _require_encryption() -> None:
 
 
 def _assert_cipher_active(con) -> None:
-    """Prove the cipher is actually engaged on an encrypted connection. On real
-    SQLCipher `PRAGMA cipher_version` returns a non-empty version string; on stdlib
-    sqlite3 it returns nothing. An empty result means the data would be written in
-    cleartext, so abort rather than proceed under a false sense of encryption."""
+    """Abort if PRAGMA cipher_version comes back empty (cipher not actually engaged)."""
     if not ENCRYPTION_AVAILABLE:
         return
     try:
@@ -92,16 +76,13 @@ def is_unlocked() -> bool:
 
 
 def _apply_key(con, key: str | None) -> None:
-    """Apply the SQLCipher key. PRAGMA can't be parameterised, so the passphrase is
-    inlined with doubled single-quotes (standard SQL string escaping) — injection-safe.
-    Must run BEFORE any other statement touches the database."""
+    """Apply the SQLCipher key (quotes doubled — PRAGMA can't be parameterised)."""
     if key:
         con.execute("PRAGMA key = '{}'".format(key.replace("'", "''")))
 
 
 def db_is_plaintext(path: Path) -> bool:
-    """True if `path` is an UNENCRYPTED SQLite file (starts with the magic header).
-    Used to detect a legacy plaintext install that needs migrating to encrypted."""
+    """True if `path` is an unencrypted SQLite file (starts with the magic header)."""
     try:
         with open(path, "rb") as fh:
             return fh.read(16) == b"SQLite format 3\x00"
@@ -110,25 +91,21 @@ def db_is_plaintext(path: Path) -> bool:
 
 
 def verify_passphrase(passphrase: str, path: Path | None = None) -> bool:
-    """True if `passphrase` actually decrypts the ENCRYPTED database at `path` (the
-    unlock check). Fails closed for the cases that would otherwise wave any passphrase
-    through: an empty passphrase, a non-encrypted (plaintext) file, or a build without
-    the cipher engine — none of which constitute a verified unlock of encrypted data."""
+    """True if `passphrase` actually decrypts the encrypted database at `path`."""
     target = path or db_path()
     if not Path(target).exists():
         return False
     if not passphrase:
-        return False  # an empty key never "unlocks" an encrypted DB
+        return False
     if not ENCRYPTION_AVAILABLE:
-        return False  # can't verify encryption without the cipher engine
+        return False
     if db_is_plaintext(Path(target)):
-        return False  # a plaintext file is not unlocked by a passphrase — it must be migrated
+        return False
     try:
         con = sqlite3.connect(str(target), timeout=10)
         try:
             _apply_key(con, passphrase)
-            # Reading a page forces SQLCipher to derive the key and decrypt; a wrong
-            # passphrase raises DatabaseError here rather than returning a bogus True.
+            # forces SQLCipher to decrypt a page; wrong key raises DatabaseError
             con.execute("SELECT count(*) FROM sqlite_master").fetchone()
             return True
         finally:
@@ -138,24 +115,21 @@ def verify_passphrase(passphrase: str, path: Path | None = None) -> bool:
 
 
 def connect(path: Path | None = None, *, key: str | None = None) -> sqlite3.Connection:
-    _require_encryption()  # fail closed if the cipher engine is missing (no silent plaintext)
+    _require_encryption()
     target = path or db_path()
     con = sqlite3.connect(target, timeout=10)
     con.row_factory = sqlite3.Row
     resolved = _resolve_key(key)
-    _apply_key(con, resolved)  # SQLCipher key first, before any other SQL
+    _apply_key(con, resolved)  # must run before any other SQL
     if resolved:
-        _assert_cipher_active(con)  # confirm AES is really engaged, not a silent no-op
+        _assert_cipher_active(con)
     con.execute("PRAGMA foreign_keys = ON")
     con.execute("PRAGMA journal_mode = WAL")
-    # WAL + NORMAL is the SQLite-recommended pairing: commits no longer fsync on
-    # every write (only at checkpoint), which is what made each Save feel slow on
-    # spinning/USB disks. It is crash-safe — the DB can never corrupt; at worst a
-    # power loss drops the last just-committed transaction, an acceptable trade for
-    # a single-site desktop app (the on-launch backup is the real durability net).
+    # WAL+NORMAL: crash-safe, no fsync per write — the on-launch backup is the
+    # real durability net.
     con.execute("PRAGMA synchronous = NORMAL")
     con.execute("PRAGMA busy_timeout = 8000")  # let multiple instances share the DB
-    con.execute("PRAGMA temp_store = MEMORY")  # sorts/temp tables in RAM, not on disk
+    con.execute("PRAGMA temp_store = MEMORY")
     _harden_perms(Path(target))
     return con
 
@@ -163,37 +137,32 @@ def connect(path: Path | None = None, *, key: str | None = None) -> sqlite3.Conn
 def init_db(
     path: Path | None = None, *, seed_admin: bool = True, from_seed: bool = True
 ) -> sqlite3.Connection:
-    _require_encryption()  # fail closed before any file is created (no silent plaintext)
+    _require_encryption()
     target = path or db_path()
-    # First run: build the live DB from the shipped (plaintext) seed catalog. With a
-    # session key set, the seed is imported into a NEW ENCRYPTED database; without a
-    # key (dev fallback) it's a plain copy.
+    # First run: build the live DB from the shipped seed catalog (encrypted if a
+    # session key is set, plain copy otherwise — dev fallback).
     if from_seed and not Path(target).exists() and SEED_DB.exists():
         _create_db_from_seed(Path(target), _resolve_key())
     con = connect(path)
     con.executescript(SCHEMA_FILE.read_text(encoding="utf-8"))
     _ensure_columns(con)
-    _backfill_paisa(con)  # populate integer-paisa twins from REAL (after columns exist)
-    _ensure_indexes(con)  # after columns exist (some indexes depend on them)
-    _sync_catalog_from_seed(con)  # pull updated tests/ranges into existing installs
-    # seed default settings (only missing keys)
+    _backfill_paisa(con)
+    _ensure_indexes(con)
+    _sync_catalog_from_seed(con)
     for k, v in DEFAULT_SETTINGS.items():
         con.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (k, v))
-    # seed default admin if no users exist
     if seed_admin:
         n = con.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         if n == 0:
             h, salt = hash_password("admin")
-            # default admin must change its password on first login (the seeded
-            # 'admin' credential is a one-time bootstrap, never a usable account).
+            # seeded admin is a one-time bootstrap — must change password on first login
             con.execute(
                 "INSERT INTO users(username, full_name, pass_hash, salt, role, "
                 "must_change_password) VALUES (?,?,?,?,?,1)",
                 ("admin", "Administrator", h, salt, "admin"),
             )
         else:
-            # the shipped seed.sqlite may carry a legacy 'admin'/'admin' account;
-            # if it still uses the default password, force a change on first login.
+            # shipped seed.sqlite may carry a legacy admin/admin account — force change
             adm = con.execute(
                 "SELECT id, pass_hash, salt FROM users WHERE username='admin'"
             ).fetchone()
@@ -201,8 +170,7 @@ def init_db(
                 con.execute(
                     "UPDATE users SET must_change_password=1 WHERE id=?", (adm["id"],)
                 )
-        # Force any account still on a legacy (non-scrypt) password hash to reset
-        # it — the next login then rehashes to scrypt. Fresh installs have none.
+        # force reset of any legacy (non-scrypt) password hash so it rehashes to scrypt
         with contextlib.suppress(sqlite3.Error):
             con.execute(
                 "UPDATE users SET must_change_password=1 "
@@ -214,12 +182,9 @@ def init_db(
 
 
 def _create_db_from_seed(target: Path, key: str | None) -> None:
-    """Build the live DB from the plaintext seed catalog. With a key (and SQLCipher
-    available), import the seed into a NEW ENCRYPTED database via sqlcipher_export;
-    otherwise copy it as-is (dev fallback — unencrypted)."""
+    """Build the live DB from the plaintext seed catalog (encrypted if key+cipher
+    available via sqlcipher_export, else a dev-only plain copy)."""
     if not key or not ENCRYPTION_AVAILABLE:
-        # Plaintext seed copy is a dev-only fallback. Never do it silently in a build
-        # that lacks the cipher — that is exactly the silent-plaintext footgun.
         if not _plaintext_allowed():
             raise RuntimeError(
                 "Refusing to create an unencrypted database from the seed "
@@ -244,24 +209,15 @@ def _create_db_from_seed(target: Path, key: str | None) -> None:
 def rekey_database(
     con: sqlite3.Connection, old_passphrase: str, new_passphrase: str
 ) -> bool:
-    """Change the database passphrase IN PLACE on the live connection (SQLCipher
-    ``PRAGMA rekey``), re-encrypting every page with the new key and adopting it as
-    the session key (so the open connection keeps working and future connections use
-    the new key — no restart needed). Verifies the old passphrase and takes a backup
-    (encrypted with the OLD key) first. Returns True on success.
-
-    NOTE: backups made BEFORE this still require the OLD passphrase to restore — the
-    caller must warn the user.
-    """
+    """Rekey the live DB in place (SQLCipher PRAGMA rekey) and adopt it as the
+    session key. Backups made before this still need the OLD passphrase."""
     if not ENCRYPTION_AVAILABLE:
         return False
-    if not verify_passphrase(old_passphrase):  # independent check the old one is right
+    if not verify_passphrase(old_passphrase):
         return False
     from .backup import backup_db  # local import avoids a connection<->backup cycle
 
-    # Safety copy (encrypted with the OLD key) BEFORE the in-place rewrite. If it
-    # can't be written, refuse to rekey — a failed rewrite with no backup could
-    # otherwise leave the only copy of the data unrecoverable.
+    # safety copy (OLD key) before the in-place rewrite — refuse to rekey without it
     try:
         if backup_db("pre-rekey") is None:
             return False
@@ -272,18 +228,14 @@ def rekey_database(
         con.commit()
     except sqlite3.Error:
         return False
-    if not verify_passphrase(new_passphrase):  # confirm the rewrite took
+    if not verify_passphrase(new_passphrase):
         return False
     unlock(new_passphrase)
     return True
 
 
 def migrate_plaintext_to_encrypted(passphrase: str, path: Path | None = None) -> bool:
-    """One-time upgrade of a legacy PLAINTEXT database to an encrypted one with the
-    given passphrase. Builds the encrypted copy, VERIFIES it opens, then atomically
-    swaps it in (os.replace) — so a failure can never lose data — and drops the WAL
-    sidecars. Returns True on success, False if there is nothing to migrate or it
-    failed (original left untouched)."""
+    """One-time upgrade of a legacy plaintext DB to encrypted, atomically swapped in."""
     target = Path(path or db_path())
     if not target.exists() or not db_is_plaintext(target) or not ENCRYPTION_AVAILABLE:
         return False
@@ -293,9 +245,7 @@ def migrate_plaintext_to_encrypted(passphrase: str, path: Path | None = None) ->
     try:
         src = sqlite3.connect(str(target))
         try:
-            src.execute(
-                "PRAGMA wal_checkpoint(TRUNCATE)"
-            )  # fold -wal/-shm into the file
+            src.execute("PRAGMA wal_checkpoint(TRUNCATE)")  # fold -wal/-shm into file
             src.execute(
                 "ATTACH DATABASE ? AS enc KEY '{}'".format(
                     passphrase.replace("'", "''")
@@ -315,7 +265,7 @@ def migrate_plaintext_to_encrypted(passphrase: str, path: Path | None = None) ->
         with contextlib.suppress(OSError):
             enc.unlink()
         return False
-    os.replace(str(enc), str(target))  # atomic: plaintext original is overwritten
+    os.replace(str(enc), str(target))  # atomic swap
     for sidecar in ("-wal", "-shm"):
         with contextlib.suppress(OSError):
             Path(str(target) + sidecar).unlink()
@@ -324,19 +274,8 @@ def migrate_plaintext_to_encrypted(passphrase: str, path: Path | None = None) ->
 
 
 def _sync_catalog_from_seed(con: sqlite3.Connection) -> None:
-    """Bring a newer catalog version's *additions* into an existing DB — WITHOUT
-    ever overwriting the lab's own catalog.
-
-    After first run the lab OWNS its catalog. An app update may ship new tests in
-    a higher `catalog_version`; this only INSERTs tests/parameters this DB does
-    not already have (matched by id). Existing rows — prices (charges), reference
-    ranges, units, names, the active/retired flag — are NEVER modified or deleted.
-    So pushing a new AppImage + checksum can add tests but can never reset a price
-    or a range the lab edited. (Past reports keep their own snapshotted ranges.)
-
-    To push a *correction* to an existing test, change it in the in-app Test
-    Catalog editor — deliberately, by an admin — not silently via an update.
-    """
+    """Additively pull new tests/params from a newer seed catalog_version into an
+    existing DB, without ever touching the lab's own edits (prices, ranges, etc.)."""
     if not SEED_DB.exists():
         return
     try:
@@ -355,19 +294,14 @@ def _sync_catalog_from_seed(con: sqlite3.Connection) -> None:
     if live_ver >= seed_ver:
         return
 
-    # The shipped seed is plaintext; KEY '' tells SQLCipher to attach it unencrypted
-    # alongside the encrypted main DB. (Plain ATTACH on the stdlib dev fallback.)
+    # KEY '' attaches the plaintext seed unencrypted alongside the encrypted main DB
     if ENCRYPTION_AVAILABLE:
         con.execute("ATTACH DATABASE ? AS seed KEY ''", (str(SEED_DB),))
     else:
         con.execute("ATTACH DATABASE ? AS seed", (str(SEED_DB),))
     try:
-        # ADDITIVE ONLY, matched by STABLE keys — NOT the autoincrement id, which the
-        # live DB reassigns when a lab adds custom tests. id-matching silently (and
-        # permanently) dropped shipped rows whose ids had been reused. Tests match on
-        # legacy_no; parameters on (test, seq, name) so the 34 seed params with no
-        # legacy_id are handled too and re-runs stay idempotent. No UPDATE/DELETE —
-        # the lab's own edits are sacrosanct.
+        # additive only, matched by stable keys (legacy_no / seq+name) not the
+        # autoincrement id, which the live DB reassigns — no UPDATE/DELETE ever
         tcols = [r[1] for r in con.execute('PRAGMA table_info("tests")')]
         scols = {r[1] for r in con.execute("PRAGMA seed.table_info('tests')")}
         tcols = [c for c in tcols if c in scols and c != "id"]  # don't force the id
@@ -426,14 +360,13 @@ def _sync_catalog_from_seed(con: sqlite3.Connection) -> None:
             )
             have_p.add(key)
 
-        # bump catalog_version ONLY after the rows actually landed, so a partial /
-        # failed sync retries on the next launch instead of being marked done.
+        # bump catalog_version only after rows landed, so a failed sync retries later
         con.execute(
             "INSERT INTO settings(key,value) VALUES ('catalog_version',?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             (str(seed_ver),),
         )
-        con.commit()  # must commit before DETACH (no open transaction allowed)
+        con.commit()  # must commit before DETACH
     except sqlite3.Error:
         # leave catalog_version unbumped so the sync retries next launch
         with contextlib.suppress(sqlite3.Error):
@@ -453,10 +386,7 @@ def _ensure_columns(con: sqlite3.Connection) -> None:
 
 
 def _backfill_paisa(con: sqlite3.Connection) -> None:
-    """Populate the integer-paisa money columns from their REAL twins wherever a paisa
-    value is still missing. Idempotent (only touches NULL paisa rows) and guarded, so
-    it runs harmlessly on every open. Uses SQL ROUND — the same rounding the inline
-    dual-writes use — so paisa always equals round(real*100)."""
+    """Populate NULL integer-paisa columns from their REAL twins (idempotent)."""
     for table, pairs in _PAISA_COLUMNS.items():
         for real_col, paisa_col in pairs:
             with contextlib.suppress(sqlite3.Error):
@@ -469,9 +399,7 @@ def _backfill_paisa(con: sqlite3.Connection) -> None:
 
 
 def _ensure_indexes(con: sqlite3.Connection) -> None:
-    """Create hot-path indexes (some depend on post-v1 columns, so this runs after
-    _ensure_columns) and the unique lab_no guard. Each is independent + guarded so
-    a pre-existing duplicate lab_no can't block startup."""
+    """Create hot-path indexes + the unique lab_no guard (runs after _ensure_columns)."""
     for ddl in (
         "CREATE INDEX IF NOT EXISTS ix_patients_tel ON patients(telephone)",
         "CREATE INDEX IF NOT EXISTS ix_patients_mr ON patients(mr_no)",
@@ -480,15 +408,13 @@ def _ensure_indexes(con: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_expenses_date ON expenses(date)",
         "CREATE INDEX IF NOT EXISTS ix_ledger_date ON ledger(date)",
         "CREATE INDEX IF NOT EXISTS ix_audit_at ON audit_log(at)",
-        # foreign-key columns lacking a covering index → full scans on lookups and
-        # slow ON DELETE CASCADE on the fastest-growing tables (DB review finding).
         "CREATE INDEX IF NOT EXISTS ix_receipts_patient ON receipts(patient_id)",
         "CREATE INDEX IF NOT EXISTS ix_receipts_doctor ON receipts(doctor_id)",
         "CREATE INDEX IF NOT EXISTS ix_cultures_item ON cultures(receipt_item_id)",
         "CREATE INDEX IF NOT EXISTS ix_cultsens_culture "
         "ON culture_sensitivity(culture_id)",
         "CREATE INDEX IF NOT EXISTS ix_panel_items_test ON panel_items(test_id)",
-        # one lab number can never be issued twice (guards the daily-serial race)
+        # guards the daily-serial race: a lab number can never be issued twice
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_receipts_labno ON receipts(lab_no) "
         "WHERE lab_no IS NOT NULL",
     ):

@@ -39,9 +39,7 @@ def save_panel(
     actor_role: str,
     username: str,
 ) -> int:
-    """Create or update a panel and its member tests in one transaction. Authorized
-    and AUDITED here (not in the caller) so a privileged catalog write always leaves a
-    trail regardless of which UI path reaches it."""
+    """Create or update a panel and its member tests in one transaction, audited."""
     require(actor_role, "edit_catalog")
     name = (name or "").strip()
     if not name:
@@ -74,7 +72,7 @@ def save_panel(
 def delete_panel(
     con: sqlite3.Connection, panel_id: int, *, actor_role: str, username: str
 ) -> None:
-    """Soft-delete (retire) a panel; member rows go with it. Authorized + audited here."""
+    """Soft-delete (retire) a panel; member rows go with it."""
     require(actor_role, "edit_catalog")
     row = con.execute("SELECT name FROM panels WHERE id=?", (panel_id,)).fetchone()
     con.execute("UPDATE panels SET active=0 WHERE id=?", (panel_id,))
@@ -91,9 +89,8 @@ def receive_due(
     *,
     actor_role: str,
 ):
-    """Record a (partial) due payment on a receipt: ledger credit + updated
-    paid/due, audited. Returns (lab_no, new_paid, new_due) or None if nothing
-    is owed. Shared by the Receipts page and the Accounts dues tab."""
+    """Record a partial due payment: ledger credit + updated paid/due, audited.
+    Returns (lab_no, new_paid, new_due) or None if nothing is owed."""
     require(actor_role, "receive_payment")
     r = con.execute(
         "SELECT lab_no, net_amount, paid, due FROM receipts WHERE id=?", (receipt_id,)
@@ -125,10 +122,7 @@ def receive_due(
 
 
 def income_between(con: sqlite3.Connection, from_date: str, to_date: str) -> float:
-    """Period income from the LEDGER: cash actually booked (credits minus refund/void
-    debits), dated by the EVENT date. Excludes expenses. This is correct across later
-    due-recovery, bill edits and voids — unlike SUM(MIN(paid,net)) keyed on
-    receipts.received_at, which retroactively mis-states already-closed months."""
+    """Period income from the ledger (credits minus refund/void debits), by event date."""
     return con.execute(
         "SELECT COALESCE(SUM(COALESCE(credit,0)-COALESCE(debit,0)),0) FROM ledger "
         "WHERE COALESCE(kind,'')<>'expense' AND date(date) BETWEEN ? AND ?",
@@ -137,8 +131,7 @@ def income_between(con: sqlite3.Connection, from_date: str, to_date: str) -> flo
 
 
 def income_by_method(con: sqlite3.Connection, from_date: str, to_date: str):
-    """Per-payment-method cash for the period, from the ledger joined to each
-    referenced receipt's method. Same event-date basis as income_between()."""
+    """Per-payment-method cash for the period, same event-date basis as income_between()."""
     return con.execute(
         "SELECT COALESCE(NULLIF(TRIM(rc.payment_method),''),'Cash') AS m, "
         "COUNT(DISTINCT l.ref_id) AS n, "
@@ -152,8 +145,7 @@ def income_by_method(con: sqlite3.Connection, from_date: str, to_date: str):
 
 # ---- in-app parameter editor ------------------------------------------------
 class ParameterInUseError(Exception):
-    """Raised when the editor tries to remove a parameter that already has saved
-    results on a patient report (deleting it would orphan that history)."""
+    """Raised when removing a parameter would orphan its saved patient results."""
 
     def __init__(self, names):
         self.names = list(names)
@@ -166,15 +158,8 @@ class ParameterInUseError(Exception):
 def save_test_parameters(
     con: sqlite3.Connection, test_id: int, rows, *, actor_role: str, username: str
 ) -> None:
-    """Persist the report-line definitions for a test from the in-app editor.
-
-    Diff-based so existing parameter IDs (and any patient results referencing
-    them) survive: existing rows are UPDATEd in place, new rows INSERTed, and
-    rows the user removed are DELETEd — unless they already have saved results,
-    in which case nothing is saved and ParameterInUseError is raised.
-
-    Authorized + audited here so the privileged catalog edit always leaves a trail.
-    """
+    """Diff-save a test's report-line definitions (update/insert/delete); raises
+    ParameterInUseError instead of deleting a parameter with saved results."""
     require(actor_role, "edit_catalog")
     rows = list(rows)
     old = con.execute(

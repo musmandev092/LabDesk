@@ -1,8 +1,4 @@
-"""Output: native PDF bytes (QPainter → QPdfWriter via :mod:`..render`),
-file exports and printing.
-
-Imports :mod:`..render` and :mod:`..db`.
-"""
+"""Native PDF bytes (QPainter → QPdfWriter via :mod:`..render`), file exports and printing."""
 
 from __future__ import annotations
 
@@ -12,12 +8,8 @@ from typing import cast
 from .. import db, render
 
 
-# ---------------------------------------------------------------------------
-# Output — native Qt PDF (QPainter → QPdfWriter) + raster-to-printer
-# ---------------------------------------------------------------------------
 def _pdf_target(path: str) -> Path:
-    """Normalise a caller-supplied export path: expand ~ and force a .pdf suffix
-    so an export can't be coerced into writing a different file type."""
+    """Expand ~ and force a .pdf suffix on a caller-supplied export path."""
     p = Path(path).expanduser()
     if p.suffix.lower() != ".pdf":
         p = p.with_suffix(".pdf")
@@ -25,7 +17,6 @@ def _pdf_target(path: str) -> Path:
 
 
 def export_report_pdf(con, receipt_id: int, path: str, pack: bool = True) -> None:
-    # build_* is polymorphic on device/images; the default path always returns bytes.
     _pdf_target(path).write_bytes(
         cast(bytes, render.build_report(con, receipt_id, pack=pack))
     )
@@ -35,9 +26,6 @@ def export_receipt_pdf(con, receipt_id: int, path: str) -> None:
     _pdf_target(path).write_bytes(cast(bytes, render.build_receipt(con, receipt_id)))
 
 
-# Build the PDF bytes natively (QPainter → QPdfWriter). Safe to run on a
-# background thread (see ui/tasks.py); the bytes are printed/previewed on the UI
-# thread. QPainter/QPdfWriter do not require the GUI thread.
 def build_report_bytes(con, receipt_id: int, pack: bool = True) -> bytes:
     return cast(bytes, render.build_report(con, receipt_id, pack=pack))
 
@@ -52,8 +40,7 @@ def build_test_page_bytes(printer_name: str = "") -> bytes:
 
 
 def _make_printer(parent, title, printer_name):
-    """Build a QPrinter: send to the configured default if it still exists, else
-    show the print dialog. Returns None if the user cancels."""
+    """Build a QPrinter for the default printer, or show the print dialog; None if cancelled."""
     from PySide6.QtGui import QPageSize
     from PySide6.QtPrintSupport import QPrintDialog, QPrinter, QPrinterInfo
 
@@ -78,11 +65,7 @@ def print_doc(
     letterhead=True,
     pack: bool = True,
 ) -> None:
-    """Render a document straight onto the chosen printer — vector output, no
-    QtPdf round-trip and no patient-PII temp file. MUST run on the UI thread
-    (QPrinter/QPainter are not thread-safe); native rendering is fast (~tens of
-    ms) so it is synchronous. Choosing 'Print to File (PDF)' in the dialog makes
-    the printer emit a PDF directly — handled for free by painting onto it."""
+    """Paint a document straight onto the chosen printer (vector output); must run on the UI thread."""
     printer = _make_printer(parent, title, printer_name)
     if printer is None:
         return

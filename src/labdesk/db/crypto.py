@@ -1,9 +1,4 @@
-"""Password hashing — scrypt (memory-hard KDF, stdlib).
-
-The stored string is self-describing: "scrypt$N$r$p$salt$hexhash". Legacy
-sha256 rows are still verified and transparently upgraded on the next
-successful login.
-"""
+"""Password hashing — scrypt (memory-hard KDF, stdlib). Stored as "scrypt$N$r$p$salt$hexhash"."""
 
 from __future__ import annotations
 
@@ -50,12 +45,10 @@ def _verify_password(password: str, stored: str, legacy_salt: str) -> bool:
     return hmac.compare_digest(h, stored)
 
 
-# Built once at import (NOT lazily on first miss) so the very first unknown-username
-# attempt isn't measurably slower than later ones — which would itself leak.
+# built at import, not lazily, so the first unknown-username attempt isn't slower
 _DUMMY_HASH, _ = hash_password("login-timing-equaliser")
 
 
 def _dummy_verify(password: str) -> None:
-    """Run one scrypt hash on the user-miss path so an unknown/inactive username
-    costs about the same as a real one — defeats username-enumeration via timing."""
+    """Constant-cost hash on the user-miss path — defeats username enumeration via timing."""
     _verify_password(password, _DUMMY_HASH, "")

@@ -1,28 +1,8 @@
-"""Report & receipt generation.
-
-Two documents — a branded lab report (letterhead, rounded patient card, teal
-cumulative results table with a highlighted CURRENT column and inline ↑/↓ flags)
-and a "CASH RECEIPT" (amount-in-words box + totals panel). They are drawn
-natively with Qt (see render.py: QPainter → QPdfWriter), so the app needs no
-WeasyPrint/Pango/Cairo/fontTools/Pillow. Inter is bundled (assets/fonts) and
-embedded in the PDF. The HTML builders below are retained for content tests and
-are not used for rendering. Printing paints straight onto the QPrinter (vector,
-no QtPdf round-trip); preview renders to image pages (no QtPdf viewer).
-
-This is a package split out of the former ``report.py`` module. The public API
-is re-exported here unchanged: every ``from . import report``, ``report.X(...)``,
-``from .report import X`` and the render package's lazy ``report._g(...)`` keeps
-working exactly as before. Single-underscore helpers used by other modules
-(_flag, _esc, _amount_in_words, _g, _user_display, _contacts, _regs,
-_patient_pairs, _history_for_item, _patient_card, _flag_arrow, _resolve_ref,
-_fmt_date, …) remain importable as ``report.<name>``.
-"""
+"""Report & receipt generation: branded lab report + cash receipt, rendered natively with Qt. Re-exports the former ``report.py`` public API unchanged."""
 
 from __future__ import annotations
 
-# ``db`` and ``render`` are bound here as ``report.db`` / ``report.render`` because
-# the package preserves the import cycle: report imports render at module level;
-# render lazily imports report back.
+# db/render bound here to preserve the report<->render import cycle contract
 from .. import db, render
 from .constants import (
     ACCENT,

@@ -94,8 +94,7 @@ class SettingsPage(
         col.addWidget(self._text_card("Receipt footer", RECEIPT_FIELDS))
         col.addWidget(self._whatsapp_card())
         col.addWidget(self._security_card())
-        # Backup/restore replaces the entire database — gate it behind an explicit
-        # admin capability rather than mere Settings-page visibility.
+        # backup/restore is gated behind an explicit admin capability
         if can(self.user["role"], "manage_backups"):
             col.addWidget(self._backup_card())
         if can(self.user["role"], "manage_users"):
@@ -104,9 +103,7 @@ class SettingsPage(
         col.addWidget(self._about_card())
         col.addStretch(1)
 
-        # Cap the form at a readable width and centre it: without this the fields
-        # (AllNonFixedFieldsGrow) overflow the right edge at 1280 and stretch to
-        # ~3300 px on 4K. The centred max-width wrapper fixes BOTH at once.
+        # cap + centre the form so fields don't overflow at 1280 or stretch on 4K
         scroll.setWidget(max_width_center(host, 880))
         root.addWidget(scroll, 1)
 
@@ -115,13 +112,11 @@ class SettingsPage(
         self.save_btn.clicked.connect(self.save)
         root.addWidget(self.save_btn)
 
-        self._install_numeric_validators()  # restrict numeric fields to valid input
+        self._install_numeric_validators()
 
     # ---- builders ----
     def _install_numeric_validators(self) -> None:
-        """Stop letters / out-of-range values being typed into numeric fields. A
-        validator only blocks bad keystrokes; save() still range-checks (a validator
-        accepts 'intermediate' input like a lone '-' or a partial number)."""
+        """Block non-numeric/out-of-range keystrokes in numeric fields."""
         for key, (kind, lo, hi, _msg) in NUMERIC_FIELDS.items():
             le = self.inputs.get(key)
             if le is None:
@@ -134,8 +129,7 @@ class SettingsPage(
             le.setValidator(v)
 
     def _validate_numeric(self) -> str | None:
-        """Return an error message if any numeric field holds a non-number or an
-        out-of-range value; None if all are fine. Blank = use the default downstream."""
+        """Return an error message for a bad numeric field, else None."""
         for key, (kind, lo, hi, msg) in NUMERIC_FIELDS.items():
             le = self.inputs.get(key)
             if le is None:
@@ -171,8 +165,7 @@ class SettingsPage(
         key, label = field[0], field[1]
         le = QLineEdit()
         if key == "whatsapp_api_key":
-            # the access token is a secret — mask it (with a reveal toggle) instead of
-            # showing it in cleartext on the admin screen.
+            # mask the access token, with a reveal toggle
             le.setEchoMode(QLineEdit.Password)
             le.setClearButtonEnabled(True)
             act = le.addAction(
@@ -190,8 +183,6 @@ class SettingsPage(
         if len(field) > 2 and field[2]:
             le.setPlaceholderText(field[2])
         if key in MAX_LENGTHS:
-            # cap the length so an over-long value can't overflow the printed
-            # report/receipt header (e.g. a very long lab name)
             le.setMaxLength(MAX_LENGTHS[key])
         self.inputs[key] = le
         form.addRow(self._flbl(label), le)
@@ -206,9 +197,7 @@ class SettingsPage(
         return card(w, title=title)
 
     def _license_card(self) -> QWidget:
-        """Node-lock license status for THIS machine + a way to (re)activate. The
-        full activation flow (request → vendor → license file) lives in the same
-        dialog shown at first launch — this just makes it reachable from Settings."""
+        """License status for this machine + a way to (re)activate."""
         from .. import licensing
 
         col = QVBoxLayout()
@@ -253,8 +242,7 @@ class SettingsPage(
         ActivationDialog(initial_state=licensing.check()[0], parent=self).exec()
 
     def _about_card(self) -> QWidget:
-        """Product + developer credit (the lab's own branding is set above; this
-        is the fixed credit for whoever built the software)."""
+        """Product + developer credit."""
         col = QVBoxLayout()
         col.setSpacing(6)
         prod = QLabel(f"<b>{PRODUCT_NAME}</b> v{__version__} — {PRODUCT_TAGLINE}")
@@ -331,8 +319,7 @@ class SettingsPage(
         self.theme_combo = QComboBox()
         self.theme_combo.addItem("Light", "light")
         self.theme_combo.addItem("Dark", "dark")
-        # No live preview: the theme is applied only when Save is pressed, so simply
-        # picking Dark and leaving without saving never changes the look.
+        # applied only on Save, not live
         form.addRow(self._flbl("Theme"), self.theme_combo)
         w = QWidget()
         w.setLayout(form)
@@ -404,27 +391,24 @@ class SettingsPage(
         )
         if not path:
             return
-        # Copy the chosen image into the protected data dir so branding files live
-        # inside it (not referenced from arbitrary, possibly-sensitive locations).
+        # copy into the protected data dir rather than referencing it in place
         try:
             self.inputs[key].setText(str(db.import_asset(path, key)))
         except OSError as e:
             toast_warn(self, "Image", f"Could not use that image:\n{e}")
 
     def save(self) -> None:
-        # defence-in-depth: settings writes are admin-level; gate the action too
-        # (consistent with the other mutating actions, not just page visibility).
+        # defence in depth: gate the action, not just page visibility
         if not can(self.user["role"], "edit_settings"):
             toast_warn(
                 self, "Settings", "You don't have permission to change settings."
             )
             return
-        # reject non-numeric / out-of-range numeric fields before anything is written
         num_err = self._validate_numeric()
         if num_err:
             toast_warn(self, "Settings", num_err)
             return
-        # validate the gateway URL (SSRF / mis-send guard) before persisting
+        # SSRF / mis-send guard
         wa_url = self.inputs["whatsapp_url"].text().strip()
         if wa_url:
             ok, why = whatsapp.validate_url(wa_url)
@@ -435,9 +419,7 @@ class SettingsPage(
 
             scheme = _urlparse.urlparse(wa_url).scheme
             if scheme == "http" and not whatsapp.is_loopback_url(wa_url):
-                # Plain http to anything other than this very computer means the
-                # patient PDF AND the access token travel UNENCRYPTED over the
-                # network where they can be intercepted. Strongly warn.
+                # plain http to a non-loopback host sends the PDF + token unencrypted
                 if (
                     QMessageBox.question(
                         self,
@@ -461,8 +443,7 @@ class SettingsPage(
                 != QMessageBox.Yes
             ):
                 return
-        # Collect every field into one mapping and write it in a SINGLE transaction.
-        # Saving key-by-key used to fsync ~30 times and froze the UI for a beat.
+        # write everything in a single transaction, not key-by-key
         theme = self.theme_combo.currentData() or "light"
         prev_theme = db.get_setting(self.con, "theme", "light")
         updates = {
@@ -481,11 +462,9 @@ class SettingsPage(
         updates["default_printer"] = self.printer_combo.currentData() or ""
         token = self.inputs["whatsapp_api_key"].text().strip()
 
-        # The DB write + secret-file write run on a background thread (the button
-        # shows "Saving…"); the toast and theme restyle happen back on the UI thread.
+        # DB write + secret-file write run in the background; UI updates after
         def work(con):
-            db.set_settings(con, updates)  # one commit — no freeze
-            # WhatsApp token → private 0600 secret file (kept out of the DB)
+            db.set_settings(con, updates)
             db.set_secret("whatsapp_api_key", token)
             db.log_audit(con, self.user["username"], "settings_saved", f"theme={theme}")
             return True

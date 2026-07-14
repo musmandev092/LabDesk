@@ -1,10 +1,4 @@
-"""Filesystem locations + secrets for LabDesk.
-
-The DB lives next to the user's data (XDG dir when packaged), so the AppImage
-stays read-only while data persists across updates. The data dir is hardened to
-0700 and the DB/secrets to 0600. Secrets are kept OUT of the SQLite DB so DB
-copies/backups don't leak them.
-"""
+"""Filesystem locations + secrets for LabDesk. Data dir hardened to 0700, DB/secrets to 0600."""
 
 from __future__ import annotations
 
@@ -18,8 +12,7 @@ from ._config import APP_NAME
 
 
 def data_dir() -> Path:
-    """Where the live database + assets are stored (writable). Hardened to 0700 so
-    other OS users can't read the patient data / secrets."""
+    """Where the live database + assets are stored (writable, hardened to 0700)."""
     override = os.environ.get("LABDESK_DATA_DIR")
     if override:
         d = Path(override)
@@ -47,9 +40,7 @@ def _harden_perms(target: Path) -> None:
 
 
 def import_asset(src: str, name_hint: str = "asset") -> Path:
-    """Copy a chosen branding image into the (0700) data dir's `assets/` folder and
-    return the managed path. Keeps logos inside the protected data dir instead of
-    referencing arbitrary, possibly-sensitive locations elsewhere on disk."""
+    """Copy a branding image into the data dir's `assets/` folder; return its path."""
     s = Path(src).expanduser()
     assets = data_dir() / "assets"
     assets.mkdir(parents=True, exist_ok=True)
@@ -60,10 +51,7 @@ def import_asset(src: str, name_hint: str = "asset") -> Path:
     return dest
 
 
-# ---------------------------------------------------------------------------
-# Secrets kept OUT of the SQLite DB (so DB copies/backups don't leak them).
-# Stored in a 0600 JSON file in the data dir. Used for the WhatsApp token.
-# ---------------------------------------------------------------------------
+# secrets kept out of the SQLite DB (so backups don't leak them) — 0600 JSON file
 def _secret_path() -> Path:
     return data_dir() / ".secrets.json"
 

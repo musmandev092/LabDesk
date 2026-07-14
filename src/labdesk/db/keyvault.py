@@ -1,16 +1,9 @@
-"""Optional "remember the database password" via the freedesktop Secret Service.
+"""Optional "remember the database password" via the freedesktop Secret Service
+(KDE Wallet / GNOME Keyring), talked to directly with jeepney (pure-Python D-Bus).
+Every call is guarded/bounded — no bus/wallet/locked just degrades to "unavailable".
 
-The Secret Service (org.freedesktop.secrets) is implemented by BOTH KDE Wallet
-(ksecretd / kwalletd) and GNOME Keyring, so this one path covers either desktop.
-We talk to it directly with jeepney (pure-Python D-Bus — no native deps), using a
-"plain" session (the local session bus is already trusted; the wallet encrypts at
-rest). Every call is guarded and bounded: if there is no bus / no wallet / it is
-locked, the helpers degrade to "unavailable" and the app just prompts as usual.
-
-Threat model: the saved key is protected by the user's OS login session (and the
-wallet). It defends a copied database file and other OS accounts — NOT someone
-already inside the same logged-in session. Storing is opt-in (a checkbox).
-"""
+Threat model: the saved key is protected by the OS login session + wallet; it
+defends a copied DB file and other OS accounts, not someone in the same session."""
 
 from __future__ import annotations
 

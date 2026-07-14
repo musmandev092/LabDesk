@@ -1,11 +1,4 @@
-"""Clinical result + culture release (no Qt).
-
-The worklist and microbiology views read their widgets and resolve reference
-ranges, then hand plain data here. These functions enforce authorization
-(``require("finalize_results")``) and perform the multi-table write + audit in one
-transaction — so releasing a clinical report can't be done by a role that lacks the
-capability regardless of which code path reaches it (defence-in-depth).
-"""
+"""Clinical result + culture release (no Qt) — authorized, audited multi-table writes."""
 
 from __future__ import annotations
 
@@ -27,16 +20,10 @@ def release_results(
     actor_role: str,
     conclusion: dict[int, str] | None = None,
 ) -> str:
-    """Persist entered results + remarks + static report lines and stamp the receipt
-    'reported' (on first finalisation), then audit. Returns the lab number.
-
-    ``result_rows`` carry resolved metadata (``item_id, parameter_id, seq, part_type,
-    group_head, name, units, superscript, ref_text, value, hidden``); a ``None``
-    ``parameter_id`` is a single-line free result. ``static_rows`` are no-editor
-    H/L/continuation lines inserted only if absent. ``conclusion`` maps item_id →
-    impression/interpretation text (imaging/molecular/serology), stored on
-    receipt_items.conclusion and printed as a block below the table. On failure the
-    whole write rolls back and re-raises so the view can report nothing was saved."""
+    """Persist results + remarks + static report lines, stamp the receipt 'reported'
+    on first finalisation, then audit. Returns the lab number. A None parameter_id in
+    result_rows is a single-line free result; conclusion maps item_id -> impression
+    text. Rolls back and re-raises on failure."""
     require(actor_role, "finalize_results")
     try:
         for row in result_rows:
@@ -137,11 +124,9 @@ def save_culture(
     actor_username: str,
     actor_role: str,
 ) -> str:
-    """Replace the culture + sensitivities for a receipt item, mark it reported, stamp
-    the receipt 'reported' on first finalisation, then audit. Returns an audit detail
-    string (lab_no — test_name). ``culture`` carries specimen/growth/organism/
-    colony_count/gram_stain/zn_stain/remarks; ``sensitivities`` is (antibiotic, result)
-    pairs (blank antibiotics are skipped)."""
+    """Replace the culture + sensitivities for a receipt item, mark it reported,
+    stamp the receipt 'reported' on first finalisation, then audit. Returns
+    "lab_no — test_name". Blank antibiotics in sensitivities are skipped."""
     require(actor_role, "finalize_results")
     try:
         con.execute("DELETE FROM cultures WHERE receipt_item_id=?", (item_id,))

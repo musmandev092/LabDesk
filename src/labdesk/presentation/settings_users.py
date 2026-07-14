@@ -1,9 +1,4 @@
-"""Users & roles settings card + actions, split out of the SettingsPage god-class.
-
-A mixin (runs on the composed SettingsPage instance). The privileged user
-mutations go through application.users (require("manage_users") + audit) exactly as
-before — this is pure reorganisation, no behavior change.
-"""
+"""Users & roles settings card + actions, mixed into SettingsPage."""
 
 from __future__ import annotations
 
@@ -82,7 +77,7 @@ class UsersSettingsMixin:
 
     def _add_user(self) -> None:
         if not can(self.user["role"], "manage_users"):
-            return  # defence in depth — managing users is admin-only
+            return
         d = UserDialog(self)
         if d.exec() == QDialog.Accepted:
             v = d.values()
@@ -109,7 +104,7 @@ class UsersSettingsMixin:
 
     def _toggle_user(self) -> None:
         if not can(self.user["role"], "manage_users"):
-            return  # defence in depth — managing users is admin-only
+            return
         r = self.users_table.currentRow()
         if not (0 <= r < len(self._user_ids)):
             return
@@ -127,7 +122,7 @@ class UsersSettingsMixin:
 
     def _reset_user_pw(self) -> None:
         if not can(self.user["role"], "manage_users"):
-            return  # defence in depth — managing users is admin-only
+            return
         r = self.users_table.currentRow()
         if not (0 <= r < len(self._user_ids)):
             toast_warn(self, "Reset password", "Select a user first.")
@@ -139,6 +134,5 @@ class UsersSettingsMixin:
             actor_username=self.user["username"],
             actor_role=self.user["role"],
         )
-        # Show it in a persistent, copyable dialog — NOT a toast (which would
-        # auto-dismiss in a few seconds and lose a single-use credential).
+        # persistent copyable dialog, not a toast — this is a single-use credential
         TempPasswordDialog(uname, temp, self).exec()

@@ -1,15 +1,4 @@
-"""Pure-Python Ed25519 (RFC 8032 reference implementation).
-
-Vendored so LabDesk's license check needs NO third-party dependency and works
-inside the compiled binary as-is. This is the public-domain reference code from RFC 8032
-Appendix A (extended/projective coordinates — a verify is ~10-20 ms, fine for a
-once-per-launch license check). Verified against the RFC 8032 test vector in the
-module self-test (`python -m labdesk.licensing._ed25519`).
-
-The app only ever calls `verify()`. `sign()` / `secret_to_public()` exist for the
-off-line vendor tools (generate_keys.py / issue_license.py) which run on the
-developer's machine with the PRIVATE key — never shipped logic that matters.
-"""
+"""Pure-Python Ed25519 (RFC 8032 reference implementation), vendored to avoid a third-party dependency."""
 
 from __future__ import annotations
 
@@ -140,8 +129,7 @@ def sign(secret: bytes, msg: bytes) -> bytes:
 
 
 def verify(public: bytes, msg: bytes, signature: bytes) -> bool:
-    """True iff `signature` is a valid Ed25519 signature of `msg` under `public`.
-    Returns False (never raises) on any malformed input."""
+    """True iff `signature` is a valid Ed25519 signature of `msg` under `public`; never raises."""
     try:
         if len(public) != 32 or len(signature) != 64:
             return False

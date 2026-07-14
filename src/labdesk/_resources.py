@@ -1,16 +1,8 @@
 """Where LabDesk's bundled resources (schema.sql, seed.sqlite, assets/) live.
 
-Every resource lookup in the package anchors on `package_root()` rather than on a
-module's own `__file__`. This matters for the shipped product:
-
-  * Source / dev runs (and the quick `build_app.sh` host build): no `_embedded_data`
-    module exists, so resources are read straight from the package directory.
-
-  * The installed, Nuitka-compiled binary: schema.sql / seed.sqlite / assets are
-    BAKED INTO the binary (scripts/gen_embedded.py -> _embedded_data) so nothing
-    readable is shipped beside it. SQLite and Qt open these by path, so at import we
-    materialise them into one private, 0700, auto-deleted temp dir and point
-    `package_root()` there. No install-dir files; nothing to leak.
+In a Nuitka-compiled build, resources are baked into the binary
+(scripts/gen_embedded.py -> _embedded_data) and unpacked here into a private,
+0700, auto-deleted temp dir; in source/dev runs they're read from the package dir.
 """
 
 from __future__ import annotations
@@ -30,7 +22,7 @@ if _emb is not None:
     import shutil
     import tempfile
 
-    _RES = Path(tempfile.mkdtemp(prefix="labdesk-res-"))  # mode 0700 by default
+    _RES = Path(tempfile.mkdtemp(prefix="labdesk-res-"))
     atexit.register(lambda: shutil.rmtree(_RES, ignore_errors=True))
     (_RES / "schema.sql").write_bytes(base64.b64decode(_emb.SCHEMA_B64))
     (_RES / "seed.sqlite").write_bytes(base64.b64decode(_emb.SEED_B64))
@@ -41,12 +33,7 @@ if _emb is not None:
 
 
 def package_root() -> Path:
-    """Directory holding schema.sql, seed.sqlite and assets/.
-
-    Compiled build → the private temp dir the embedded resources were unpacked into.
-    Otherwise → LABDESK_RESOURCE_DIR if set, else the labdesk package directory
-    (correct for source / host-build runs).
-    """
+    """Directory holding schema.sql, seed.sqlite and assets/."""
     if _RES is not None:
         return _RES
     env = os.environ.get("LABDESK_RESOURCE_DIR")

@@ -1,6 +1,4 @@
-"""Dialogs used by the Receipts page — extracted from receipts.py to keep that
-page focused. ``_PreviewDialog`` shows a rendered document as image pages;
-``_EditReceiptDialog`` edits a saved bill (tests, discount, paid, method)."""
+"""Dialogs used by the Receipts page: document preview, and bill editing."""
 
 from __future__ import annotations
 
@@ -31,15 +29,12 @@ from .widgets import fit_to_screen, like_term, money, toast_warn
 
 
 class _PreviewDialog(QDialog):
-    """In-app preview of a report/receipt — the document rendered to image pages
-    (native Qt, no QtPdf viewer) shown in a scroll area."""
+    """In-app preview of a report/receipt, rendered to image pages in a scroll area."""
 
     def __init__(self, pages, parent=None, title: str = "Preview") -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
-        fit_to_screen(
-            self, 840, 1040
-        )  # scroll area below; clamp so it fits short screens
+        fit_to_screen(self, 840, 1040)  # clamp so it fits short screens
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         host = QWidget()
@@ -49,7 +44,6 @@ class _PreviewDialog(QDialog):
         for img in pages:
             lbl = QLabel()
             lbl.setAlignment(Qt.AlignHCenter)
-            # scale each A4 page to a comfortable on-screen width, keeping aspect
             pm = QPixmap.fromImage(img).scaledToWidth(780, Qt.SmoothTransformation)
             lbl.setPixmap(pm)
             vl.addWidget(lbl)
@@ -60,9 +54,8 @@ class _PreviewDialog(QDialog):
 
 
 class _EditReceiptDialog(QDialog):
-    """Edit a saved bill: add/remove tests, adjust discount, amount paid and
-    payment method. A test that already has results entered cannot be removed
-    (so a finalised result can never be orphaned)."""
+    """Edit a saved bill: add/remove tests, discount, amount paid, payment method.
+    A test with results already entered cannot be removed."""
 
     def __init__(self, con, rec, currency: str = "Rs.", parent=None) -> None:
         super().__init__(parent)
@@ -72,7 +65,7 @@ class _EditReceiptDialog(QDialog):
         self.setWindowTitle(f"Edit bill {rec['lab_no'] or ''}")
         self.setMinimumWidth(480)
 
-        # working copy of the line items; item_id is None for a freshly-added test
+        # item_id is None for a freshly-added test
         self.items: list[dict] = []
         for it in con.execute(
             "SELECT id, test_id, test_name, charge FROM receipt_items WHERE receipt_id=? ORDER BY id",
@@ -92,7 +85,6 @@ class _EditReceiptDialog(QDialog):
         root = QVBoxLayout(self)
         root.addWidget(QLabel(f"Patient: <b>{rec['patient_name'] or ''}</b>"))
 
-        # current tests
         self.tbl = QTableWidget(0, 3)
         self.tbl.setHorizontalHeaderLabels(["Test", "Charge", ""])
         self.tbl.verticalHeader().setVisible(False)
@@ -102,13 +94,10 @@ class _EditReceiptDialog(QDialog):
         th.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         th.setSectionResizeMode(2, QHeaderView.Fixed)
         self.tbl.setColumnWidth(2, 44)
-        # Taller so a typical multi-test bill shows its rows cleanly instead of
-        # cramming ~1.5 rows behind a scrollbar; longer bills scroll past ~7 rows.
         self.tbl.setMinimumHeight(180)
         self.tbl.setMaximumHeight(300)
         root.addWidget(self.tbl)
 
-        # add a test (by name or number)
         self.search = QLineEdit()
         self.search.setPlaceholderText("Add test by name or number…")
         self.search.textChanged.connect(self._search_tests)
@@ -120,7 +109,6 @@ class _EditReceiptDialog(QDialog):
         root.addWidget(self.search)
         root.addWidget(self.results)
 
-        # money
         form = QFormLayout()
         self.sub_lbl = QLabel()
         form.addRow("Subtotal", self.sub_lbl)
@@ -163,7 +151,6 @@ class _EditReceiptDialog(QDialog):
         self._refresh_table()
         self._recompute()
 
-    # ---- tests -----------------------------------------------------
     def _has_results(self, item_id) -> bool:
         """True if any result/culture row exists for this line item."""
         for tbl in ("results", "cultures"):
@@ -200,7 +187,6 @@ class _EditReceiptDialog(QDialog):
                     "QPushButton:hover{background:#c0392b;color:white;border-color:#c0392b;}"
                 )
                 btn.clicked.connect(lambda _=False, idx=i: self._remove(idx))
-            # center the small button in the cell
             wrap = QWidget()
             wl = QHBoxLayout(wrap)
             wl.setContentsMargins(0, 0, 0, 0)
@@ -263,7 +249,6 @@ class _EditReceiptDialog(QDialog):
         self._refresh_table()
         self._recompute()
 
-    # ---- money -----------------------------------------------------
     def _subtotal(self) -> float:
         return round(sum(c["charge"] for c in self.items), 2)
 

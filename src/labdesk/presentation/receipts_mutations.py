@@ -1,7 +1,4 @@
-"""Receipt mutations (receive due, mark delivered, edit, void) — split out of ReceiptsPage.
-
-A mixin; the privileged writes go through application.receipts / db as before.
-"""
+"""Receipt mutations (receive due, mark delivered, edit, void) — split out of ReceiptsPage."""
 
 from __future__ import annotations
 
@@ -39,7 +36,7 @@ class ReceiptsMutationsMixin:
         if not r or not r["due"] or r["due"] <= 0:
             return
         cur = db.currency(self.con)
-        # prompt for the actual amount received (supports partial payments; cannot exceed due)
+        # partial payments allowed; cannot exceed due
         amount, ok = QInputDialog.getDouble(
             self,
             "Receive payment",
@@ -80,20 +77,19 @@ class ReceiptsMutationsMixin:
         if not rec or ("voided" in rec.keys() and rec["voided"]):
             return  # a voided bill is read-only
         if (rec["status"] or "") in REPORT_READY:
-            return  # once reported/delivered the bill is frozen for everyone (incl. admin)
+            return  # frozen for everyone once reported/delivered
         cur = db.currency(self.con)
         dlg = _EditReceiptDialog(self.con, rec, cur, self)
         if dlg.exec() != QDialog.Accepted:
             return
         v = dlg.values()
-        # delta of money actually collected (capped at each bill's net), not raw paid —
-        # an over-payment is change handed back, so it must not move the ledger.
+        # delta of money actually collected (capped at net) — an over-payment is
+        # change handed back, so it must not move the ledger
         old_collected = min(rec["paid"] or 0.0, rec["net_amount"] or 0.0)
         new_collected = min(v["paid"], v["net_amount"])
         delta = new_collected - old_collected
         try:
-            # remove deleted line items — guarded to never drop one that has
-            # results/cultures (defence in depth; the dialog already blocks it)
+            # guarded to never drop an item that has results/cultures
             for iid in v["removed_item_ids"]:
                 self.con.execute(
                     "DELETE FROM receipt_items WHERE id=? AND receipt_id=? "
@@ -101,7 +97,7 @@ class ReceiptsMutationsMixin:
                     "AND id NOT IN (SELECT receipt_item_id FROM cultures WHERE receipt_item_id IS NOT NULL)",
                     (iid, rid),
                 )
-            # add newly-picked tests (dual-write the paisa twin, Wave 4b)
+            # add newly-picked tests (dual-write the paisa columns)
             for a in v["added"]:
                 self.con.execute(
                     "INSERT INTO receipt_items(receipt_id,test_id,test_name,charge,charge_paisa) "
@@ -131,8 +127,7 @@ class ReceiptsMutationsMixin:
                     rid,
                 ),
             )
-            # adding a test to an already-finalised bill makes the report incomplete
-            # again → send it back to the worklist as in-progress.
+            # a test added to a finalised bill sends the report back to in-progress
             if v["added"] and (rec["status"] or "") in REPORT_READY:
                 self.con.execute(
                     "UPDATE receipts SET status='in_progress' WHERE id=?", (rid,)

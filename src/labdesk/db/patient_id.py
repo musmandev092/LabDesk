@@ -1,13 +1,6 @@
-"""Patient ID — the lab's unique patient identifier (formerly "MR No").
-
-  Format: YY-NNN-NN<L>, e.g. 26-000-43K
-    YY  two-digit registration year
-    NNN-NN  the patient's sequence, zero-padded and chunked for readability
-    <L> an alpha CHECK letter derived from the digits, so a single mistyped
-        digit (or most adjacent transpositions) is caught before saving —
-        the same idea as a credit-card check digit, but a letter.
-Existing "MR…" ids are left untouched; this only shapes NEW patient ids.
-"""
+"""Patient ID — format YY-NNN-NN<L>, e.g. 26-000-43K, <L> a check letter over the
+digits (catches mistyped digits like a credit-card check digit). Existing "MR…"
+ids are left untouched; this only shapes new patient ids."""
 
 from __future__ import annotations
 
@@ -20,8 +13,7 @@ _PID_RE = _re.compile(r"(\d{2})-(\d{2,})-(\d{2})([A-Z])$")
 
 
 def _pid_check_letter(digits: str) -> str:
-    """Weighted mod-23 checksum over the digit string → one letter. Each position
-    carries a distinct weight so any single-digit change flips the letter."""
+    """Weighted mod-23 checksum over the digit string -> one letter."""
     total = 0
     for i, ch in enumerate(digits):
         total = (total + int(ch) * (i + 2)) % len(_PID_ALPHABET)
@@ -29,8 +21,7 @@ def _pid_check_letter(digits: str) -> str:
 
 
 def format_patient_id(seq: int, year: int | None = None) -> str:
-    """Build the patient id for sequence `seq` (e.g. the patient row id).
-    `year` defaults to the current local year."""
+    """Build the patient id for sequence `seq`; `year` defaults to the current year."""
     yy = f"{(year if year is not None else int(time.strftime('%Y'))) % 100:02d}"
     s = f"{int(seq):05d}"
     head, tail = s[:-2], s[-2:]
@@ -39,8 +30,7 @@ def format_patient_id(seq: int, year: int | None = None) -> str:
 
 
 def validate_patient_id(code: str) -> bool:
-    """True only if `code` is in the YY-…-NN<L> shape AND its check letter is
-    correct. Legacy 'MR…' / free-form ids return False (not our format)."""
+    """True only if `code` is YY-…-NN<L> shaped with a correct check letter."""
     m = _PID_RE.match((code or "").strip().upper())
     if not m:
         return False

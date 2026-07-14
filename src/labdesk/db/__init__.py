@@ -1,21 +1,8 @@
-"""Database layer for LabDesk.
-
-A thin wrapper over sqlite3: locates the data directory, initialises the
-schema, seeds default settings + an admin user, and hands out connections.
-The DB lives next to the user's data (XDG dir when packaged), so the AppImage
-stays read-only while data persists across updates.
-
-This package was split out of a single ``db.py`` module by responsibility; this
-``__init__`` re-exports the complete public API so ``from ..db import X`` and
-``db.X(...)`` keep working unchanged. Layering (a module only imports from those
-above it): _config → paths/crypto → connection → settings/audit → backup/auth →
-patient_id → queries.
-"""
+"""Database layer for LabDesk — re-exports the complete public API of the db package."""
 
 from __future__ import annotations
 
-# Stdlib modules that were importable as ``db.<name>`` from the original
-# single-file module — kept re-exported so the public surface is unchanged.
+# stdlib modules kept re-exported so ``db.<name>`` still works as before the split
 import hashlib  # noqa: F401
 import hmac  # noqa: F401
 import json  # noqa: F401

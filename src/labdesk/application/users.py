@@ -1,10 +1,4 @@
-"""User account mutations (no Qt).
-
-Create / enable-disable / reset-password run through here so the privileged
-``manage_users`` capability is enforced + audited at the data boundary, not only by
-the settings widget's button state (defence-in-depth; see roles.require). The view
-keeps the dialogs, validation, and showing the one-time reset credential.
-"""
+"""User account mutations (no Qt) — manage_users enforced + audited at the data boundary."""
 
 from __future__ import annotations
 
@@ -25,8 +19,7 @@ def create_user(
     actor_username: str,
     actor_role: str,
 ) -> None:
-    """Create a staff account (must change password on first login) + audit. The
-    caller validates the username/password and checks for duplicates first."""
+    """Create a staff account (must change password on first login) + audit."""
     require(actor_role, "manage_users")
     h, salt = db.hash_password(password)
     con.execute(
@@ -43,8 +36,7 @@ def create_user(
 def set_user_active(
     con: sqlite3.Connection, *, user_id: int, actor_username: str, actor_role: str
 ) -> bool:
-    """Toggle a user's active flag + audit. Returns the new active state. The caller
-    is responsible for refusing to disable one's own account."""
+    """Toggle a user's active flag + audit. Returns the new active state."""
     require(actor_role, "manage_users")
     row = con.execute(
         "SELECT username, active FROM users WHERE id=?", (user_id,)
@@ -64,14 +56,13 @@ def set_user_active(
 def reset_user_password(
     con: sqlite3.Connection, *, user_id: int, actor_username: str, actor_role: str
 ) -> tuple[str, str]:
-    """Reset a user's password to a fresh single-use credential (forcing a change on
-    next login and clearing any lockout) + audit. Returns ``(username, temp_password)``
-    so the view can display the one-time credential."""
+    """Reset a user's password to a fresh single-use credential + audit. Returns
+    (username, temp_password)."""
     require(actor_role, "manage_users")
     uname = con.execute("SELECT username FROM users WHERE id=?", (user_id,)).fetchone()[
         0
     ]
-    temp = "Temp-" + secrets.token_hex(4)  # 32-bit single-use, e.g. Temp-9af3c1d2
+    temp = "Temp-" + secrets.token_hex(4)
     h, salt = db.hash_password(temp)
     con.execute(
         "UPDATE users SET pass_hash=?, salt=?, must_change_password=1, "

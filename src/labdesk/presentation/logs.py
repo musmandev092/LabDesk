@@ -175,7 +175,6 @@ class LogsPage(QWidget):
         )
 
     def verify_integrity(self) -> None:
-        # Hashing the whole chain grows with the log — run it off the UI thread.
         def done(work_ok: bool, result) -> None:
             if not work_ok:
                 toast_warn(self, "Logs", f"Could not verify the log:\n{result}")
@@ -220,8 +219,7 @@ class LogsPage(QWidget):
             db.log_audit(
                 con, user, "logs_cleared", "removed entries older than 90 days"
             )
-            # re-anchor the hash chain so 'Verify integrity' stays valid after the purge
-            db.rechain_audit(con)
+            db.rechain_audit(con)  # re-anchor the hash chain after the purge
             return True
 
         def done(work_ok: bool, result) -> None:

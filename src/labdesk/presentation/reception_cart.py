@@ -1,9 +1,4 @@
-"""Test search + cart management for reception, split out of ReceptionPage.
-
-A mixin (runs on the composed ReceptionPage instance). update_specimen_options and
-statusBar_message stay on the page (they use a module-local helper / are shared);
-everything else cart-related lives here. Pure reorganisation, no behavior change.
-"""
+"""Test search + cart management for reception, split out of ReceptionPage."""
 
 from __future__ import annotations
 
@@ -39,8 +34,7 @@ class ReceptionCartMixin:
             )
             return
         like = f"%{text}%"
-        # match on the test name OR its (legacy) test number — staff often know
-        # tests by the number from the old system.
+        # matches the test name OR its legacy test number
         rows = self.con.execute(
             "SELECT id,name,charges,legacy_no FROM tests WHERE active=1 "
             "AND (name LIKE ? OR CAST(legacy_no AS TEXT) LIKE ?) "

@@ -4,13 +4,7 @@ import re
 
 
 def format_person_name(name: str) -> str:
-    """Tidy a typed patient name to proper case regardless of how it was entered.
-
-    ``MUHAMMAD USMAN``, ``muhammad usman`` and ``muHAMmad   usman`` all become
-    ``Muhammad Usman``. Each whitespace-separated word is capitalised (first letter
-    upper, rest lower); hyphen/apostrophe sub-parts are capitalised too
-    (``abdul-rehman`` → ``Abdul-Rehman``, ``o'brien`` → ``O'Brien``). Runs of
-    whitespace collapse to a single space. Returns "" for blank input."""
+    """Tidy a typed patient name to proper case (per word, incl. hyphen/apostrophe parts)."""
 
     def _cap(word: str) -> str:
         return re.sub(r"[^\W\d_]+", lambda m: m.group(0).capitalize(), word)
@@ -19,26 +13,21 @@ def format_person_name(name: str) -> str:
 
 
 def format_address(addr: str) -> str:
-    """Capitalise just the first letter of an address (leave the rest as typed);
-    a small touch that makes the printed header read nicely. Blank stays blank."""
+    """Capitalise just the first letter of an address, leaving the rest as typed."""
     a = (addr or "").strip()
     return a[:1].upper() + a[1:] if a else a
 
 
 def normalize_phone(raw: str, cc: str = "92") -> str:
-    """Canonical local phone format used everywhere in the system.
-
-    Any input (+92…, 0092…, 92…, 03xx…, bare national) collapses to the local
-    11-digit form ``03XXXXXXXXX`` (leading 0 + national number). Returns "" for
-    empty/garbage input. WhatsApp ids are derived from this (see whatsapp.py)."""
+    """Collapse any phone input to the canonical local 11-digit form 03XXXXXXXXX."""
     d = "".join(c for c in (raw or "") if c.isdigit())
     if not d:
         return ""
-    if d.startswith("00"):  # 0092… → 92…
+    if d.startswith("00"):
         d = d[2:]
-    if d.startswith(cc) and len(d) >= len(cc) + 9:  # 92XXXXXXXXXX → national
+    if d.startswith(cc) and len(d) >= len(cc) + 9:
         d = d[len(cc) :]
-    d = d.lstrip("0")  # drop any leading zero(s)
+    d = d.lstrip("0")
     return ("0" + d) if d else ""
 
 
@@ -48,8 +37,7 @@ AGE_UNITS = ["Years", "Months", "Days"]
 
 SEXES = ["Male", "Female", "Other"]
 
-# Standard "Sample Required" / specimen presets (volume + tube + cap colour),
-# matching the conventions used on typical pathology requisitions.
+# "Sample Required" / specimen presets (volume + tube + cap colour).
 SPECIMEN_PRESETS = [
     "3cc EDTA Whole Blood (Lavender)",
     "3-5cc Clotted Blood / Serum (Red / Gold)",
@@ -73,6 +61,5 @@ SPECIMEN_PRESETS = [
     "Blood for Culture",
 ]
 
-
-# Payment methods offered at billing and when editing a bill (single source of truth).
+# Payment methods offered at billing and when editing a bill.
 PAYMENT_METHODS = ["Cash", "Card", "Easypaisa", "JazzCash", "Bank", "Other"]

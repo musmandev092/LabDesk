@@ -1,9 +1,4 @@
-"""WhatsApp settings card + its actions, split out of the SettingsPage god-class.
-
-A mixin: the methods run on the composed SettingsPage instance, so they use the
-shared helpers (self._form/_add_field/_flbl) and widgets (self.inputs, self.con,
-self.user) exactly as before — pure reorganisation, no behavior change.
-"""
+"""WhatsApp settings card + its actions, mixed into SettingsPage."""
 
 from __future__ import annotations
 
@@ -33,7 +28,6 @@ class WhatsAppSettingsMixin:
         self.wa_auto_receipt = QCheckBox("Auto-send the bill when a receipt is saved")
         form.addRow("", self.wa_auto_receipt)
 
-        # status line + action buttons
         self.wa_status = muted("")
         form.addRow("", self.wa_status)
 
@@ -53,7 +47,6 @@ class WhatsAppSettingsMixin:
         rw1.setLayout(row1)
         form.addRow("", rw1)
 
-        # send a real test message (the user triggers this, not automatic)
         self.wa_test_num = QLineEdit()
         self.wa_test_num.setPlaceholderText("03XXXXXXXXX")
         send = QPushButton("Send test message")
@@ -83,9 +76,7 @@ class WhatsAppSettingsMixin:
         )
 
     def _test_whatsapp(self) -> None:
-        # Run the status check OFF the UI thread — check_status() is a blocking HTTP
-        # GET (up to 8s); doing it inline froze the whole window if the gateway was
-        # down/slow. Mirrors _send_test_whatsapp's background pattern.
+        # off the UI thread — check_status() is a blocking HTTP GET (up to 8s)
         def done(work_ok: bool, result) -> None:
             if work_ok and isinstance(result, tuple):
                 ok, msg = result

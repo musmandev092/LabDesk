@@ -76,9 +76,7 @@ class DashboardPage(QWidget):
         n_rec = c.execute(
             f"SELECT COUNT(*) FROM receipts WHERE {db.NOT_VOIDED} AND {db.RECEIVED_TODAY}"
         ).fetchone()[0]
-        # income today = cash actually booked today, from the LEDGER by event date
-        # (matches the Accounts page; a due collected today counts today, not on the
-        # original bill's date). See db.income_between.
+        # income today = cash booked today per the ledger (see db.income_between)
         today = c.execute("SELECT date('now','localtime')").fetchone()[0]
         income = db.income_between(c, today, today)
         pending = c.execute(

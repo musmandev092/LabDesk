@@ -1,18 +1,4 @@
-"""WhatsApp delivery via a self-hosted **wuzapi** gateway
-(https://github.com/asternic/wuzapi) — a free, open-source whatsmeow REST API
-that can send PDF documents (unlike WAHA Core, whose file sending is paid).
-
-Run it (one container, SQLite, no DB):
-    docker run -d --name wuzapi -p 8080:8080 \
-        -e WUZAPI_ADMIN_TOKEN=... -v wuzapi-data:/app/dbdata asternic/wuzapi
-then create a user token and scan the QR (see app/WHATSAPP_SETUP.md).
-
-LabDesk settings used:
-    whatsapp_url           e.g. http://localhost:8080
-    whatsapp_api_key       the wuzapi *user token* (sent as the `token` header)
-    whatsapp_country_code  e.g. 92
-Uses only the stdlib so the AppImage stays lean.
-"""
+"""WhatsApp delivery via a self-hosted wuzapi gateway (stdlib only)."""
 
 from __future__ import annotations
 
@@ -28,11 +14,9 @@ from . import db
 from .constants import normalize_phone
 import contextlib
 
-# Timeouts (seconds). Kept modest so a dead gateway fails fast instead of
-# hanging. The send runs on a background thread (ui/wa.py), so these only bound
-# how long until the user sees a result — they never freeze the window.
-_TIMEOUT_POST = 40  # document upload (PDF base64) — generous but bounded
-_TIMEOUT_GET = 8  # status / quick checks
+# timeouts (seconds); send runs on a background thread so these never freeze the window
+_TIMEOUT_POST = 40
+_TIMEOUT_GET = 8
 
 
 def _cfg(con):
@@ -41,13 +25,11 @@ def _cfg(con):
             float(db.get_setting(con, "whatsapp_timeout", "") or _TIMEOUT_POST)
         )
     except (TypeError, ValueError, OverflowError):
-        # OverflowError: int(float('inf')) — a user typed 'inf' in the timeout field.
         timeout = _TIMEOUT_POST
-    timeout = max(5, min(timeout, 120))  # keep it sane (5-120s)
+    timeout = max(5, min(timeout, 120))
     return {
         "url": db.get_setting(con, "whatsapp_url", "").rstrip("/"),
-        # token lives in the 0600 secret file (not the DB); fall back to a legacy
-        # DB value so existing installs keep working until the next Settings save.
+        # secret file first, fall back to legacy DB value
         "token": db.get_secret("whatsapp_api_key")
         or db.get_setting(con, "whatsapp_api_key", ""),
         "cc": db.get_setting(con, "whatsapp_country_code", "92") or "92",
@@ -60,9 +42,7 @@ def _caption(con, key: str, fallback: str, **vals) -> str:
     tpl = (db.get_setting(con, key, "") or "").strip()
     if not tpl:
         return fallback
-    # Plain placeholder substitution — NOT str.format (which would let a crafted
-    # template reach object internals, e.g. {lab.__class__}). Only the known
-    # whole tokens are replaced.
+    # plain substitution, not str.format (avoids reaching object internals)
     out = tpl
     for k, v in vals.items():
         out = out.replace("{" + k + "}", str(v))
@@ -75,11 +55,7 @@ def _headers(cfg):
 
 
 class _NoCrossHostRedirect(urllib.request.HTTPRedirectHandler):
-    """Refuse a redirect that changes host (or downgrades https→http).
-
-    The gateway request carries the auth token and a base64 patient PDF; a
-    redirect to another host would silently exfiltrate both. Same-host (and
-    http→https upgrade) redirects are still followed normally."""
+    """Refuse a redirect that changes host (or downgrades https->http) to protect the token/PDF."""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         import urllib.parse
@@ -100,9 +76,7 @@ class _NoCrossHostRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-# Install as the process default so urllib.request.urlopen routes through it: a
-# redirect to another host then can't leak the token/PDF. (We still CALL urlopen
-# by name so it stays patchable/mockable.)
+# installed as the process default so urlopen routes through it
 urllib.request.install_opener(urllib.request.build_opener(_NoCrossHostRedirect))
 
 
@@ -153,8 +127,7 @@ def _friendly_url_error(e) -> str:
 
 
 def validate_url(url: str) -> tuple[bool, str]:
-    """Sanity-check a gateway URL: must be http/https with a host. Guards against
-    pasting garbage or an exfiltration URL into Settings."""
+    """Sanity-check a gateway URL: must be http/https with a host."""
     import urllib.parse
 
     try:
@@ -169,61 +142,51 @@ def validate_url(url: str) -> tuple[bool, str]:
 
 
 def is_loopback_url(url: str) -> bool:
-    """True only for strict loopback (localhost/127.0.0.1/::1) — the single case
-    where plain http carries no on-the-wire exposure (it never leaves the box).
-    Used to decide whether to warn about unencrypted http transport."""
+    """True only for strict loopback (localhost/127.0.0.1/::1)."""
     import urllib.parse
 
     try:
         host = (urllib.parse.urlparse(url or "").hostname or "").lower()
     except ValueError:
-        return False  # malformed bracket/IPv6 host → not loopback (fail safe)
+        return False
     return host in ("localhost", "127.0.0.1", "::1")
 
 
 def is_local_url(url: str) -> bool:
-    """True if the URL points at loopback or a private (RFC1918) address — the
-    intended self-hosted deployment. Non-local hosts get a warning before sending."""
+    """True if the URL points at loopback or a private (RFC1918) address."""
     import ipaddress
     import urllib.parse
 
     try:
         host = (urllib.parse.urlparse(url or "").hostname or "").lower()
     except ValueError:
-        return False  # malformed bracket/IPv6 host → treat as non-local (warn)
+        return False
     if host in ("localhost", "127.0.0.1", "::1", ""):
         return True
     try:
         ip = ipaddress.ip_address(host)
         return ip.is_loopback or ip.is_private
     except ValueError:
-        return False  # a hostname we can't resolve here → treat as non-local
+        return False
 
 
 def wa_number(raw: str, cc: str) -> str | None:
-    """Local phone → wuzapi recipient (digits, country code, no +/@), e.g.
-    03001234567 → 923001234567. Returns None if the number isn't plausible."""
-    cc = (
-        "".join(ch for ch in (cc or "") if ch.isdigit()) or "92"
-    )  # tolerate '+92'/' 92'
-    local = normalize_phone(raw, cc)  # canonical 03XXXXXXXXX
+    """Local phone -> wuzapi recipient (digits, country code, no +/@); None if implausible."""
+    cc = "".join(ch for ch in (cc or "") if ch.isdigit()) or "92"
+    local = normalize_phone(raw, cc)
     if not local:
         return None
-    national = local.lstrip("0")  # drop the leading 0
-    num = cc + national  # 92 + national
+    national = local.lstrip("0")
+    num = cc + national
     if not num.isdigit():
         return None
     if cc == "92":
-        # Pakistan mobile: national is exactly 3XXXXXXXXX (10 digits) — reject
-        # malformed/landline/wrong-length numbers so reports don't mis-send.
+        # Pakistan mobile: national must be 3XXXXXXXXX (10 digits)
         return num if re.fullmatch(r"3\d{9}", national) else None
     return num if 9 <= len(national) <= 13 else None
 
 
-# ---------------------------------------------------------------------------
-# Instant (no-network) pre-flight checks — used by the UI before it spawns the
-# background send, so the user gets immediate feedback instead of a frozen wait.
-# ---------------------------------------------------------------------------
+# instant (no-network) pre-flight checks used by the UI before spawning the background send
 def config_ready(con) -> tuple[bool, str]:
     cfg = _cfg(con)
     if not cfg["url"]:
@@ -262,7 +225,7 @@ def recipient_ready(con, receipt_id: int) -> tuple[bool, str]:
 
 
 def _log_wa(con, receipt_id, kind, number, filename, ok, message) -> None:
-    """Record a WhatsApp send attempt in the delivery log (best-effort)."""
+    """Record a WhatsApp send attempt in the delivery log."""
     try:
         con.execute(
             "INSERT INTO wa_messages(receipt_id,kind,number,filename,ok,message) "
@@ -336,15 +299,12 @@ def send_pdf(
     payload = {
         "Phone": phone,
         "Document": document,
-        # show a meaningful name to the recipient, not the random temp filename
         "FileName": filename or p.name,
         "Caption": caption or "Your laboratory report",
     }
     try:
         status, body = _post(cfg, "/chat/send/document", payload)
-        # Prefer the gateway's authoritative JSON fields over scanning the raw
-        # body for English phrases — a changed/spoofed gateway could otherwise
-        # make a failed send read as success (or vice-versa) via crafted text.
+        # prefer the gateway's JSON verdict over scanning raw body text (spoofable)
         j = None
         try:
             parsed = json.loads(body)
@@ -366,9 +326,7 @@ def send_pdf(
                 with contextlib.suppress(TypeError, ValueError):
                     success = 200 <= int(j["code"]) < 300
         if success is None:
-            # No authoritative JSON signal. Trust a 2xx ONLY if the reply was
-            # valid JSON (a genuine gateway response); a 2xx with an opaque text
-            # body is treated as UNCONFIRMED rather than assumed-delivered.
+            # trust a 2xx only if the reply was valid JSON; opaque text is unconfirmed
             if 200 <= status < 300 and not not_linked:
                 success = True if j is not None else None
             else:
@@ -408,8 +366,7 @@ def send_pdf(
 
 
 def _send_built_pdf(con, receipt_id, build_fn, caption_key, label, fname_suffix=""):
-    """Build a PDF into a private 0600 temp file, send it, and always delete it
-    (no patient-PII residue in a shared/world-readable temp dir)."""
+    """Build a PDF into a private temp file, send it, and always delete it."""
     import os
     import tempfile
 
@@ -487,8 +444,7 @@ def send_text(con, raw_number: str, text: str) -> tuple[bool, str]:
         return False, "Enter a valid number (03XXXXXXXXX) to send a test to."
     try:
         status, body = _post(cfg, "/chat/send/text", {"Phone": phone, "Body": text})
-        # Prefer the gateway's JSON verdict over scanning the raw body for phrases
-        # (a changed/spoofed gateway could otherwise fake success/failure).
+        # prefer the gateway's JSON verdict over scanning raw body text (spoofable)
         j = None
         try:
             parsed = json.loads(body)

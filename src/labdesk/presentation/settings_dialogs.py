@@ -1,6 +1,4 @@
-"""Dialogs used by the Settings page — extracted from settings.py to keep that
-page focused. ``UserDialog`` collects a new user's details; ``TempPasswordDialog``
-shows a one-time temporary password in a persistent, copyable form."""
+"""Dialogs used by the Settings page: new-user creation and temp-password display."""
 
 from __future__ import annotations
 
@@ -35,7 +33,7 @@ class UserDialog(QDialog):
         self.role = QComboBox()
         for key, (lvl, label, desc) in sorted(ROLES.items(), key=lambda kv: kv[1][0]):
             self.role.addItem(f"{label} — {desc}", key)
-        self.role.setCurrentIndex(0)  # default Receptionist (lowest)
+        self.role.setCurrentIndex(0)  # lowest role
         form.addRow("Username *", self.username)
         form.addRow("Full name", self.full_name)
         form.addRow("Password *", self.password)
@@ -61,12 +59,7 @@ class UserDialog(QDialog):
 
 
 class TempPasswordDialog(QDialog):
-    """Show a one-time temporary password in a persistent, copyable form.
-
-    A toast would auto-dismiss after a few seconds — far too easy to miss a
-    single-use credential the admin has to hand to a user — so this stays open
-    until they close it, with the password selectable and a one-click Copy.
-    """
+    """Show a one-time temporary password in a persistent, copyable form."""
 
     def __init__(self, username: str, temp: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)

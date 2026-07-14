@@ -52,8 +52,7 @@ def resolve_ref(param_row, sex: str) -> str:
 
 
 def _qual_options(ref: str) -> list[str]:
-    """Likely result options for a qualitative parameter, inferred from its
-    reference text. The combo stays editable so titres (e.g. 1:160) are typeable."""
+    """Likely result options for a qualitative parameter, inferred from its ref text."""
     r = (ref or "").lower()
     if "reactive" in r:
         return ["", "Non-Reactive", "Reactive"]
@@ -65,9 +64,7 @@ def _qual_options(ref: str) -> list[str]:
 
 
 def _bloodbank_options(name: str) -> list[str]:
-    """Result options for a blood-bank parameter, inferred from its name. An empty
-    list means "no fixed vocabulary" → the entry should be a free-text box (e.g.
-    Blood Bag No, donor name), not a constrained dropdown."""
+    """Result options for a blood-bank parameter; empty list means free text."""
     n = (name or "").lower()
     if "group" in n and "rh" not in n:
         return ["", "A", "B", "AB", "O"]
@@ -77,7 +74,7 @@ def _bloodbank_options(name: str) -> list[str]:
         return ["", "Compatible", "Not Compatible"]
     if "coomb" in n or "antibod" in n or "screen" in n:
         return ["", "Positive", "Negative"]
-    return []  # bag numbers, names, free notes → plain text field
+    return []
 
 
 def _widget_text(w) -> str:
@@ -90,10 +87,7 @@ def _widget_text(w) -> str:
 
 
 def _has_enterable_content(result_rows, remarks, conclusion) -> bool:
-    """True if the technician actually entered something worth saving: at least one
-    result value, or any remark / impression text. Used to refuse an all-blank save
-    so a completely empty report can never be saved (and thus previewed / printed /
-    sent). Values and texts arrive already stripped."""
+    """True if at least one result value or remark/impression was entered."""
     if any((r.get("value") or "") for r in result_rows):
         return True
     if any((t or "") for t in remarks.values()):
@@ -110,13 +104,7 @@ def _widget_set_readonly(w, ro: bool) -> None:
 
 
 class _GrowingText(QPlainTextEdit):
-    """A multi-line editor that grows to fit its content (so long findings /
-    impressions aren't clipped on entry) up to ``max_h``, then scrolls.
-
-    Height is driven by the document layout's documentSizeChanged signal, whose
-    reported height is the wrapped line count at the editor's *current* width —
-    reliable across resizes, unlike reading viewport().width() before layout.
-    """
+    """A multi-line editor that grows to fit content up to ``max_h``, then scrolls."""
 
     def __init__(self, min_h: int = 78, max_h: int = 240) -> None:
         super().__init__()
@@ -130,14 +118,14 @@ class _GrowingText(QPlainTextEdit):
     def _fit(self, *args) -> None:
         fm = self.fontMetrics()
         width = self.viewport().width()
-        if width < 80:  # not laid out yet → assume the entry column width
+        if width < 80:  # not laid out yet -> assume the entry column width
             width = 560
         avail = max(1, width - 8)
         text = self.toPlainText() or self.placeholderText()
         lines = 0
         for para in (text or "").split("\n"):
             adv = fm.horizontalAdvance(para)
-            lines += max(1, (int(adv) + avail - 1) // avail)  # ceil division
+            lines += max(1, (int(adv) + avail - 1) // avail)
         h = (
             lines * fm.lineSpacing()
             + 2 * self.document().documentMargin()
@@ -146,7 +134,7 @@ class _GrowingText(QPlainTextEdit):
         )
         self.setFixedHeight(int(max(self._min_h, min(self._max_h, h))))
 
-    def resizeEvent(self, e) -> None:  # re-fit when the column width changes
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self._fit()
 
@@ -156,15 +144,13 @@ class WorklistPage(QWidget):
         super().__init__()
         self.con = con
         self.user = user
-        self._ids: list[int] = []  # parallel to worklist table rows; filled by refresh
+        self._ids: list[int] = []
         self.current_receipt: int | None = None
-        # (item_id, parameter_id) -> QLineEdit
         self._editors: dict[tuple[int, int | None], QLineEdit] = {}
-        # (item_id, parameter_id) -> QCheckBox (ticked = print this row)
-        self._show: dict[tuple[int, int | None], QCheckBox] = {}
-        # item_id -> QPlainTextEdit (per-test remarks)
+        self._show: dict[
+            tuple[int, int | None], QCheckBox
+        ] = {}  # ticked = print this row
         self._remarks: dict[int, QPlainTextEdit] = {}
-        # item_id -> QPlainTextEdit (impression/interpretation, descriptive/qualitative)
         self._conclusion: dict[int, QPlainTextEdit] = {}
 
         root = QVBoxLayout(self)
@@ -190,7 +176,6 @@ class WorklistPage(QWidget):
             self.status_filter.addItem(label, value)
         self.status_filter.setCurrentIndex(1)  # Pending
         self.status_filter.currentIndexChanged.connect(self.refresh_list)
-        # optional calendar date-range filter (on received date)
         self.use_dates = QCheckBox("By date")
         self.use_dates.toggled.connect(self._dates_toggled)
         self.date_from = self._date_edit()
@@ -208,13 +193,12 @@ class WorklistPage(QWidget):
 
         split = QSplitter()
         split.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        # left: receipts
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(["Lab No", "Patient", "Date", "Status"])
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        hh.setSectionResizeMode(1, QHeaderView.Stretch)  # Patient grows
-        hh.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Date readable
+        hh.setSectionResizeMode(1, QHeaderView.Stretch)
+        hh.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         hh.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
@@ -223,7 +207,6 @@ class WorklistPage(QWidget):
         self.table.itemSelectionChanged.connect(self.load_receipt)
         split.addWidget(self.table)
 
-        # right: result entry
         right = QWidget()
         rl = QVBoxLayout(right)
         self.header = h2("Select a receipt")
@@ -246,8 +229,7 @@ class WorklistPage(QWidget):
         btns.addStretch(1)
         btns.addWidget(self.save_btn)
         rl.addLayout(btns)
-        # Worklist is for entering & saving results only. Printing, PDF export and
-        # WhatsApp delivery of the report all live on the Receipts / Reports page.
+        # printing/PDF/WhatsApp of the report live on the Receipts / Reports page
         self.report_hint = muted(
             "Print, save as PDF or send the report on WhatsApp from the "
             "Receipts / Reports page (once results are saved)."
@@ -256,13 +238,10 @@ class WorklistPage(QWidget):
         rl.addWidget(self.report_hint)
         split.addWidget(right)
         split.setSizes([430, 650])
-        # Proportional stretch so the two panes scale with the window instead of the
-        # right pane dominating on wide/4K screens (absolute setSizes alone don't).
         split.setStretchFactor(0, 2)
         split.setStretchFactor(1, 3)
         root.addWidget(split, 1)
 
-        # ESC clears the selection / right panel; clicking empty list area too
         sc = QShortcut(QKeySequence(Qt.Key_Escape), self)
         sc.setContext(Qt.WidgetWithChildrenShortcut)
         sc.activated.connect(self.clear_selection)
@@ -276,9 +255,8 @@ class WorklistPage(QWidget):
 
     def clear_selection(self) -> None:
         """Deselect the current receipt and reset the right-hand panel."""
-        # block signals while clearing — otherwise clearSelection() fires
-        # itemSelectionChanged -> load_receipt while currentRow() is still the old
-        # row, which would re-select the receipt we're trying to clear.
+        # block signals: clearSelection() would otherwise fire itemSelectionChanged
+        # -> load_receipt while currentRow() is still the old row
         self.table.blockSignals(True)
         self.table.clearSelection()
         self.table.setCurrentCell(-1, -1)
@@ -299,10 +277,8 @@ class WorklistPage(QWidget):
         self._conclusion = {}
         self.save_btn.setEnabled(False)
 
-    # ---------------------------------------------------------------
     def _date_edit(self) -> QDateEdit:
-        """A calendar-popup date editor, defaulting to today, disabled until the
-        'By date' filter is switched on."""
+        """A calendar-popup date editor, disabled until the 'By date' filter is on."""
         d = QDateEdit()
         setup_date_edit(d)
         d.setDisplayFormat("yyyy-MM-dd")
@@ -363,7 +339,6 @@ class WorklistPage(QWidget):
     def _selected_id(self) -> int | None:
         return selected_id(self.table, self._ids)
 
-    # ---------------------------------------------------------------
     def load_receipt(self) -> None:
         rid = self._selected_id()
         if rid is None:
@@ -376,8 +351,8 @@ class WorklistPage(QWidget):
         self.empty_hint.hide()
         sex = r["sex"]
 
-        # clear entry area synchronously (setParent(None) removes immediately —
-        # deleteLater alone is async and can leave duplicates on rapid re-select)
+        # setParent(None) removes immediately; deleteLater alone is async and can
+        # leave duplicates on rapid re-select
         while self.entry_layout.count():
             it = self.entry_layout.takeAt(0)
             w = it.widget()
@@ -400,8 +375,7 @@ class WorklistPage(QWidget):
             else:
                 self.entry_layout.addWidget(self._build_test_block(it, sex))
         self.entry_layout.addStretch(1)
-        # Lock editing by report status + role: a delivered report is frozen for
-        # everyone; a reported report may be corrected only by an admin.
+        # delivered -> locked for everyone; reported -> admin only
         lock = self._results_locked_reason(r["status"])
         if lock:
             self.entry_layout.insertWidget(0, muted(f"🔒  {lock}"))
@@ -417,9 +391,7 @@ class WorklistPage(QWidget):
         self.save_btn.setEnabled(editable)
 
     def _results_locked_reason(self, status: str | None) -> str:
-        """Why result editing is blocked for the current user (else '').
-        delivered -> locked for everyone (incl. admin); reported -> admin only;
-        pending / in-progress -> open."""
+        """Why result editing is blocked for the current user (else '')."""
         status = status or ""
         if status == "delivered":
             return "This report is delivered — it is locked and cannot be edited by anyone."
@@ -444,12 +416,10 @@ class WorklistPage(QWidget):
         cb.setToolTip("Tick to print this line on the report; untick to hide it.")
         return cb
 
-    # -- per-category result-entry grids -----------------------------------
     def _grid_single(
         self, grid, item, existing, hidden, had_results, multiline=False
     ) -> None:
-        """A test with no parameters → one free result box. ``multiline`` gives a
-        tall narrative box (histopathology / biopsy / free-text imaging)."""
+        """A test with no parameters -> one free result box (or tall narrative box)."""
         cb = self._make_check()
         cb.setChecked(not (had_results and hidden.get(None)))
         grid.addWidget(cb, 0, 0, Qt.AlignTop if multiline else Qt.AlignVCenter)
@@ -467,8 +437,7 @@ class WorklistPage(QWidget):
         self._show[(item["id"], None)] = cb
 
     def _grid_numeric(self, grid, item, params, existing, hidden, had, sex) -> None:
-        """Numeric tabular tests (CBC/LFT/RFT…): Show | Parameter | Result | Unit |
-        Reference, with the live out-of-range colour cue."""
+        """Numeric tabular tests (CBC/LFT/RFT…) with live out-of-range colour cue."""
         for col, lbl in enumerate(("Show", "Parameter", "Result", "Unit", "Reference")):
             grid.addWidget(QLabel(f"<b>{lbl}</b>"), 0, col)
         row_i = 1
@@ -480,9 +449,7 @@ class WorklistPage(QWidget):
                 grid.addWidget(QLabel(f"<b>{name}</b>"), row_i, 0, 1, 5)
                 row_i += 1
                 continue
-            # legacy static 'L' legend rows are never fillable and their text did not
-            # survive the catalog migration — not shown here or on the report
-            # (see render.report_doc._measure_qual). A nameless row has nothing to enter.
+            # legacy static 'L' legend rows never had fillable text (see report_doc)
             if pt == "L" or not name:
                 continue
             cb = self._make_check()
@@ -512,9 +479,8 @@ class WorklistPage(QWidget):
             row_i += 1
 
     def _grid_descriptive(self, grid, item, params, existing, hidden, had, sex) -> None:
-        """Imaging / narrative tests (ultrasound, x-ray, histopath): Show | Organ /
-        Part | Findings — a wide multi-line box per organ, pre-filled on first entry
-        with the catalog's normal text so staff edit only the abnormal lines."""
+        """Imaging / narrative tests: a multi-line finding box per organ, pre-filled
+        with the catalog's normal text on first entry."""
         for col, lbl in enumerate(("Show", "Organ / Part", "Findings")):
             grid.addWidget(QLabel(f"<b>{lbl}</b>"), 0, col)
         grid.setColumnStretch(2, 1)
@@ -522,9 +488,8 @@ class WorklistPage(QWidget):
         for p in params:
             pt = (p["part_type"] or "N").upper()
             name = (p["name"] or "").strip()
-            # whole-name match (not substring) so a real organ row like "Impression
-            # of liver" keeps its editor; only the dedicated block names are skipped.
-            # Keep in sync with render.report_doc._CONCLUSION_NAMES.
+            # whole-name match, not substring, so e.g. "Impression of liver" keeps
+            # its editor; keep in sync with render.report_doc._CONCLUSION_NAMES
             if name.lower().rstrip(":").strip() in (
                 "conclusion",
                 "impression",
@@ -532,7 +497,7 @@ class WorklistPage(QWidget):
                 "impression / conclusion",
                 "interpretation",
             ):
-                continue  # handled by the dedicated conclusion box
+                continue
             if pt == "H":
                 grid.addWidget(QLabel(f"<b>{name}</b>"), row_i, 0, 1, 3)
                 row_i += 1
@@ -546,7 +511,7 @@ class WorklistPage(QWidget):
             box = _GrowingText(min_h=60, max_h=260)
             if p["id"] in existing:
                 box.setPlainText(existing.get(p["id"]) or "")
-            else:  # first entry → start from the normal template
+            else:
                 box.setPlainText(resolve_ref(p, sex) or "")
             grid.addWidget(box, row_i, 2)
             self._editors[(item["id"], p["id"])] = box
@@ -554,9 +519,8 @@ class WorklistPage(QWidget):
             row_i += 1
 
     def _grid_qualitative(self, grid, item, params, existing, hidden, had, sex) -> None:
-        """Serology / blood-bank / qualitative PCR: Show | Parameter | Result |
-        Reference — Result is an editable dropdown of the likely word-states (still
-        free-typeable for titres like 1:160)."""
+        """Serology / molecular: Result is an editable dropdown of likely states
+        (still free-typeable for titres like 1:160)."""
         for col, lbl in enumerate(("Show", "Parameter", "Result", "Reference")):
             grid.addWidget(QLabel(f"<b>{lbl}</b>"), 0, col)
         row_i = 1
@@ -569,7 +533,7 @@ class WorklistPage(QWidget):
                 row_i += 1
                 continue
             if pt == "L" or not name:
-                continue  # legacy static legend row — not shown (see report_doc)
+                continue
             cb = self._make_check()
             cb.setChecked(not (had and hidden.get(p["id"])))
             grid.addWidget(cb, row_i, 0, Qt.AlignCenter)
@@ -586,8 +550,7 @@ class WorklistPage(QWidget):
             row_i += 1
 
     def _grid_blood_bank(self, grid, item, params, existing, hidden, had, sex) -> None:
-        """Blood bank (group / cross-match / Coombs): Show | Parameter | Result —
-        an editable dropdown of the valid result values, no reference column."""
+        """Blood bank (group / cross-match / Coombs): dropdown or free-text field."""
         for col, lbl in enumerate(("Show", "Parameter", "Result")):
             grid.addWidget(QLabel(f"<b>{lbl}</b>"), 0, col)
         row_i = 1
@@ -599,19 +562,19 @@ class WorklistPage(QWidget):
                 row_i += 1
                 continue
             if pt == "L" or not name:
-                continue  # legacy static legend row — not shown (see report_doc)
+                continue
             cb = self._make_check()
             cb.setChecked(not (had and hidden.get(p["id"])))
             grid.addWidget(cb, row_i, 0, Qt.AlignCenter)
             grid.addWidget(QLabel(name), row_i, 1)
             opts = _bloodbank_options(name)
-            if opts:  # known result vocabulary → editable dropdown
+            if opts:
                 editor = QComboBox()
                 editor.setEditable(True)
                 editor.addItems(opts)
                 editor.setMaximumWidth(200)
                 editor.setCurrentText(existing.get(p["id"], "") or "")
-            else:  # bag number, donor name, free note → plain text field
+            else:
                 editor = QLineEdit()
                 editor.setMaximumWidth(240)
                 editor.setText(existing.get(p["id"], "") or "")
@@ -625,7 +588,6 @@ class WorklistPage(QWidget):
             "SELECT * FROM test_parameters WHERE test_id=? ORDER BY seq",
             (item["test_id"],),
         ).fetchall()
-        # existing results keyed by parameter_id (value + hidden flag)
         existing, hidden = {}, {}
         for row in self.con.execute(
             "SELECT parameter_id, value, hidden FROM results WHERE receipt_item_id=?",
@@ -633,18 +595,13 @@ class WorklistPage(QWidget):
         ):
             existing[row["parameter_id"]] = row["value"]
             hidden[row["parameter_id"]] = row["hidden"]
-        had_results = bool(existing)  # first entry → everything ticked by default
+        had_results = bool(existing)
 
         grid = QGridLayout()
         grid.setSpacing(6)
-        # Entry layout follows the same render category as the printed report, so
-        # what staff type matches what comes out: descriptive tests get wide
-        # multi-line finding boxes (pre-filled with the normal text), qualitative
-        # tests get result dropdowns, numeric tests keep the value/unit/ref grid.
+        # entry layout follows the same render category as the printed report
         cat = category_for_test(self.con, item["test_id"])
         if not params:
-            # histopathology / biopsy / free-text imaging: one big narrative box,
-            # not a one-line field. Other single-result tests keep the line box.
             multiline = cat == "descriptive"
             self._grid_single(grid, item, existing, hidden, had_results, multiline)
         elif cat == "descriptive":
@@ -664,7 +621,6 @@ class WorklistPage(QWidget):
         grid_host = QWidget()
         grid_host.setLayout(grid)
 
-        # per-test remarks (printed under the results table)
         rk = item.keys()
         existing_rem = (item["remarks"] if "remarks" in rk else "") or ""
         rem = QPlainTextEdit()
@@ -682,10 +638,8 @@ class WorklistPage(QWidget):
         hl.addWidget(rem_lbl)
         hl.addWidget(rem)
 
-        # Imaging / descriptive and serology / molecular reports carry an
-        # Impression / Interpretation block (printed prominently below the table).
-        # Offer a dedicated box for those categories so staff can type the
-        # conclusion the report needs — the numeric grid tests don't have one.
+        # descriptive/qualitative/blood_bank/obstetric reports get a dedicated
+        # Impression/Interpretation block; numeric grid tests don't have one
         if cat in ("descriptive", "qualitative", "blood_bank", "obstetric"):
             label = (
                 "Conclusion / Impression"
@@ -703,7 +657,6 @@ class WorklistPage(QWidget):
             hl.addWidget(con_box)
         return card(h2(item["test_name"]), host)
 
-    # ---------------------------------------------------------------
     def save_results(self) -> None:
         if self.current_receipt is None:
             return
@@ -717,8 +670,7 @@ class WorklistPage(QWidget):
             toast_warn(self, "Locked", lock)
             return
         sex = r["sex"]
-        # Load each parameter once per distinct test on this receipt (a single query)
-        # instead of one SELECT per editor plus a second full pass in the snapshot step.
+        # one query per distinct test on this receipt, instead of one per editor
         items = c.execute(
             "SELECT ri.id, ri.test_id, t.is_culture FROM receipt_items ri "
             "JOIN tests t ON t.id=ri.test_id WHERE ri.receipt_id=?",
@@ -735,14 +687,14 @@ class WorklistPage(QWidget):
             ):
                 params_by_test[p["test_id"]].append(p)
                 param_by_id[p["id"]] = p
-        # Gather entered values from the widgets here; the DB writes + authorization
-        # + audit happen at the service boundary (results_svc.release_results).
+        # DB writes + authorization + audit happen at the service boundary
+        # (results_svc.release_results); this just gathers the entered values.
         result_rows: list[dict] = []
         for (item_id, param_id), editor in self._editors.items():
             value = _widget_text(editor).strip()
             cb = self._show.get((item_id, param_id))
             hidden = 0 if (cb is None or cb.isChecked()) else 1
-            if param_id is None:  # single-line free result
+            if param_id is None:
                 result_rows.append(
                     {
                         "item_id": item_id,
@@ -777,11 +729,8 @@ class WorklistPage(QWidget):
             item_id: box.toPlainText().strip()
             for item_id, box in self._conclusion.items()
         }
-        # Refuse to save/finalize a report with nothing entered on this screen: at
-        # least one value (or an impression / remark) must be present. This also stops
-        # a CULTURE-ONLY receipt (no editors here — cultures are entered on the
-        # Microbiology screen) from being stamped 'reported' with no data and, with
-        # whatsapp_auto on, auto-sending an empty report.
+        # refuse to save a report with nothing entered — also stops a culture-only
+        # receipt (no editors here) from being stamped 'reported' with no data
         if not _has_enterable_content(result_rows, remarks, conclusion):
             culture_only = bool(items) and all(
                 it["is_culture"] for it in items if "is_culture" in it.keys()
@@ -820,9 +769,8 @@ class WorklistPage(QWidget):
             return
         toast_info(self, "Results", "✓ Results saved.")
         rid = self.current_receipt
-        # optional auto-send on WhatsApp — gated SILENTLY first (config + recipient),
-        # so an opted-out patient / missing number / unconfigured gateway is a quiet
-        # skip, not a red error toast on every save (matches the receipt path).
+        # gated silently (config + recipient) so an opted-out patient / missing
+        # number / unconfigured gateway is a quiet skip, not an error toast
         if (
             db.get_setting(c, "whatsapp_auto", "0") == "1"
             and whatsapp.config_ready(c)[0]
@@ -841,18 +789,15 @@ class WorklistPage(QWidget):
                 ),
             )
         self.refresh_list()
-        # re-render the entry panel so it reflects the now-finalised (locked) state
-        # instead of staying editable until the next interaction.
+        # re-render so the entry panel reflects the now-finalised (locked) state
         self.load_receipt()
 
     def _static_line_rows(self, sex: str, items, params_by_test) -> list[dict]:
-        """H/L/continuation lines (no editor) so reports render fully. Reuses the
-        parameters already loaded in save_results — no extra queries. The service
-        inserts these with INSERT OR IGNORE."""
+        """H/L/continuation lines (no editor) so reports render fully."""
         rows: list[dict] = []
         for it in items:
             if "is_culture" in it.keys() and it["is_culture"]:
-                continue  # cultures are entered on the Microbiology screen — no static rows
+                continue
             for p in params_by_test.get(it["test_id"], []):
                 pt = (p["part_type"] or "N").upper()
                 if pt in ("L", "H") or not (p["name"] or "").strip():

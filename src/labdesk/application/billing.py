@@ -1,8 +1,5 @@
-"""Pure billing math + promo-discount lookup (no Qt).
-
-The money breakdown is computed exactly in integer paisa (see ``application.money``)
-so it is free of floating-point drift and uses one half-up rounding policy.
-"""
+"""Pure billing math + promo-discount lookup (no Qt). Money is computed exactly in
+integer paisa (see application.money) — no floating-point drift."""
 
 from __future__ import annotations
 
@@ -17,14 +14,8 @@ from . import money
 def compute_bill_totals(
     items: list[dict[str, object]], discount_pct: float, paid: float
 ) -> dict[str, float]:
-    """Compute the money breakdown for a bill, exactly, via integer paisa.
-
-    ``items`` is a list of dicts each carrying a ``"charge"`` key. All arithmetic is
-    done in integer minor units (see ``application.money``) so there is no floating-point
-    drift (``0.1 + 0.2`` is exactly ``0.30``), with a single half-up rounding policy on
-    the discount. Returns ``{"subtotal","discount","net","paid","due","change"}`` as
-    rupee floats (each an exact 2-dp value).
-    """
+    """Compute the money breakdown for a bill, exactly, via integer paisa. `items`
+    is a list of dicts each carrying a "charge" key."""
     charges_paisa = [money.to_paisa(cast("float", c["charge"])) for c in items]
     totals_paisa = money.compute_bill_totals_paisa(
         charges_paisa, discount_pct, money.to_paisa(paid)

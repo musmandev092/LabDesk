@@ -1,9 +1,4 @@
-"""Receipt DB-mutation helpers (no Qt).
-
-These perform the writes + audit exactly as the ReceiptsPage view did after its
-confirmation dialogs. The view keeps the dialogs/refresh; the SQL + audit live
-here so they can be tested directly.
-"""
+"""Receipt DB-mutation helpers (no Qt) — the writes + audit behind the Receipts view."""
 
 from __future__ import annotations
 
@@ -17,9 +12,7 @@ from ..roles import require
 
 @dataclass
 class BillDraft:
-    """All fields of a bill the reception view has validated/computed, passed as one
-    object so the service signature stays small and the bill's data travels together.
-    A truthy ``existing_patient_id`` means a returning patient (reuse the row)."""
+    """A validated bill's fields. Truthy existing_patient_id => returning patient."""
 
     existing_patient_id: int | None
     title: str
@@ -47,7 +40,7 @@ class BillDraft:
 
 @dataclass
 class CreateReceiptResult:
-    """Outcome of a successful bill creation (the view needs the id + lab number)."""
+    """Outcome of a successful bill creation."""
 
     receipt_id: int
     lab_no: str
@@ -57,15 +50,13 @@ class CreateReceiptResult:
 def _upsert_patient(
     con: sqlite3.Connection, d: BillDraft, consent_at: str
 ) -> tuple[int, str, bool]:
-    """Insert or refresh the patient row. Returns ``(patient_id, mr_no, new_patient)``."""
+    """Insert or refresh the patient row. Returns (patient_id, mr_no, new_patient)."""
     pid = d.existing_patient_id
     mr_no = d.mr_no
-    if pid:  # returning patient → reuse row + permanent MR, refresh details
+    if pid:  # returning patient -> reuse row + permanent MR, refresh details
         row = con.execute("SELECT mr_no FROM patients WHERE id=?", (pid,)).fetchone()
-        # Prefer the STORED permanent MR over a typed one: an auto-matched returning
-        # patient must not have its canonical Patient ID overwritten by whatever was
-        # typed for what looked like a new registration. A typed value only fills in
-        # when the patient has no stored MR yet.
+        # prefer the stored permanent MR: don't let a typed value overwrite the
+        # canonical id of an auto-matched returning patient
         stored = (row["mr_no"] if row else "") or ""
         mr_no = stored or mr_no or db.format_patient_id(pid)
         con.execute(
@@ -111,11 +102,8 @@ def _upsert_patient(
 def _allocate_lab_no(
     con: sqlite3.Connection, prefix: str, datestr: str, receipt_id: int
 ) -> str:
-    """Assign a unique lab number to a just-inserted receipt and return it.
-
-    Bases the serial on the highest already minted today for this prefix (NOT
-    COUNT(*), which regresses if a receipt is ever removed), then bumps on the UNIQUE
-    guard (ux_receipts_labno) so two terminals can't collide."""
+    """Assign a unique lab number, based on today's highest minted serial (not
+    COUNT(*), which would regress on deletion); bumps on the UNIQUE guard on collision."""
     serial_prefix = f"{prefix}-{datestr}-"
     like = (
         serial_prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -143,16 +131,9 @@ def _allocate_lab_no(
 def create_receipt(
     con: sqlite3.Connection, draft: BillDraft, *, actor_username: str, actor_role: str
 ) -> CreateReceiptResult:
-    """Create a bill at an authorized, audited boundary: upsert the patient, insert the
-    receipt + items + ledger, allocate a unique lab number, and audit — one transaction.
-
-    Authorization is enforced here (``require``), not only by the reception widget's
-    button state, so a privileged write can't be performed by a role lacking it
-    regardless of which code path reaches it (defence-in-depth; see roles.require).
-
-    The caller validates input, normalises the phone, drives the discount-approval UX,
-    and resolves ``draft.existing_patient_id``. On any DB failure the whole write is
-    rolled back and re-raised so the view can report that nothing was charged."""
+    """Create a bill in one transaction: upsert patient, insert receipt+items+ledger,
+    allocate a lab number, audit. Authorized here (defence-in-depth). Rolls back and
+    re-raises on any DB failure."""
     require(actor_role, "create_receipt")
     d = draft
     prefix = db.get_setting(con, "lab_no_prefix", "LAB")
@@ -160,8 +141,7 @@ def create_receipt(
     consent_at = con.execute("SELECT datetime('now','localtime')").fetchone()[0]
     try:
         pid, mr_no, new_patient = _upsert_patient(con, d, consent_at)
-        # money is dual-written: the REAL columns plus their integer-paisa twins,
-        # CAST(ROUND(?*100)) so paisa == round(real*100) and can't drift (Wave 4b).
+        # money dual-written: REAL columns + integer-paisa twins (CAST(ROUND(?*100)))
         rid = con.execute(
             """INSERT INTO receipts
                (patient_id,doctor_id,title,mr_no,patient_name,age,age_desc,sex,
@@ -209,8 +189,7 @@ def create_receipt(
                 "VALUES (?,?,?,?,CAST(ROUND(?*100) AS INTEGER))",
                 (rid, item["test_id"], item["name"], item["charge"], item["charge"]),
             )
-        # record income = money actually earned (capped at the bill); over-payment is
-        # change returned, not revenue — keeps the ledger from over-stating income.
+        # income capped at the bill; over-payment is change returned, not revenue
         collected = min(d.paid, d.net)
         if collected:
             con.execute(
@@ -236,7 +215,7 @@ def create_receipt(
         "receipt_created",
         f"{lab_no} — {d.name}, net {d.net:.0f}, paid {d.paid:.0f}, due {d.due:.0f}",
     )
-    if d.discount_pct > 0:  # record any discount (promo, self-applied, or approved)
+    if d.discount_pct > 0:
         who = d.discount_approved_by or (
             "promo" if d.discount_pct <= d.promo_pct + 1e-9 else actor_username
         )
@@ -258,29 +237,22 @@ def void_receipt(
     actor_role: str,
 ) -> None:
     """Void a receipt: mark voided, zero its due, reverse the ledger if paid, audit.
-
-    ``reason`` is expected already-stripped by the caller (the view stripped it
-    before confirming); the lab_no is read here for the ledger/audit detail.
-    ``actor_role`` is required and authorization-checked here — voiding reverses
-    money and must not depend solely on a UI gate. Idempotent: a no-op (returns
-    early) if the receipt is already voided, so a double-void can't double-reverse.
-    """
+    Idempotent — a no-op if already voided, so a double-void can't double-reverse."""
     require(actor_role, "void_receipt")
     r = con.execute(
         "SELECT lab_no, paid, net_amount, voided FROM receipts WHERE id=?",
         (receipt_id,),
     ).fetchone()
     if r is None or r["voided"]:
-        return  # unknown or already-voided — never reverse the ledger twice
+        return
     con.execute(
         "UPDATE receipts SET voided=1, void_reason=?, voided_at=datetime('now','localtime'), "
         "voided_by=?, due=0, due_paisa=0 WHERE id=?",
         (reason, username, receipt_id),
     )
-    # reverse exactly what was booked as income (collected = min(paid, net)), not the
-    # raw tendered amount — otherwise voiding an over-paid bill over-credits the reversal.
+    # reverse exactly what was booked as income, not the raw tendered amount
     collected = min(r["paid"] or 0.0, r["net_amount"] or 0.0)
-    if collected:  # reversing ledger entry keeps ledger-based accounting balanced
+    if collected:
         con.execute(
             "INSERT INTO ledger(kind,ref_id,detail,debit,debit_paisa,date) "
             "VALUES ('void',?,?,?,CAST(ROUND(?*100) AS INTEGER),date('now','localtime'))",

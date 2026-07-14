@@ -68,8 +68,8 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         super().__init__()
         self.con = con
         self.user = user
-        self.cart: list[dict] = []  # list of dicts: {test_id, name, charge}
-        self._existing_patient_id = None  # set when a returning patient is picked
+        self.cart: list[dict] = []
+        self._existing_patient_id = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -82,11 +82,9 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         body = QHBoxLayout()
         body.setSpacing(14)
 
-        # ---- left: patient + test picker ----
         left = QVBoxLayout()
         left.setSpacing(12)
 
-        # patient form
         pgrid = QGridLayout()
         pgrid.setSpacing(8)
         pgrid.setColumnStretch(1, 1)
@@ -95,9 +93,7 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         self.title.addItems(TITLES)
         self.name = QLineEdit()
         self.name.setPlaceholderText("Patient name *")
-        self.name.setMaxLength(
-            60
-        )  # snapshotted onto receipts/reports — keep it bounded
+        self.name.setMaxLength(60)  # snapshotted onto receipts/reports — keep bounded
         self.mr_no = QLineEdit()
         self.mr_no.setPlaceholderText("auto if blank")
         self.mr_no.setMaxLength(20)
@@ -115,12 +111,12 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         self.address.setMaxLength(120)
         self.doctor = QComboBox()
         self.doctor.setEditable(True)
-        self.doctor.lineEdit().setMaxLength(50)  # snapshotted as dr_name on reports
+        self.doctor.lineEdit().setMaxLength(50)
         self.specimen = QComboBox()
         self.specimen.setEditable(True)
         self.specimen.lineEdit().setMaxLength(40)
-        self.update_specimen_options()  # presets (no cart yet)
-        # editing identity fields by hand breaks any "returning patient" link
+        self.update_specimen_options()
+        # hand-editing identity fields breaks any "returning patient" link
         self.name.textEdited.connect(self._unlink)
         self.tel.textEdited.connect(self._unlink)
         self.mr_no.textEdited.connect(self._unlink)
@@ -150,7 +146,6 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         pgrid.addWidget(self.specimen, 5, 1, 1, 3)
         pform = QWidget()
         pform.setLayout(pgrid)
-        # returning-patient lookup (phone is the practical key patients remember)
         self.find = QLineEdit()
         self.find.setPlaceholderText(
             "🔍  Returning patient? search phone / Patient ID / name"
@@ -164,8 +159,7 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         self.find_results.itemClicked.connect(self.pick_patient)
         self.linked_lbl = muted("")
         self.linked_lbl.hide()
-        # Positive consent, default ON (giving a number implies the patient wants
-        # WhatsApp delivery). Unticking opts them out; the choice is timestamped.
+        # positive consent, default ON; unticking opts out, timestamped
         self.wa_consent = QCheckBox(
             "Send reports and bills to this patient on WhatsApp"
         )
@@ -174,7 +168,6 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
             "Reports/bills are delivered through WhatsApp (Meta). Untick if the "
             "patient does not want messages sent to their number."
         )
-        # previous visits of a picked returning patient (hidden until one is chosen)
         self.prev_lbl = muted("Previous visits")
         self.prev_lbl.hide()
         self.prev_visits = QListWidget()
@@ -194,7 +187,6 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         patient_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         left.addWidget(patient_card)
 
-        # test search
         search_row = QHBoxLayout()
         search_row.setContentsMargins(0, 0, 0, 0)
         search_row.setSpacing(8)
@@ -217,19 +209,17 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         self.results.itemActivated.connect(self.add_from_list)
         self.results.itemDoubleClicked.connect(self.add_from_list)
         add_card = card(search_w, self.results, title="Add tests")
-        # let the results list grow to fill the card and the column
         add_card.layout().setStretch(add_card.layout().count() - 1, 1)
         left.addWidget(add_card, 1)
         body.addLayout(left, 3)
 
-        # ---- right: cart + totals ----
         right = QVBoxLayout()
         right.setSpacing(12)
         self.cart_table = QTableWidget(0, 3)
         self.cart_table.setHorizontalHeaderLabels(["Test", "Charge", ""])
         ch = self.cart_table.horizontalHeader()
-        ch.setSectionResizeMode(0, QHeaderView.Stretch)  # test name grows
-        ch.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # charge
+        ch.setSectionResizeMode(0, QHeaderView.Stretch)
+        ch.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         ch.setSectionResizeMode(2, QHeaderView.Fixed)
         self.cart_table.setColumnWidth(2, 42)
         self.cart_table.verticalHeader().setVisible(False)
@@ -238,7 +228,6 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         cart_card.layout().setStretch(cart_card.layout().count() - 1, 1)
         right.addWidget(cart_card, 1)
 
-        # totals
         tgrid = QGridLayout()
         tgrid.setSpacing(9)
         tgrid.setColumnStretch(1, 1)
@@ -248,7 +237,6 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         self.discount.setMaximum(100)
         self.discount.setSuffix(" %")
         self.discount.valueChanged.connect(self.recompute)
-        # A discount needs manager/admin rights; a cashier must get it approved.
         self._can_discount = roles.can(self.user["role"], "apply_discount")
         self._discount_approved_by = None
         self._discount_approved_pct = 0.0  # ceiling a manager approved for a cashier
@@ -273,7 +261,6 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         self.paid.valueChanged.connect(self.recompute)
         self.due = QLabel("—")
         self.due.setStyleSheet("font-weight:800;font-size:15px;color:#c0392b;")
-        # change to hand back when the customer overpays (paid > net)
         self.change = QLabel("—")
         self.change.setStyleSheet("font-weight:800;font-size:15px;color:#1f9d55;")
         self.change_lbl = field_label("Change to return")
@@ -302,7 +289,7 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         right.addWidget(pay_card)
 
         btns = QHBoxLayout()
-        # NB: clicked(checked) passes a bool — wrap so do_print stays True
+        # clicked(checked) passes a bool — wrap so do_print stays True
         save = QPushButton("Save && Print receipt")
         save.setMinimumHeight(42)
         save.clicked.connect(lambda: self.save(do_print=True))
@@ -321,7 +308,6 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
 
         root.addLayout(body, 1)
 
-        # keyboard shortcuts: Ctrl+S save & print, Ctrl+Enter save (no print)
         QShortcut(
             QKeySequence("Ctrl+S"), self, activated=lambda: self.save(do_print=True)
         )
@@ -335,10 +321,8 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
             self,
             activated=lambda: self.save(do_print=False),
         )
-        # Enter in the test search adds the top match
         self.test_search.returnPressed.connect(self._add_top_test)
 
-    # ---------------------------------------------------------------
     def on_show(self) -> None:
         self.load_doctors()
         if self.results.count() == 0:
@@ -347,7 +331,6 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
             self._apply_promo()
             self.recompute()
 
-    # ---- discount approval + special-day promo --------------------
     def _request_discount_approval(self) -> None:
         """A cashier asks a manager/admin to approve a discount on this bill."""
         u, ok = QInputDialog.getText(
@@ -362,7 +345,6 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
             return
         approver = db.verify_user(self.con, u.strip(), p)
         if not approver or not roles.can(approver["role"], "apply_discount"):
-            # audit the failed approval attempt (brute-force of a manager password)
             db.log_audit(
                 self.con,
                 self.user["username"],
@@ -375,8 +357,7 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
                 "Invalid credentials, or that user can't approve discounts.",
             )
             return
-        # Bind the approval to a concrete amount the manager authorises — otherwise
-        # the cashier could be approved for "a discount" and then type any value.
+        # bind the approval to a concrete % so a cashier can't type any value later
         pct, ok = QInputDialog.getDouble(
             self,
             "Approve discount",
@@ -410,7 +391,7 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
     def _apply_promo(self) -> None:
         pct = self._promo_pct()
         self.discount.blockSignals(True)
-        self.discount.setValue(pct)  # auto-apply the special-day discount
+        self.discount.setValue(pct)
         self.discount.blockSignals(False)
 
     def load_doctors(self) -> None:
@@ -424,10 +405,9 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
             self.doctor.addItem(d["name"], d["id"])
         self.doctor.setCurrentText(cur)
 
-    # ---- specimen options driven by the chosen tests --------------
     def update_specimen_options(self) -> None:
-        """Offer each cart test's `sample_required` as a specimen option (plus the
-        standard presets); auto-select when there is a single specimen."""
+        """Offer each cart test's `sample_required` plus the standard presets;
+        auto-select when there is a single specimen."""
         cur = self.specimen.currentText().strip()
         ids = [c["test_id"] for c in self.cart]
         cart_specs = []
@@ -459,13 +439,11 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         """Show a brief, self-clearing confirmation toast (top-right, non-blocking)."""
         toast_info(self, "", msg)
 
-    # ---------------------------------------------------------------
     def save(self, do_print=True):
-        # Auto-format the typed name to proper case (MUHAMMAD USMAN / muhammad usman
-        # → Muhammad Usman) so it stores and prints tidily however it was entered.
+        # tidy the typed name to proper case so it stores/prints consistently
         name = format_person_name(self.name.text())
         if name:
-            self.name.setText(name)  # reflect the tidy form back in the field
+            self.name.setText(name)
         # require a real name — not blank, and not digits/punctuation only
         if not name or not re.search(r"[^\W\d_]", name):
             toast_warn(self, "Reception", "Enter a valid patient name.")
@@ -473,14 +451,12 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         if not self.cart:
             toast_warn(self, "Reception", "Add at least one test.")
             return
-        # Re-validate the discount at save (defence-in-depth — don't trust only the
-        # widget's enabled state). A discount ABOVE the auto-applied promo needs the
-        # apply_discount capability or a recorded manager approval.
+        # re-validate at save (don't trust only the widget's enabled state); a
+        # discount above the auto-applied promo needs apply_discount or approval
         if self.discount.value() > self._promo_pct() + 1e-9 and not roles.can(
             self.user["role"], "apply_discount"
         ):
-            # a cashier needs an approval, AND the discount must not exceed the amount
-            # the manager actually approved (not merely "a discount was approved").
+            # the discount must not exceed what the manager actually approved
             ceiling = max(self._promo_pct(), self._discount_approved_pct)
             if not self._discount_approved_by or self.discount.value() > ceiling + 1e-9:
                 toast_warn(
@@ -493,15 +469,14 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         c = self.con
         title = self.title.currentText().strip()
         mr_no = self.mr_no.text().strip()
-        # A manually-entered Patient ID in the new YY-…-NN<L> format is typo-checked via
-        # its trailing check letter. Accept it typed WITHOUT the dashes (e.g. 2600043K)
-        # by re-inserting them, and store our-format ids in canonical UPPER-dashed form.
-        # Legacy 'MR…' / free-form ids pass through unchanged.
+        # A manually-entered Patient ID (YY-…-NN<L>) is typo-checked via its check
+        # letter; accept it typed without dashes and store canonically. Legacy
+        # 'MR…' / free-form ids pass through unchanged.
         cand = mr_no.upper()
         m = re.fullmatch(r"(\d{2})(\d{3})(\d{2})([A-Z])", cand)
         if m:
             cand = f"{m.group(1)}-{m.group(2)}-{m.group(3)}{m.group(4)}"
-        if cand[:2].isdigit() and "-" in cand:  # looks like our new Patient-ID format
+        if cand[:2].isdigit() and "-" in cand:
             if not db.validate_patient_id(cand):
                 toast_warn(
                     self,
@@ -510,7 +485,7 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
                     "Leave it blank to auto-generate one, or re-enter it correctly.",
                 )
                 return
-            mr_no = cand  # canonical form
+            mr_no = cand
         specimen = self.specimen.currentText().strip()
         cc = db.get_setting(c, "whatsapp_country_code", "92") or "92"
         tel = normalize_phone(self.tel.text(), cc)
@@ -518,10 +493,7 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         age_desc = self.age_desc.currentText()
         sex = self.sex.currentText()
         addr = format_address(self.address.text())
-        # Resolve the patient identity:
-        #  1) an explicitly picked "returning patient", else
-        #  2) auto-match on (canonical phone + same name), else
-        #  3) a brand-new patient with an auto-assigned Patient ID.
+        # resolve identity: explicit pick, else phone+name match, else new patient
         pid = self._existing_patient_id
         if not pid and tel:
             m = c.execute(
@@ -533,8 +505,7 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
                 pid = m["id"]
         doc_id = self.doctor.currentData()
         doc_name = self.doctor.currentText().strip()
-        # compute totals directly (don't depend on cached recompute state), exactly
-        # in integer paisa so a discount can't leave a sub-cent "phantom due"
+        # exact integer-paisa math so a discount can't leave a sub-cent "phantom due"
         disc_pct = self.discount.value()
         totals = billing.compute_bill_totals(self.cart, disc_pct, self.paid.value())
         sub = totals["subtotal"]
@@ -543,9 +514,6 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         due = totals["due"]
         pay_method = self.payment_method.currentText()
         optout = 0 if self.wa_consent.isChecked() else 1
-        # All writes + authorization + audit happen at the service boundary; the view
-        # keeps validation, money computation, and the print/WhatsApp UX. A failure
-        # rolls back inside the service (nothing charged) and is surfaced here.
         try:
             res = receipts_svc.create_receipt(
                 c,
@@ -591,19 +559,14 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
             return
         rid = res.receipt_id
         lab_no = res.lab_no
-        # non-blocking inline confirmation (no modal to dismiss → save feels instant)
         self.statusBar_message(f"✓ Receipt {lab_no} saved.")
         if do_print:
-            # native render is fast and prints straight onto the printer (vector);
-            # a print failure here never loses the already-saved receipt.
             try:
                 report.print_receipt(self.con, rid, self)
             except Exception as e:
                 toast_warn(
                     self, "Print", f"Saved as {lab_no}, but printing failed:\n{e}"
                 )
-        # optional: auto-send the bill on WhatsApp (gated silently so it never
-        # nags when WhatsApp isn't set up or the patient has no number)
         if (
             db.get_setting(self.con, "whatsapp_auto_receipt", "0") == "1"
             and whatsapp.config_ready(self.con)[0]
@@ -634,8 +597,6 @@ class ReceptionPage(ReceptionCartMixin, ReceptionPatientMixin, QWidget):
         self.paid.setValue(0)
         self.wa_consent.setChecked(True)
         self.payment_method.setCurrentIndex(0)
-        # reset the discount-approval lock + approved ceiling for cashiers, then
-        # re-apply any promo
         self._discount_approved_by = None
         self._discount_approved_pct = 0.0
         self.discount.setMaximum(100)  # undo the per-approval cap

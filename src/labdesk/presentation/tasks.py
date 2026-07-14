@@ -1,17 +1,4 @@
-"""Run slow work on a background thread so the GUI never freezes.
-
-Generalises the WhatsApp-send pattern (originally in ui/wa.py): a QThreadPool
-worker runs ``work(con)`` with its OWN SQLite connection (handles can't cross
-threads) and reports the result back on the UI thread via a queued signal.
-
-Notes that make this safe:
-  * the in-flight task is kept in ``_active`` until it finishes — otherwise
-    Python garbage-collects the runnable the moment the caller returns and the
-    completion callback never fires;
-  * every widget touch in the callback is guarded with ``_alive`` in case the
-    page / window was closed while the work was still running;
-  * the worker never raises out of run() (a crash there would take the app down).
-"""
+"""Run slow work on a background QThreadPool thread so the GUI never freezes."""
 
 from __future__ import annotations
 
@@ -24,7 +11,7 @@ from .. import db
 from .widgets import toast_warn
 import contextlib
 
-try:  # detect a widget destroyed while work was in flight
+try:
     from shiboken6 import Shiboken
 
     def _alive(obj: Any) -> bool:
@@ -35,7 +22,7 @@ except Exception:  # pragma: no cover - fallback if shiboken layout differs
         return obj is not None
 
 
-_active: set[Any] = set()  # keep running tasks referenced until they complete
+_active: set[Any] = set()  # keeps running tasks referenced until they complete
 
 
 class _Signals(QObject):
@@ -52,7 +39,7 @@ class _Runnable(QRunnable):
         ok, result = False, "Something went wrong."
         con = None
         try:
-            con = db.connect()  # fresh connection owned by THIS thread
+            con = db.connect()
             result = self._work(con)
             ok = True
         except Exception as e:
@@ -73,16 +60,7 @@ def run_in_background(
     lock: tuple[Any, ...] = (),
     busy_text: str = "Working…",
 ) -> None:
-    """Run ``work(con)`` on a pool thread, then call ``on_done(ok, result)`` on
-    the UI thread.
-
-    work(con)            any callable; ``con`` is a fresh worker-thread connection.
-                         Its return value is passed to on_done as ``result``.
-    on_done(ok, result)  ok is False when work raised — then ``result`` is the
-                         error message (str).
-    clicked              button to disable + show ``busy_text`` on during the run.
-    lock                 extra buttons to disable while running (anti double-click).
-    """
+    """Run ``work(con)`` on a pool thread, then call ``on_done(ok, result)`` on the UI thread."""
     locks = list(dict.fromkeys([b for b in (clicked, *lock) if b is not None]))
     prev_enabled = {b: b.isEnabled() for b in locks}
     prev_text = clicked.text() if clicked is not None else None
@@ -92,7 +70,7 @@ def run_in_background(
         clicked.setText(busy_text)
 
     task = _Runnable(work)
-    task.setAutoDelete(False)  # we manage its lifetime via _active
+    task.setAutoDelete(False)  # lifetime managed via _active
     _active.add(task)
 
     def _finished(ok: bool, result: Any) -> None:
@@ -111,7 +89,7 @@ def run_in_background(
             with contextlib.suppress(Exception):
                 on_done(ok, result)
 
-    task.signals.done.connect(_finished)  # cross-thread → queued onto the UI thread
+    task.signals.done.connect(_finished)
     QThreadPool.globalInstance().start(task)
 
 
@@ -125,9 +103,7 @@ def build_pdf(
     busy_text: str = "Working…",
     error_title: str = "Document",
 ) -> None:
-    """Build something (usually PDF bytes) via ``build(con)`` off the UI thread,
-    then call ``on_ready(result)`` on success. On failure, show one uniform
-    warning dialog — saves every caller repeating the ok/error branch."""
+    """Build something (usually PDF bytes) off the UI thread; show one uniform warning dialog on failure."""
 
     def _done(ok: bool, result: Any) -> None:
         if not ok:
@@ -143,9 +119,7 @@ def build_pdf(
 
 
 def debounce(owner: Any, slot: Callable[[], Any], ms: int = 250) -> Callable[..., None]:
-    """Return a callable that fires ``slot`` only after ``ms`` of quiet, so a
-    search box hits the DB once after typing stops, not on every keystroke. The
-    QTimer is parented to ``owner`` so it lives exactly as long as the widget."""
+    """Return a callable that fires ``slot`` only after ``ms`` of quiet (e.g. debounce a search box)."""
     timer = QTimer(owner)
     timer.setSingleShot(True)
     timer.setInterval(ms)

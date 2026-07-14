@@ -10,8 +10,7 @@ _FAMILY = None
 
 
 def _ensure_app() -> None:
-    """Qt painting/font APIs need a QGuiApplication. The GUI always has one; this
-    only kicks in for headless use (a script/test that exports a PDF directly)."""
+    """Qt font APIs need a QGuiApplication; only kicks in for headless use."""
     from PySide6.QtWidgets import QApplication
 
     if QApplication.instance() is None:
@@ -31,8 +30,7 @@ def _family() -> str:
 
 
 def preload() -> None:
-    """Load the bundled font once on the main thread (call at app startup) so the
-    PDF-building worker thread never touches QFontDatabase off-thread."""
+    """Load the bundled font on the main thread so the PDF worker thread never touches QFontDatabase off-thread."""
     _family()
 
 
@@ -42,6 +40,6 @@ def _font(size_pt: float, *, bold: bool = False, spacing_px: float = 0.0) -> QFo
     f.setBold(bold)
     f.setHintingPreference(QFont.PreferNoHinting)
     if spacing_px:
-        # CSS letter-spacing px@96 → points (font logical units are points here)
+        # px@96 → points
         f.setLetterSpacing(QFont.AbsoluteSpacing, spacing_px / 96.0 * 72.0)
     return f

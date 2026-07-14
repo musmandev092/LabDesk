@@ -33,14 +33,10 @@ from .fonts import _font
 from .primitives import Doc
 
 
-# ---------------------------------------------------------------------------
-# Lab report
-# ---------------------------------------------------------------------------
 def _report_letterhead(d: Doc, g, x0: float, y: float) -> float:
-    """Draw letterhead (logo + clinic + optional accred/regs) + the 2px rule.
-    Returns y just below the rule."""
+    """Letterhead (logo + clinic + accred/regs) + the 2px rule; returns y below the rule."""
     tx = x0
-    # shrink the lab name so a long one stops short of the centred logo (no overlap)
+    # shrink the lab name so it stops short of the centred logo
     logo_left = centered_logo_left(d, g("logo_path"), x0)
     title_w = 130.0 if logo_left is None else max(45.0, logo_left - tx - 4.0)
     h1 = fit_lab_name_font(d, g("lab_name"), 17, title_w, min_pt=11.0)
@@ -63,7 +59,6 @@ def _report_letterhead(d: Doc, g, x0: float, y: float) -> float:
     for line in addr_lines:
         d.text(tx, cy, 140, 3.4, line, pf, MUTED)
         cy += 3.2
-    # top-right: accreditation logo + reg lines
     regs = _rregs(g)
     al = (g("accred_logo_1") or "").strip()
     ry = y
@@ -82,7 +77,6 @@ def _report_letterhead(d: Doc, g, x0: float, y: float) -> float:
             Qt.AlignRight | Qt.AlignTop,
         )
         ry += 3.4
-    # centre: main logo, horizontally AND vertically centred within the header band
     lp = (g("logo_path") or "").strip()
     if lp and Path(lp).exists():
         header_h = max(cy, ry) - y
@@ -133,16 +127,13 @@ def _report_header(d: Doc, con, g, r) -> float:
 
 
 def _report_footer(d: Doc, con, g, page_no: int, total: int, code: str = "") -> None:
-    """Running footer: signatures + footer line + dept band + Page X of Y.
-    ``code`` (when set) is the report's verification code, shown bottom-left."""
+    """Running footer: signatures + footer line + dept band + Page X of Y; ``code`` is the verification code."""
     x0 = d.ml
     sigs = [(g(f"signatory_{i}_name"), g(f"signatory_{i}_title")) for i in (1, 2)]
     sigs = [(n, t) for n, t in sigs if n]
     band = g("dept_band")
     fline = g("report_footer")
-    # build bottom-up from page bottom (+4mm: sit the footer a little lower on the page)
     yb = A4_H_MM - d.mb + 4
-    # Page X of Y (bottom-right, below everything)
     d.text(
         x0,
         yb - 4,
@@ -154,9 +145,7 @@ def _report_footer(d: Doc, con, g, page_no: int, total: int, code: str = "") -> 
         Qt.AlignRight | Qt.AlignVCenter,
     )
     if code:
-        # verification code, bottom-left (shares the row with Page X of Y). Lets the
-        # issuing lab confirm a presented printout matches its records (Receipts →
-        # Verify report); a tampered value makes the recomputed code differ.
+        # lets the lab confirm a printout against its records; tampering changes the recomputed code
         d.text(
             x0,
             yb - 4,
@@ -181,11 +170,7 @@ def _report_footer(d: Doc, con, g, page_no: int, total: int, code: str = "") -> 
         )
         cy -= 4.5
     if fline:
-        # Disclaimer: wrap across (almost) the full width instead of clipping a
-        # single centred line at both ends ("This…proceedings" was losing its first
-        # and last letters). The block bottom stays where the one-line version sat
-        # and grows upward; the rule above it widens to match. One-line footers are
-        # rendered identically to before.
+        # wrap the disclaimer across the full width instead of clipping a centred line; grows upward from the same bottom
         fw = d.content_w - 16
         fx = x0 + 8
         ff = _font(7.3)
@@ -255,8 +240,7 @@ def _ref_lines(res, sex: str | None) -> tuple[list[str], str]:
 
 
 def _measure_test(d: Doc, con, item, sex: str | None, receipt) -> dict[str, object]:
-    """Return a layout dict for one (non-culture) test: title + columns + rows,
-    with per-row heights, so we can paginate."""
+    """Layout dict for one (non-culture) test: title + columns + rows with per-row heights, for pagination."""
     from . import report as R
 
     results = con.execute(
@@ -280,15 +264,13 @@ def _measure_test(d: Doc, con, item, sex: str | None, receipt) -> dict[str, obje
     cw["unit"] = d.content_w * 0.11
     rest = d.content_w - cw["test"] - cw["unit"]
     cw["ref"] = rest * 0.46
-    # width of one value column (history columns + the current column) — needed
-    # up front so a long/descriptive value (e.g. an ultrasound finding) grows the
-    # row enough to wrap instead of clipping. Mirrors the divisor in _draw_test_table.
+    # value-column width, needed up front so a long value grows the row to wrap; mirrors _draw_test_table
     nval = len(hist_labels) + 1
     each = (d.content_w - cw["test"] - cw["ref"] - cw["unit"]) / max(nval, 1)
     rows = []
-    name_f = _font(8.6)  # test name
+    name_f = _font(8.6)
     ref_f = _font(7.8)
-    cur_f = _font(9.5, bold=True)  # current-value font (matches the draw side)
+    cur_f = _font(9.5, bold=True)  # matches the draw side
     for res in results:
         if "hidden" in res.keys() and res["hidden"]:
             continue
@@ -300,10 +282,7 @@ def _measure_test(d: Doc, con, item, sex: str | None, receipt) -> dict[str, obje
         pid = res["parameter_id"] if "parameter_id" in res.keys() else None
         hist = [m.get(pid) for m in hist_maps]
         has_hist = any(str(h).strip() for h in hist if h is not None)
-        # Blank current value: omit the row entirely — UNLESS the patient has
-        # previous results for this parameter. Then keep the row so the history
-        # columns still print, and show "No result" in the current column instead
-        # of a misleading empty cell.
+        # blank current value: omit the row unless prior history exists, then show "No result"
         no_result = False
         if not val:
             if not has_hist:
@@ -314,8 +293,7 @@ def _measure_test(d: Doc, con, item, sex: str | None, receipt) -> dict[str, obje
         ref_ls, flag = _ref_lines(res, sex)
         unit = res["units"] or ""
         h_name = d.text_height(name, name_f, cw["test"] - 4)
-        # measure the ref as one wrapped block and include the unit cell, so a long
-        # reference range or unit grows the row instead of being clipped.
+        # measure ref as one wrapped block (+ unit) so a long value grows the row instead of clipping
         h_ref = d.text_height("\n".join(ref_ls), ref_f, cw["ref"] - 4)
         h_unit = d.text_height(unit, ref_f, cw["unit"] - 2)
         h_val = d.text_height(val, cur_f, each - 2) if val else 0
@@ -347,16 +325,11 @@ def _measure_test(d: Doc, con, item, sex: str | None, receipt) -> dict[str, obje
 
 
 def _draw_test_table(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, list]:
-    """Draw the title bar + as many rows as fit; returns (y_after, remaining_rows).
-    remaining_rows is a list to continue on the next page (header repeats)."""
+    """Draw the title bar + as many rows as fit; returns (y_after, remaining_rows) for the next page."""
     cw = lay["cw"]
-    # Stop the body at the reserved footer band — the previous "+24" reclaimed most
-    # of that band, so on a full page the last rows overprinted the signatures /
-    # disclaimer of an official medical report.
+    # stop above the reserved footer band so rows don't overprint the signatures/disclaimer
     body_bottom = A4_H_MM - d.mb - REPORT_FOOTER_MM
-    # title bar — square edges + a matching 1px border so it lines up pixel-flush
-    # with the result rows below (which carry a border); a rounded bar previously
-    # left the rows ~1-2px wider at both ends.
+    # square edges + matching border so the title bar lines up flush with the rows below
     d.fill_rect(x0, y, d.content_w, 6.5, TEAL)
     d.rect(x0, y, d.content_w, 6.5, TEAL_DARK, 1)
     d.text(
@@ -370,7 +343,6 @@ def _draw_test_table(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, lis
         Qt.AlignLeft | Qt.AlignVCenter,
     )
     y += 6.5
-    # header row
     cols = [
         ("TEST", cw["test"], Qt.AlignLeft),
         ("REFERENCE RANGE", cw["ref"], Qt.AlignHCenter),
@@ -459,7 +431,6 @@ def _draw_test_table(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, lis
             d.fill_rect(x0, y, ncols_w, rh, LIGHT)
         even = not even
         cx = x0
-        # test name
         d.rect(cx, y, cw["test"], rh, BORDER, 1)
         d.text(
             cx + 2,
@@ -473,7 +444,7 @@ def _draw_test_table(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, lis
             wrap=True,
         )
         cx += cw["test"]
-        # ref — one wrapped block (wraps long ranges instead of clipping them)
+        # ref — wrapped block avoids clipping long ranges
         d.rect(cx, y, cw["ref"], rh, BORDER, 1)
         d.text(
             cx + 2,
@@ -487,7 +458,7 @@ def _draw_test_table(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, lis
             wrap=True,
         )
         cx += cw["ref"]
-        # unit — wrap so long units (e.g. "Minutes / Seconds") are not clipped
+        # unit — wrap so long units aren't clipped
         d.rect(cx, y, cw["unit"], rh, BORDER, 1)
         d.text(
             cx + 1,
@@ -507,8 +478,7 @@ def _draw_test_table(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, lis
             is_cur = vi == len(vals) - 1
             d.rect(cx, y, each, rh, BORDER, 1)
             if is_cur and row.get("no_result"):
-                # blank current value but prior results exist — label it instead of
-                # leaving an empty cell (see _measure_test).
+                # prior results exist, so label the blank cell instead of leaving it empty (see _measure_test)
                 d.text(
                     cx + 1,
                     y,
@@ -530,17 +500,9 @@ def _draw_test_table(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, lis
     return y, rows[i:]
 
 
-# ---------------------------------------------------------------------------
-# Category renderers: descriptive (imaging/narrative) + qualitative (serology).
-# Both reuse the running header/footer + pagination shape of _draw_test_table so
-# multi-page reports keep working; only the per-test table body differs. Numeric
-# tabular tests (CBC/LFT/RFT) and cultures are unchanged.
-# ---------------------------------------------------------------------------
+# Category renderers (descriptive/qualitative) reuse _draw_test_table's header/footer/pagination shape; only the table body differs.
 def _drop_orphan_subheads(rows: list) -> list:
-    """Remove section sub-headings that have no visible content row beneath them.
-    Once blank parameters are skipped, a heading like "DIFFERENTIAL COUNT" can be
-    left with nothing under it; this drops the dangling heading. A heading is kept
-    only if a row / narrative / note follows it before the next heading."""
+    """Drop a subhead with no content row before the next subhead (can happen once blank rows are skipped)."""
     content_kinds = {"row", "narrative", "note"}
     keep: list = []
     n = len(rows)
@@ -596,9 +558,7 @@ def _draw_title_bar(d: Doc, x0: float, y: float, title: str) -> float:
     return y + 6.5
 
 
-# Names that designate the dedicated Impression/Conclusion block (rendered below the
-# table, not as a finding row). Whole-name match (not substring) so a real organ row
-# like "Impression of liver" is NOT swallowed. Keep in sync with worklist's grid.
+# Names for the dedicated Impression/Conclusion block; whole-name match so "Impression of liver" isn't swallowed. Keep in sync with worklist's grid.
 _CONCLUSION_NAMES = {
     "conclusion",
     "impression",
@@ -614,14 +574,11 @@ def _is_conclusion_name(name: str) -> bool:
 
 
 def _polarity(value: object) -> str | None:
-    """Colour for a qualitative result: GREEN (negative/non-reactive), RED
-    (positive/reactive/detected), or None (blood group / unknown free text → INK).
-    Negative phrases are checked first because 'non-reactive' contains 'reactive'."""
+    """Colour for a qualitative result: GREEN=negative, RED=positive, None=unknown (→INK); negative checked first."""
     s = str(value or "").strip().lower()
     if not s:
         return None
-    # whole words only — "+ve"/"-ve" are deliberately excluded because they clash
-    # with blood-group notation (e.g. "B+", "O-ve" is a group, not a pathology flag).
+    # whole words only; +ve/-ve excluded — clashes with blood-group notation like "B+"
     neg = (
         "non-reactive",
         "non reactive",
@@ -640,9 +597,7 @@ def _polarity(value: object) -> str | None:
 
 
 def _measure_descriptive(d: Doc, con, item, sex: str | None, receipt) -> dict:
-    """Layout for an imaging / narrative report: ORGAN/PART | FINDINGS (wide,
-    wrapping). The CONCLUSION/IMPRESSION line renders as a block below the table
-    (from receipt_items.conclusion), not as a cramped row."""
+    """Layout for an imaging/narrative report: ORGAN/PART | FINDINGS; conclusion renders as a block below the table, not a row."""
     head, title = _head_title(con, item)
     cw = {"part": d.content_w * 0.28, "find": d.content_w * 0.72}
     part_f = _font(8.6, bold=True)
@@ -660,9 +615,7 @@ def _measure_descriptive(d: Doc, con, item, sex: str | None, receipt) -> dict:
         if pt == "H":
             rows.append({"kind": "subhead", "text": name, "h": 5.2})
             continue
-        # A free-text result (no parameter — histopathology, biopsy, cytology, a
-        # plain narrative imaging report) is a full-width paragraph, not an
-        # organ/finding row with a meaningless "Result" label.
+        # free-text result (no parameter) is a full-width paragraph, not an organ/finding row
         if pid is None and val:
             h = d.text_height(val, find_f, d.content_w - 6)
             rows.append({"kind": "narrative", "text": val, "h": h + 3})
@@ -701,20 +654,15 @@ def _measure_descriptive(d: Doc, con, item, sex: str | None, receipt) -> dict:
 def _split_text_by_height(
     d: Doc, text: str, font: QFont, width: float, max_h: float
 ) -> tuple[str, str]:
-    """Split ``text`` at a word boundary so the head's wrapped height (in a
-    ``width``-mm box) fits within ``max_h`` mm. Returns ``(head, tail)`` with
-    ``tail == ""`` when everything fits. Words are never cut mid-character, and
-    the head always carries at least one word so pagination is guaranteed to
-    make progress even when not a single line fits in ``max_h``."""
+    """Split text at a word boundary so the head's wrapped height fits max_h mm; returns (head, tail), tail=="" if it all fits."""
     import re
 
-    tokens = re.findall(r"\S+\s*", text)  # words with their trailing whitespace
+    tokens = re.findall(r"\S+\s*", text)  # words with trailing whitespace
     if len(tokens) <= 1:
         return text, ""
     if d.text_height(text, font, width, wrap=True) <= max_h:
         return text, ""
-    # wrapped height is monotonic in the prefix length → binary-search the
-    # largest whole-word prefix that fits (floor of 1 token = forced progress).
+    # wrapped height is monotonic in prefix length → binary-search the largest prefix that fits
     lo, hi, best = 1, len(tokens) - 1, 1
     while lo <= hi:
         mid = (lo + hi) // 2
@@ -734,8 +682,7 @@ def _draw_descriptive_table(
     cw = lay["cw"]
     body_bottom = A4_H_MM - d.mb - REPORT_FOOTER_MM  # reserve the footer band
     y = _draw_title_bar(d, x0, y, lay["title"])
-    # A pure narrative report (histopathology, biopsy, free-text imaging) has no
-    # organ/finding columns — skip the column header band entirely.
+    # a pure narrative report has no organ/finding columns — skip the header band
     narrative = lay.get("narrative")
     th_h = 7.0
     thf = _font(7, bold=True, spacing_px=0.3)
@@ -766,10 +713,8 @@ def _draw_descriptive_table(
         row = rows[i]
         rh = row["h"]
         if row["kind"] == "narrative" and y + rh > body_bottom:
-            # An oversized narrative paragraph (histopathology / biopsy free text)
-            # is a single row and cannot rely on the row-level page break — split
-            # it at a word boundary: draw what fits here, hand the rest back as a
-            # new narrative row so it continues on the next page.
+            # an oversized narrative paragraph can't rely on the row-level page break —
+            # split at a word boundary and continue the rest on the next page
             avail = body_bottom - y - 3
             line_h = d.text_height("Xg", find_f, d.content_w - 6, wrap=False)
             if avail < line_h and i > 0:
@@ -794,8 +739,7 @@ def _draw_descriptive_table(
                 th = d.text_height(tail, find_f, d.content_w - 6)
                 rest = [{"kind": "narrative", "text": tail, "h": th + 3}]
                 return y, rest + list(rows[i + 1 :])
-            # the whole paragraph fits in the remaining space after all — fall
-            # through and draw it as a normal narrative row.
+            # else the whole paragraph fits after all — fall through to draw as a normal row
         elif y + rh > body_bottom and i > 0:
             break
         if row["kind"] == "narrative":
@@ -862,8 +806,7 @@ def _draw_descriptive_table(
 
 
 def _measure_qual(d: Doc, con, item, sex: str | None, receipt) -> dict:
-    """Layout for a qualitative serology/immunology report: TEST | RESULT |
-    REFERENCE. No unit column; result is polarity-coloured."""
+    """Layout for a qualitative serology/immunology report: TEST | RESULT | REFERENCE; result is polarity-coloured."""
     head, title = _head_title(con, item)
     cw = {
         "test": d.content_w * 0.42,
@@ -884,13 +827,8 @@ def _measure_qual(d: Doc, con, item, sex: str | None, receipt) -> dict:
         if pt == "H":
             rows.append({"kind": "subhead", "text": name, "h": 5.2})
             continue
-        # 'L' rows are legacy static "legend/interpretation" lines carried over from
-        # the VB6 catalog (e.g. Typhidot's "IgG Positive only:", Mantoux's
-        # "INTERPRETATION:"). They are never fillable — the worklist shows them
-        # read-only — and the explanatory text that once followed each label did NOT
-        # survive the catalog migration, so they printed as orphan half-lines under
-        # the result table. Drop them: a real interpretation belongs in the test's
-        # method note or the descriptive INTERPRETATION block, not as bare fragments.
+        # 'L' rows are legacy static legend lines from the VB6 catalog whose explanatory
+        # text didn't survive migration — drop them (real interpretation goes in the method note / INTERPRETATION block)
         if pt == "L":
             continue
         if not name:
@@ -1037,8 +975,7 @@ def _draw_qual_table(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, lis
 
 
 def _measure_blood_bank(d: Doc, con, item, sex: str | None, receipt) -> dict:
-    """Blood-bank report (group / cross-match / Coombs): TEST | RESULT only — no
-    reference column (standard practice). Result is polarity-coloured."""
+    """Blood-bank report (group/cross-match/Coombs): TEST | RESULT only, no reference column; result is polarity-coloured."""
     head, title = _head_title(con, item)
     cw = {"test": d.content_w * 0.55, "result": d.content_w * 0.45}
     name_f = _font(8.6)
@@ -1053,8 +990,7 @@ def _measure_blood_bank(d: Doc, con, item, sex: str | None, receipt) -> dict:
         if pt == "H":
             rows.append({"kind": "subhead", "text": name, "h": 5.2})
             continue
-        # Drop legacy static 'L' legend rows (see _measure_qual). On blood-bank
-        # reports these were cross-match placeholder dashes ("-") — pure noise.
+        # drop legacy 'L' legend rows (see _measure_qual); here they were placeholder dashes
         if pt == "L":
             continue
         if not name:
@@ -1162,8 +1098,7 @@ def _draw_blood_bank(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, lis
             wrap=True,
         )
         d.rect(x0 + cw["test"], y, cw["result"], rh, BORDER, 1)
-        # blood group / Rh are identity, not pathology — never colour them; only the
-        # cross-match / Coombs verdict gets a polarity cue (Not Compatible = red).
+        # blood group/Rh are identity, not pathology — never coloured; only cross-match/Coombs gets a polarity cue
         nm = row["name"].lower()
         neutral = "group" in nm or "rh" in nm
         col = INK if neutral else (_polarity(row["value"]) or INK)
@@ -1201,11 +1136,7 @@ def _draw_value(
     arrow = R._flag_arrow(value, flag)
     s = str(value)
     if not arrow:
-        # Wrap so a long descriptive value (ultrasound/x-ray finding, a sentence
-        # of serology comment) flows onto multiple lines inside the cell instead
-        # of overflowing and clipping on both sides. Short numeric values are
-        # unaffected — they stay on one centred line. The 1mm inset keeps wrapped
-        # text off the cell borders.
+        # wrap long descriptive values instead of clipping; short values stay on one centred line
         d.text(
             x + 1,
             y,
@@ -1258,8 +1189,7 @@ def _fmt_one(iso: str | None) -> str:
 
 
 def _draw_conclusion(d: Doc, lay: dict, x0: float, y: float) -> float:
-    """Impression / Interpretation block below the table (imaging, molecular,
-    serology). Reads receipt_items.conclusion; emphasised with an accent bar."""
+    """Impression/Interpretation block below the table; reads receipt_items.conclusion, emphasised with an accent bar."""
     item = lay["item"]
     concl = ((item["conclusion"] if "conclusion" in item.keys() else "") or "").strip()
     prev = lay.get("prev_impression")
@@ -1354,8 +1284,7 @@ def _draw_blocks_after_table(d: Doc, lay: dict, x0: float, y: float) -> float:
         y += 2.5
         text = f"Method / Comments: {note}"
         mf = _font(7.5)
-        # measure the real wrapped height and ADVANCE y past it — otherwise the block's
-        # reported height is short by the note and the next packed test overlaps it.
+        # advance y past the real wrapped height, or the next packed test overlaps this block
         mh = d.text_height(text, mf, d.content_w, wrap=True)
         d.text(
             x0,
@@ -1404,8 +1333,7 @@ _PACK_GAP_MM = 5.0
 
 
 def _after_height(lay) -> float:
-    """Height (mm) of the conclusion/remarks/method blocks drawn below a test table,
-    measured on a throwaway buffer (0 for a culture layout, which has none)."""
+    """Height (mm) of the conclusion/remarks/method blocks below a test table, measured on a throwaway buffer."""
     if "item" not in lay:  # culture layouts carry no after-table blocks
         return 0.0
     tmp = Doc(margin_mm=(8, 8, 8, 8), measure=True)
@@ -1418,13 +1346,7 @@ def _after_height(lay) -> float:
 
 
 def _block_height(con, kind, lay) -> tuple[float, bool, float]:
-    """Measure one test block on a throwaway buffer, in a SINGLE draw pass. Returns
-    ``(height_mm, spans_multiple_pages, after_blocks_height_mm)`` — the block's intrinsic
-    height (title bar + table + any conclusion/remarks/method blocks, or the whole
-    culture block), whether it overflows one fresh page, and the height of just the
-    trailing conclusion/remarks/method blocks (needed to decide, when a long table
-    spills, whether those trailing blocks still fit). Row heights are absolute mm, so
-    the figures are independent of where the block is finally placed."""
+    """Measure one test block on a throwaway buffer; returns (height_mm, spans_multiple_pages, after_blocks_height_mm)."""
     tmp = Doc(margin_mm=(8, 8, 8, 8), measure=True)
     y0 = tmp.mt
     page_bottom = A4_H_MM - tmp.mb - REPORT_FOOTER_MM
@@ -1445,9 +1367,7 @@ def _block_height(con, kind, lay) -> tuple[float, bool, float]:
 
 
 def _measure_blocks(d: Doc, con, items, sex, r) -> list:
-    """Build ``(kind, layout, height_mm, spans_multiple_pages, after_blocks_height)``
-    for each receipt item, ready for the packing pass. Everything is measured ONCE
-    here so the two pagination passes (count + real) do no extra measurement."""
+    """Build (kind, layout, height_mm, spans_multiple_pages, after_blocks_height) per item, measured once for both pagination passes."""
     blocks = []
     for kind, lay in _build_layouts(d, con, items, sex, r):
         h, multipage, after_h = _block_height(con, kind, lay)
@@ -1458,17 +1378,7 @@ def _measure_blocks(d: Doc, con, items, sex, r) -> list:
 def _paginate_report(
     d: Doc, con, blocks, *, pack: bool, total_pages, header_fn, footer_fn, empty_msg
 ) -> int:
-    """Single source of truth for report pagination + drawing. Walks the pre-measured
-    blocks in receipt order and, when ``pack`` is True, stacks as many test blocks onto a
-    page as fit (first-fit) to save paper: a block that does not fit in the space left
-    starts a fresh page, and a block taller than a page spills via the per-table
-    remaining-rows path. When ``pack`` is False every test starts its own page (the 'one
-    test per page' option). ``header_fn(d) -> body_top_y`` paints the page header and
-    returns the first content y; ``footer_fn(d, page_no, total)`` paints the footer (a
-    no-op for the plain letterhead-free copy). Returns the total page count.
-
-    Run once against a throwaway Doc to learn the page count, then again against the real
-    Doc with that ``total_pages`` so every footer's 'X of Y' agrees."""
+    """Paginate + draw pre-measured blocks (packed onto pages when ``pack``, else one test per page); returns total page count."""
     body_bottom = A4_H_MM - d.mb - REPORT_FOOTER_MM
     x0 = d.ml
     if not blocks:
@@ -1501,10 +1411,8 @@ def _paginate_report(
             lay2 = dict(lay)
             lay2["rows"] = remaining
             yy, remaining = draw(d, lay2, x0, body_top)
-        # culture draws its own remarks/notes inline; other kinds have conclusion/
-        # remarks/method blocks below the table. If the table spilled to the very
-        # bottom of its last page, move those blocks to a fresh page instead of
-        # painting them over the signature/footer band. (after_h precomputed once.)
+        # if the table spilled to the page bottom, move the after-table blocks (conclusion/
+        # remarks/method) to a fresh page instead of overprinting the signature/footer band
         if kind != "culture":
             if after_h and yy + after_h > body_bottom:
                 footer_fn(d, page_no, max(total_pages or page_no, page_no))
@@ -1521,11 +1429,7 @@ def _paginate_report(
 def _build_report_letterfree(
     con, r, items, sex, g, device, images, pack: bool = True, img_scale: float = 1.0
 ):
-    """Render the report with no clinic letterhead and no footer, so it can be printed
-    onto the lab's own pre-printed letterhead paper. When the whole report fits on one
-    page the content is vertically CENTRED — so it sits in the middle of the sheet,
-    clear of the paper's pre-printed letterhead, rather than jammed against the top; a
-    report that spans multiple pages packs from the top."""
+    """Render the report with no clinic letterhead/footer for pre-printed letterhead paper; vertically centres content when it fits on one page."""
     from . import report as R
 
     d = Doc(margin_mm=(8, 8, 8, 8), device=device, images=images, img_scale=img_scale)
@@ -1535,10 +1439,7 @@ def _build_report_letterfree(
         card_pad=(2.4, 5), gap=(1.6, 4), l_pt=6.6, v_pt=8.4, radius=5, border=BORDER
     )
 
-    # Vertically centre the content when it all fits on one page (single test, or
-    # several packed tests). Measure the patient-card height on a throwaway buffer and
-    # add the pre-measured block heights + inter-block gaps; centre within the drawable
-    # band so the content never dips past the (reserved) bottom margin.
+    # centre content vertically when it fits on one page; measured against the drawable band so it never dips past the bottom margin
     card_top = d.mt
     if blocks and not any(b[3] for b in blocks) and (pack or len(blocks) == 1):
         md = Doc(margin_mm=(8, 8, 8, 8), measure=True)
@@ -1590,10 +1491,7 @@ def build_report(
     pack: bool = True,
     img_scale: float = 1.0,
 ) -> bytes | list[QImage] | None:
-    """Render a patient's full report. With ``pack`` (default) several tests share a page
-    whenever they fit, to save paper; ``pack=False`` prints one test per page.
-    ``img_scale`` (< 1.0, images mode only) rasterises at a fraction of print resolution
-    for a faster on-screen preview — layout is identical, only the pixel buffer shrinks."""
+    """Render a patient's full report; ``pack`` shares tests per page to save paper, ``img_scale`` < 1.0 rasterises preview at reduced resolution."""
     from . import report as R
 
     g = R._g(con)
@@ -1623,12 +1521,7 @@ def build_report(
     def footer_fn(dd: Doc, page_no: int, total: int) -> None:
         _report_footer(dd, con, g, page_no, total, code)
 
-    # A throwaway pagination pass first to learn the true page count, so EVERY footer's
-    # "X of Y" agrees even when packing / a long test spilling changes the total; then
-    # the real render with that total. The count pass NEVER rasterises (no images/device)
-    # — that would double preview/print cost for zero benefit; page breaks come from the
-    # pre-measured absolute-mm block heights, and the footer total is clamped to
-    # ``max(total, page_no)`` so it can never read less than the current page.
+    # throwaway pagination pass first to learn the true page count (never rasterises), so every footer's "X of Y" agrees; then render for real
     tmp = Doc(margin_mm=(8, 8, 8, 8), measure=True)
     total_pages = _paginate_report(
         tmp,
@@ -1656,9 +1549,7 @@ def build_report(
 
 
 def _measure_culture(d: Doc, con, item) -> dict:
-    """Pre-measure a culture report into a row list (title + fixed fields + antibiotic
-    sensitivity grid + remarks) so it paginates like every other test kind. Row heights
-    are absolute mm; the draw side paints as many as fit and returns the rest."""
+    """Pre-measure a culture report into a row list (fields + sensitivity grid + remarks) with absolute-mm row heights, for pagination."""
     head = con.execute(
         "SELECT report_head, method_note FROM tests WHERE id=?", (item["test_id"],)
     ).fetchone()
@@ -1721,9 +1612,7 @@ def _measure_culture(d: Doc, con, item) -> dict:
 
 
 def _draw_culture(d: Doc, lay: dict, x0: float, y: float) -> tuple[float, list]:
-    """Draw the culture title bar + as many pre-measured rows as fit; returns
-    (y_after, remaining_rows) so an oversized antibiotic panel continues on the next
-    page (the title bar and the ANTIBIOTIC/SENSITIVITY header repeat)."""
+    """Draw the culture title bar + as many pre-measured rows as fit; returns (y_after, remaining_rows) for the next page."""
     body_bottom = A4_H_MM - d.mb - REPORT_FOOTER_MM
     d.fill_rect(x0, y, d.content_w, 6.5, TEAL)  # square edges, flush with the table
     d.rect(x0, y, d.content_w, 6.5, TEAL_DARK, 1)

@@ -1,9 +1,4 @@
-"""Tamper-evident audit trail (rolling SHA-256 hash chain).
-
-Each row carries a rolling hash of (prev_hash, at, user, action, detail), so any
-later edit/deletion is detectable. Writes never raise — on DB failure they fall
-back to an owner-only file so the gap stays visible.
-"""
+"""Tamper-evident audit trail (rolling SHA-256 hash chain). Writes never raise."""
 
 from __future__ import annotations
 
@@ -19,12 +14,11 @@ _ANCHOR_NAME = "audit_anchor"
 
 
 def _audit_fallback(username: str, action: str, detail: str, err: object) -> None:
-    """If the audit DB write fails, append to a local file so the gap is visible."""
+    """If the audit DB write fails, append to a local owner-only file."""
     try:
         p = data_dir() / "audit_fallback.log"
         with open(p, "a", encoding="utf-8") as fh:
             fh.write(f"{username}\t{action}\t{detail}\t(audit-db-error: {err})\n")
-        # this file can hold lab numbers / patient names — keep it owner-only
         with contextlib.suppress(OSError):
             os.chmod(p, 0o600)
     except OSError:
@@ -34,12 +28,9 @@ def _audit_fallback(username: str, action: str, detail: str, err: object) -> Non
 def log_audit(
     con: sqlite3.Connection, username: str, action: str, detail: str = ""
 ) -> None:
-    """Append one tamper-evident entry to the audit trail (shown on the admin Logs
-    page). Each row carries a rolling SHA-256 hash of (prev_hash, at, user, action,
-    detail), so any later edit/deletion is detectable. Never raises — recording an
-    action must never break the action itself; on DB failure it falls back to a file."""
-    # str() coercion keeps the "never raises" contract even when a caller passes a
-    # non-string (int/dict/object): slicing those directly would throw before the try.
+    """Append one tamper-evident, rolling-hash-chained entry to the audit trail.
+    Never raises — falls back to a file on DB failure."""
+    # str() coercion: a non-string caller arg would throw on slicing before the try
     username = str(username or "")[:64]
     action = str(action or "")[:64]
     detail = str(detail or "")[:500]
@@ -57,18 +48,15 @@ def log_audit(
             (ts, username, action, detail, chain),
         )
         con.commit()
-        _write_anchor(con)  # advance the off-DB tamper anchor (best-effort)
+        _write_anchor(con)
     except Exception as e:
-        # Must NEVER raise (the docstring contract): recording an action must not
-        # break the action. Catch *everything*, not just sqlite3.Error — a stale
-        # connection (e.g. after a restore replaced the DB file underneath it) can
-        # surface non-sqlite errors like MemoryError, which previously crashed close.
+        # catch everything, not just sqlite3.Error: a stale connection (e.g. after a
+        # restore swapped the DB file underneath it) can surface non-sqlite errors
         _audit_fallback(username, action, detail, e)
 
 
 def verify_audit_chain(con: sqlite3.Connection) -> tuple[bool, int | None]:
-    """Recompute the rolling hash chain. Returns (ok, first_bad_id|None). A
-    mismatch or a missing hash after chaining began means the log was altered."""
+    """Recompute the rolling hash chain. Returns (ok, first_bad_id|None)."""
     prev = ""
     started = False
     try:
@@ -101,9 +89,7 @@ def verify_audit_chain(con: sqlite3.Connection) -> tuple[bool, int | None]:
 
 
 def rechain_audit(con: sqlite3.Connection) -> None:
-    """Recompute the rolling hash chain over all current rows. Used after an
-    authorised purge (Clear old logs) so verify_audit_chain stays valid instead of
-    reporting tampering at the new first row."""
+    """Recompute the hash chain over all rows (after an authorised purge)."""
     rows = con.execute(
         "SELECT id, at, username, action, detail FROM audit_log ORDER BY id"
     ).fetchall()
@@ -123,22 +109,19 @@ def rechain_audit(con: sqlite3.Connection) -> None:
         con.execute("UPDATE audit_log SET hash=? WHERE id=?", (h, r["id"]))
         prev = h
     con.commit()
-    _write_anchor(con)  # an authorised purge legitimately shrinks the log
+    _write_anchor(con)
 
 
-# --------------------------------------------------------------------------
-# Off-DB tamper anchor (advisory). The hash chain alone can't detect a key-holder
-# who deletes recent rows and re-chains (the shortened chain re-verifies). Mirroring
-# the chain head + row count to an owner-only file OUTSIDE the DB lets us notice a
-# shrink. This is ADVISORY ONLY — it never raises, never blocks, and never reports a
-# hard "tampered"; a legitimate backup-restore simply reads "behind"/"no_anchor".
-# --------------------------------------------------------------------------
+# Off-DB tamper anchor (advisory only, never raises/blocks): the hash chain alone
+# can't detect a key-holder who deletes recent rows and re-chains, so the chain
+# head + row count is mirrored to an owner-only file outside the DB to notice a
+# shrink. A legitimate backup-restore just reads "behind"/"no_anchor".
 def _anchor_path() -> Path:
     return data_dir() / _ANCHOR_NAME
 
 
 def _chain_head(con: sqlite3.Connection) -> tuple[str, int]:
-    """Return (head_hash, row_count) for the current audit_log."""
+    """(head_hash, row_count) for the current audit_log."""
     n = con.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
     head_row = con.execute(
         "SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1"
@@ -148,8 +131,7 @@ def _chain_head(con: sqlite3.Connection) -> tuple[str, int]:
 
 
 def _write_anchor(con: sqlite3.Connection) -> None:
-    """Persist the chain head + row count to an owner-only file. Best-effort: suppress
-    everything so it can never break the audit write that called it."""
+    """Persist the chain head + row count to an owner-only file (best-effort)."""
     with contextlib.suppress(Exception):
         head, n = _chain_head(con)
         fd = os.open(str(_anchor_path()), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -158,14 +140,8 @@ def _write_anchor(con: sqlite3.Connection) -> None:
 
 
 def audit_anchor_status(con: sqlite3.Connection) -> str:
-    """Compare the live audit_log against the off-DB anchor. Advisory only:
-
-    - ``ok``        — head + count match (or only a benign DB read error occurred)
-    - ``behind``    — the DB has FEWER rows than the anchor (possible truncation), or
-                      the same count with a different head (possible in-place edit)
-    - ``ahead``     — the DB has MORE rows than the anchor (anchor merely stale)
-    - ``no_anchor`` — no anchor yet, or it is unreadable/garbled
-    """
+    """Compare the live audit_log against the off-DB anchor: "ok" | "behind"
+    (fewer rows or same count/different head) | "ahead" (anchor stale) | "no_anchor"."""
     try:
         raw = _anchor_path().read_text(encoding="utf-8").strip()
     except OSError:

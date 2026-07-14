@@ -39,7 +39,7 @@ class AccountsPage(QWidget):
         super().__init__()
         self.con = con
         self.user = user
-        self._due_ids: list = []  # parallel to due_table rows; filled by refresh_dues
+        self._due_ids: list = []  # parallel to due_table rows
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(12)
@@ -84,7 +84,6 @@ class AccountsPage(QWidget):
         grid.addWidget(self.c_net, 0, 2)
         grid.addWidget(self.c_due, 0, 3)
         lay.addLayout(grid)
-        # cash reconciliation: collected money broken down by payment method
         lay.addSpacing(8)
         lay.addWidget(field_label("Collection by payment method (paid in range)"))
         self.method_table = QTableWidget(0, 3)
@@ -92,9 +91,8 @@ class AccountsPage(QWidget):
             ["Method", "Receipts", "Collected (Rs.)"]
         )
         _mh = self.method_table.horizontalHeader()
-        _mh.setSectionResizeMode(0, QHeaderView.Stretch)  # Method grows
-        # fixed, generous widths for the numeric columns so the bold "Collected
-        # (Rs.)" header can never be clipped at the table's right edge
+        _mh.setSectionResizeMode(0, QHeaderView.Stretch)
+        # fixed widths so the numeric column headers are never clipped
         _mh.setSectionResizeMode(1, QHeaderView.Fixed)
         _mh.setSectionResizeMode(2, QHeaderView.Fixed)
         self.method_table.setColumnWidth(1, 100)
@@ -102,19 +100,14 @@ class AccountsPage(QWidget):
         self.method_table.verticalHeader().setVisible(False)
         self.method_table.setAlternatingRowColors(True)
         self.method_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        # Rule 2 (no dead-space caps): instead of a fixed maximumHeight (which made a
-        # lab with many payment methods scroll inside a short box while the page sat
-        # empty), the table is sized to its exact content after each refresh
-        # (_fit_method_table). The trailing stretch keeps a sparse table top-aligned;
-        # an unusually long one grows and the page scroll view takes over.
+        # sized to exact content in _fit_method_table, not a fixed max height
         self.method_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         lay.addWidget(self.method_table)
         lay.addStretch(1)
         return w
 
     def _fit_method_table(self) -> None:
-        """Pin the breakdown table to exactly its content height (header + rows) so
-        it never internally scrolls and never shows empty filler rows."""
+        """Pin the breakdown table to exactly its content height."""
         t = self.method_table
         h = t.horizontalHeader().height() + 2 * t.frameWidth()
         for r in range(t.rowCount()):
@@ -126,9 +119,7 @@ class AccountsPage(QWidget):
         cur = db.currency(c)
         f = self.from_date.date().toString("yyyy-MM-dd")
         t = self.to_date.date().toString("yyyy-MM-dd")
-        # income = cash actually booked in the period, from the LEDGER by event date,
-        # so a due collected / bill edited / voided later counts in the month it
-        # happened (not the month the bill was created). See db.income_between.
+        # income = cash booked in the period per the ledger (see db.income_between)
         income = db.income_between(c, f, t)
         expense = c.execute(
             "SELECT COALESCE(SUM(amount),0) FROM expenses WHERE date BETWEEN ? AND ?",
@@ -146,8 +137,6 @@ class AccountsPage(QWidget):
             f"font-size: 30px; font-weight: 800; color: {net_color};"
         )
         self.c_due.value_label.setText(money(due, cur))
-        # cash reconciliation by payment method — also ledger-based (same event-date
-        # basis as income above), joining each ledger entry to its receipt's method.
         methods = db.income_by_method(c, f, t)
         self.method_table.setRowCount(0)
         for m in methods:
@@ -168,7 +157,7 @@ class AccountsPage(QWidget):
         tot_amt = num_item(f"{sum(m['total'] for m in methods):,.0f}")
         tot_amt.setFont(fnt)
         self.method_table.setItem(i, 2, tot_amt)
-        self._fit_method_table()  # size to content (Rule 2: use space, no dead box)
+        self._fit_method_table()
 
     # ---- expenses ----
     def _expenses_tab(self) -> QWidget:
@@ -186,7 +175,6 @@ class AccountsPage(QWidget):
         self.exp_amount.setPrefix("Rs. ")
         add = QPushButton("Add expense")
         add.clicked.connect(self.add_expense)
-        # aligned label-over-input grid
         grid = QGridLayout()
         grid.setSpacing(6)
         grid.setColumnStretch(1, 2)
@@ -212,8 +200,7 @@ class AccountsPage(QWidget):
         return w
 
     def add_expense(self) -> None:
-        # defence-in-depth: the Accounts page is already level-4, but gate the money
-        # write at the action too (consistent with the other ledger mutations).
+        # defence-in-depth: gate the money write here too, not just at page level
         if not roles.can(self.user["role"], "record_expense"):
             QMessageBox.warning(
                 self, "Add expense", "You don't have permission to record expenses."
@@ -224,9 +211,7 @@ class AccountsPage(QWidget):
         date = self.exp_date.date().toString("yyyy-MM-dd")
         head = self.exp_head.text().strip()
         amount = self.exp_amount.value()
-        # Both rows (the expense + its ledger debit) must land together — wrap them in
-        # a single transaction so a mid-write failure can't leave the ledger unbalanced
-        # (an expenses row with no matching ledger debit, or vice-versa).
+        # expense + ledger debit must land together, atomically
         try:
             with self.con:
                 self.con.execute(
@@ -323,8 +308,7 @@ class AccountsPage(QWidget):
         self.recover_btn.setEnabled(False)
 
     def recover_due(self) -> None:
-        # use the actual selection, not currentRow (which survives a rebuild and
-        # would settle a different receipt than the one highlighted)
+        # use the actual selection, not currentRow (which survives a table rebuild)
         rid = selected_id(self.due_table, self._due_ids)
         if rid is None:
             return

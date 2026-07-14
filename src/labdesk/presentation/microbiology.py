@@ -122,8 +122,7 @@ class MicrobiologyPage(QWidget):
         return super().eventFilter(obj, event)
 
     def clear_selection(self) -> None:
-        # block signals so clearSelection() doesn't re-fire load_item (which would
-        # re-set current_item to the old row while currentRow() is still set).
+        # block signals so clearSelection() doesn't re-fire load_item
         self.table.blockSignals(True)
         self.table.clearSelection()
         self.table.setCurrentCell(-1, -1)
@@ -148,7 +147,6 @@ class MicrobiologyPage(QWidget):
             cb.addItem(r["value"])
         return cb
 
-    # ---------------------------------------------------------------
     def on_show(self) -> None:
         self.refresh_list()
 
@@ -189,8 +187,7 @@ class MicrobiologyPage(QWidget):
             "SELECT * FROM cultures WHERE receipt_item_id=?", (self.current_item,)
         ).fetchone()
         self.sens.setRowCount(0)
-        # reset every field first so a culture with no saved data never shows the
-        # previously-selected culture's values
+        # reset fields first so a culture with no saved data doesn't show stale values
         for w in (self.specimen, self.growth, self.gram, self.zn):
             w.setCurrentIndex(0)
         self.organism.clear()
@@ -234,8 +231,7 @@ class MicrobiologyPage(QWidget):
             toast_warn(self, "Microbiology", "Select a culture order first.")
             return
         c = self.con
-        # Read the culture form + sensitivity grid here; the DB writes + authorization
-        # + audit happen at the service boundary (results_svc.save_culture).
+        # DB writes + authorization + audit happen at results_svc.save_culture
         culture = {
             "specimen": self.specimen.currentText(),
             "growth": self.growth.currentText(),

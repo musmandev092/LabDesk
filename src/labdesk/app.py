@@ -21,15 +21,12 @@ from .presentation.main_window import MainWindow
 from .presentation.setup_wizard import SetupWizard
 from .presentation.style import PRODUCT_NAME, apply_theme
 
-# product icon (the microscope logo) — shown in the title bar + taskbar/dock
+# product icon — shown in the title bar and taskbar/dock
 APP_ICON = package_root() / "assets" / "app_icon_256.png"
 
 
 def _selftest() -> bool:
-    """The headless self-test (no display/login, builds the window as admin) is a
-    DEV/CI affordance only. It is honoured solely when running from source — in a
-    packaged release binary LABDESK_SELFTEST is ignored, so it can never be used to
-    bypass database unlock, login, or licensing on a shipped build."""
+    """Headless self-test, honoured only when running from source (never in a packaged build)."""
     return (
         os.environ.get("LABDESK_SELFTEST") == "1" and not licensing.is_packaged_build()
     )
@@ -51,15 +48,7 @@ def _instance_paths() -> tuple[str, str]:
 
 
 def _acquire_single_instance():
-    """Allow only one LabDesk window per user via an advisory fcntl lock (no
-    QtNetwork dependency). Returns ``(lock_file, activation_socket)`` when this
-    process is the primary, or ``(None, None)`` when another instance already holds
-    the lock. The kernel releases the lock automatically on exit — including a crash
-    — so there is no stale-lock cleanup to do.
-
-    The primary also opens a tiny Unix-domain "activation" socket: a second launch
-    connects to it to ask the primary to raise its window (see
-    ``_ping_running_instance`` / ``_install_activation_listener``)."""
+    """Advisory fcntl lock for single-instance; returns (lock_file, activation_socket) or (None, None)."""
     import fcntl
     import socket
 
@@ -72,12 +61,11 @@ def _acquire_single_instance():
     with contextlib.suppress(OSError):
         f.write(str(os.getpid()))
         f.flush()
-    # We are the primary — open the activation listener (best-effort; the lock alone
-    # still enforces single-instance even if this socket can't be created).
+    # primary: open the activation listener (best-effort)
     srv = None
     try:
         with contextlib.suppress(OSError):
-            os.unlink(sock_path)  # clear a stale socket from a previous run
+            os.unlink(sock_path)  # clear stale socket
         srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         srv.bind(sock_path)
         srv.listen(1)
@@ -88,8 +76,7 @@ def _acquire_single_instance():
 
 
 def _ping_running_instance() -> bool:
-    """Ask the already-running primary to raise its window. Returns True if the
-    primary acknowledged (so a second launch knows the app really is up)."""
+    """Ask the already-running primary to raise its window; True if it acknowledged."""
     import socket
 
     _lock_path, sock_path = _instance_paths()
@@ -105,10 +92,7 @@ def _ping_running_instance() -> bool:
 
 
 def _install_activation_listener(app, win) -> None:
-    """Wire the primary's activation socket into the Qt loop: when a second launch
-    connects, bring this window to the front (un-minimise + raise + request focus).
-    On Wayland the compositor may not steal focus, but the window is un-minimised and
-    flagged for attention, which is the portable best-effort."""
+    """When a second launch connects to the activation socket, bring this window to front."""
     srv = getattr(app, "_labdesk_activation_srv", None)
     if srv is None:
         return
@@ -122,9 +106,7 @@ def _install_activation_listener(app, win) -> None:
             with contextlib.suppress(OSError):
                 conn.recv(16)
                 conn.close()
-        # Un-minimise WITHOUT dropping a maximised/full-screen state. showNormal()
-        # would force the window back to its small windowed size — the reported
-        # shrink bug. Clearing only the Minimized flag preserves Maximized.
+        # clear only Minimized so a maximised window isn't shrunk (showNormal() would)
         win.setWindowState(win.windowState() & ~Qt.WindowState.WindowMinimized)
         win.show()
         win.raise_()
@@ -135,19 +117,14 @@ def _install_activation_listener(app, win) -> None:
 
 
 def _integrate_appimage(con) -> str | None:
-    """When launched as an AppImage, register a menu entry + logo on first run
-    (so it appears in the apps menu/dock) and detect version changes. Returns a
-    one-line notice ('installed' / 'updated to vX') or None. No-op for dev runs."""
+    """AppImage first-run: register menu entry + logo, detect version changes. No-op otherwise."""
     appimage = os.environ.get("APPIMAGE")
     if not appimage or not Path(appimage).exists():
         return None
     prev_ver = db.get_setting(con, "installed_version", "")
     apps = Path.home() / ".local/share/applications"
     icons = Path.home() / ".local/share/icons/hicolor/256x256/apps"
-    # The .desktop filename MUST match the Wayland app_id (set via
-    # setDesktopFileName('LabDesk')) and the X11 StartupWMClass, or KDE/GNOME on
-    # Wayland can't tie the running window to this launcher — the icon falls back to
-    # a generic one and the app can't be pinned. Hence 'LabDesk.desktop', not lowercase.
+    # filename must match the Wayland app_id / X11 StartupWMClass, hence not lowercase
     desktop = apps / "LabDesk.desktop"
     try:
         apps.mkdir(parents=True, exist_ok=True)
@@ -166,9 +143,7 @@ def _integrate_appimage(con) -> str | None:
         # drop the pre-1.0 lowercase entry so the launcher doesn't show a duplicate
         with contextlib.suppress(OSError):
             (apps / "labdesk.desktop").unlink()
-        # Refreshing the menu/icon caches can take 1-3s — do it in a daemon thread so
-        # it never delays the first window. Fire-and-forget; run every refresher so
-        # the entry/icon appear without a relogin on BOTH GNOME/GTK and KDE Plasma.
+        # refresh caches in a daemon thread (fire-and-forget) so it doesn't delay startup
         import threading
 
         def _refresh_caches():
@@ -187,9 +162,6 @@ def _integrate_appimage(con) -> str | None:
         return None
     db.set_setting(con, "installed_version", db.APP_VERSION)
     if not prev_ver:
-        # We only add LabDesk to the applications menu; pinning to a dock/taskbar is
-        # left to the user (an app can't portably pin itself without risking the
-        # panel config). Open it from the menu and pin it yourself if you like.
         return (
             "LabDesk has been added to your applications menu.\n"
             "Open it from there — and pin it to your taskbar or dock yourself if you like."
@@ -200,8 +172,7 @@ def _integrate_appimage(con) -> str | None:
 
 
 def _setup_crash_logging() -> None:
-    """Log uncaught exceptions to a rotating file under the data dir and show the
-    user where to find the details, instead of the app vanishing silently."""
+    """Log uncaught exceptions to a rotating file under the data dir."""
     from logging.handlers import RotatingFileHandler
 
     logdir = db.data_dir() / "logs"
@@ -239,9 +210,7 @@ def _setup_crash_logging() -> None:
 
 
 def _db_damaged_notice(exc: Exception) -> None:
-    """Show a clear, recoverable message when the database can't be opened/read
-    (corruption, or a key that decrypts the header but not all pages) instead of the
-    generic crash dialog. Points the user at their backups + the Restore action."""
+    """Show a recoverable message pointing at backups when the database can't be opened/read."""
     logging.getLogger("labdesk").error("Database open/read failed: %r", exc)
     if _selftest():
         return
@@ -261,10 +230,7 @@ def _db_damaged_notice(exc: Exception) -> None:
 
 
 def _auto_backup_on_launch(con) -> None:
-    """Once a day, write an automatic encrypted backup to the lab's chosen folder
-    (or the ~/Documents/LabDesk Backups fallback when that folder — e.g. a USB stick
-    or network share — is unavailable). Throttled by last_auto_backup_date so it runs
-    at most once per calendar day no matter how often LabDesk is opened."""
+    """Write an automatic encrypted backup at most once per calendar day."""
     if db.get_setting(con, "auto_backup", "1") != "1":
         return
     import datetime
@@ -289,12 +255,7 @@ def _auto_backup_on_launch(con) -> None:
         db.log_audit(con, "system", "backup_created", detail)
 
 
-# The UI is laid out in px for roughly a 1080p screen. On smaller panels (e.g. a
-# 1366x768 laptop, where the desktop bar leaves ~731-740 px tall) it overflows and
-# everything needs scrolling. We auto-shrink with QT_SCALE_FACTOR so the whole
-# window fits — the same lever a user would set by hand — instead of asking them to.
-# The target height (860) is calibrated so a 1366x768 screen lands on 0.85, which
-# fits cleanly on that hardware; smaller screens step down from there.
+# UI is laid out for ~1080p; smaller screens auto-shrink via QT_SCALE_FACTOR (see below)
 _FIT_NEED_W = 1280
 _FIT_NEED_H = 860
 
@@ -302,9 +263,7 @@ _FIT_NEED_H = 860
 def _fit_scale(
     avail_w: int, avail_h: int, need_w: int = _FIT_NEED_W, need_h: int = _FIT_NEED_H
 ) -> float | None:
-    """Largest scale ≤ 1.0 (in 0.05 steps, floored at 0.70 so text stays legible)
-    that fits the UI's preferred size into the screen's available area. Returns None
-    when no scaling is needed (the UI already fits). E.g. 1366x768 → 0.85."""
+    """Largest scale <= 1.0 (0.05 steps, floor 0.70) that fits the UI; None if it already fits."""
     if avail_w <= 0 or avail_h <= 0:
         return None
     s = min(avail_w / need_w, avail_h / need_h, 1.0)
@@ -313,9 +272,7 @@ def _fit_scale(
 
 
 def _reexec_self() -> None:
-    """Restart this process in place (so a freshly-set QT_SCALE_FACTOR is read at
-    QApplication construction). Handles the dev `python -m labdesk`, the installed
-    gui-script, and the compiled binary."""
+    """Restart this process in place so a freshly-set QT_SCALE_FACTOR is read at startup."""
     exe = sys.argv[0]
     if os.path.basename(exe) == "__main__.py":  # python -m labdesk (dev)
         os.execv(sys.executable, [sys.executable, "-m", "labdesk", *sys.argv[1:]])
@@ -326,9 +283,7 @@ def _reexec_self() -> None:
 
 
 def _maybe_rescale_for_screen(app) -> None:
-    """If the primary screen is too small for the UI, set QT_SCALE_FACTOR and re-exec
-    once so the whole window fits without scrolling. No-op when it already fits, when
-    the user set a scale explicitly, or after we've already re-exec'd (no loop)."""
+    """If the primary screen is too small, set QT_SCALE_FACTOR and re-exec once."""
     if _selftest():
         return
     if os.environ.get("QT_SCALE_FACTOR") or os.environ.get("QT_SCREEN_SCALE_FACTORS"):
@@ -364,9 +319,7 @@ def _maybe_rescale_for_screen(app) -> None:
 
 def run(argv: list[str]) -> int:
     _setup_crash_logging()
-    # High-DPI: pass the OS's exact fractional scale through (e.g. 150% -> 1.5) so a
-    # window never gets rounded UP past the screen. This is already the Qt 6 default;
-    # setting it explicitly is portable and must happen before QApplication is built.
+    # pass the OS's exact fractional DPI scale through; must happen before QApplication
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QGuiApplication
 
@@ -374,9 +327,7 @@ def run(argv: list[str]) -> int:
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
     app = QApplication(argv)
-    # Fit the UI to small screens (e.g. 1366x768) by auto-setting QT_SCALE_FACTOR and
-    # re-exec'ing once. Done before anything else (incl. the single-instance lock) so
-    # the restart is clean. On a screen that already fits, this is a no-op.
+    # done before the single-instance lock so the restart is clean
     _maybe_rescale_for_screen(app)
     app.setApplicationName(PRODUCT_NAME)
     app.setOrganizationName(PRODUCT_NAME)
@@ -386,21 +337,15 @@ def run(argv: list[str]) -> int:
         app.setWindowIcon(QIcon(str(APP_ICON)))
     apply_theme(app, "light")  # splash is light; the saved theme is applied below
 
-    # Load the report font once here on the main thread; PDF building runs on a
-    # worker thread and must not touch QFontDatabase off-thread.
+    # load the report font here (main thread); PDF worker thread must not touch QFontDatabase
     from . import render
 
     render.preload()
 
-    # Single instance: if LabDesk is already open, raise that window and tell the
-    # user, instead of silently doing nothing.
     if not _selftest():
         lock, activation_srv = _acquire_single_instance()
         if lock is None:
-            # Nudge the running instance to raise its window IF it has one. We can't
-            # claim it was raised — the first instance may still be at the unlock/login
-            # dialog (it starts listening before its main window exists) — so keep the
-            # message neutral rather than asserting a front-raise that didn't happen.
+            # nudge the running instance; keep the message neutral since it may still be at login
             _ping_running_instance()
             QMessageBox.information(
                 None,
@@ -413,9 +358,7 @@ def run(argv: list[str]) -> int:
         app._labdesk_lock = lock  # keep the lock file alive for the run
         app._labdesk_activation_srv = activation_srv
 
-    # Brief splash so the pre-unlock startup shows feedback instead of a blank window;
-    # it's closed before the password dialog. (The one-time post-update catalog sync
-    # runs later, inside init_db, after the splash is already gone.)
+    # brief splash for pre-unlock feedback; closed before the password dialog
     splash = None
     if not _selftest() and APP_ICON.exists():
         from PySide6.QtGui import QPixmap
@@ -432,10 +375,7 @@ def run(argv: list[str]) -> int:
         app.processEvents()
 
     # ---- node-locked licensing (machine activation) ---------------------------
-    # Verify activation BEFORE touching the database, so a fresh install can offer to
-    # restore a backup or start anew only once the copy is licensed for this machine.
-    # Activation needs no DB (it reads license.lic from the data dir). Gated by
-    # licensing.enforced() so dev runs and the self-test are never blocked.
+    # verify activation before touching the DB; gated so dev runs / self-test aren't blocked
     license_just_activated = False
     if not _selftest() and licensing.enforced():
         if splash is not None:
@@ -451,10 +391,6 @@ def run(argv: list[str]) -> int:
             license_just_activated = True
 
     # ---- database unlock (encrypted at rest with SQLCipher) -------------------
-    # The live DB is encrypted; obtain the passphrase BEFORE opening it. On a fresh
-    # install (post-activation) the lab chooses to start a new lab or restore from a
-    # backup; a legacy plaintext DB is migrated; otherwise we unlock. Headless
-    # self-test takes the key from LABDESK_DB_KEY in the environment.
     if not _selftest():
         if splash is not None:
             splash.close()  # don't leave the splash on top of the password dialog
@@ -514,9 +450,7 @@ def run(argv: list[str]) -> int:
             if dlg.remember:
                 keyvault.store_key(dlg.passphrase)
         else:
-            # Auto-unlock from the system wallet if a saved password is there and still
-            # valid; otherwise prompt. A stale saved key (after a password change) is
-            # cleared so it doesn't get retried forever.
+            # auto-unlock from the system wallet if valid; clear a stale saved key
             saved = keyvault.load_key()
             if saved and db.verify_passphrase(saved):
                 db.unlock(saved)
@@ -543,9 +477,7 @@ def run(argv: list[str]) -> int:
         if splash is not None:
             splash.close()
         _db_damaged_notice(e)
-        # Offer an in-app restore right here. The Settings → Restore path needs a
-        # running MainWindow, which can't be built on a broken DB, so without this the
-        # user dead-ends on every relaunch with no way back in but deleting the file.
+        # offer an in-app restore here since Settings -> Restore needs a running MainWindow
         from .db.backup import install_restored
         from .presentation.unlock import RestoreBackupDialog
 
@@ -569,10 +501,7 @@ def run(argv: list[str]) -> int:
             _db_damaged_notice(e2)
             return 1
 
-    # Recovery: `labdesk --unlock` clears any brute-force lockout so a locked-out
-    # admin can sign in again without waiting out the window. It runs only after the
-    # normal DB-password unlock above, so only someone who already holds the database
-    # password (the lab owner / vendor) can use it. Then it exits.
+    # `labdesk --unlock` clears any brute-force lockout; runs only after DB unlock above
     if "--unlock" in argv:
         n = db.clear_lockouts(con)
         db.log_audit(
@@ -586,13 +515,7 @@ def run(argv: list[str]) -> int:
         )
         return 0
 
-    # Automatic backups (once a day on launch + on exit) are written to the lab's
-    # chosen folder, with a Documents fallback — see _auto_backup_on_launch below and
-    # MainWindow._auto_backup_on_exit. A manual "Back up now" remains in Settings.
-
-    # Desktop integration (menu entry + logo) is done at install time by
-    # install.sh for the installed launcher; this runtime hook stays a no-op
-    # there and only fires for a legacy AppImage launch.
+    # desktop integration is done at install time by install.sh; this only fires for AppImage
     notice = _integrate_appimage(con)
     # apply the saved theme now that we can read settings (splash was light)
     apply_theme(app, db.get_setting(con, "theme", "light"))
@@ -601,8 +524,7 @@ def run(argv: list[str]) -> int:
     if notice and not _selftest():
         QMessageBox.information(None, "LabDesk", notice)
 
-    # Self-test: build the main window for an admin user, visit every page, exit.
-    # Used to validate a packaged build launches without a real display/login.
+    # self-test: build the main window for an admin user, visit every page, exit
     if _selftest():
         user = con.execute("SELECT * FROM users WHERE username='admin'").fetchone()
         win = MainWindow(con, user)
@@ -613,20 +535,16 @@ def run(argv: list[str]) -> int:
         print(f"SELFTEST OK — {win.stack.count()} pages, {n} tests in catalog")
         return 0
 
-    # Licensing was verified before the DB step (above, so a fresh install could offer
-    # restore-vs-new only once activated). Record the activation now that we have a
-    # connection for the audit trail.
     if license_just_activated:
         db.log_audit(con, "system", "license_activated", licensing.current_code())
 
-    # First-run setup wizard (white-label: each lab enters its own branding).
+    # first-run setup wizard (white-label: each lab enters its own branding)
     if db.get_setting(con, "configured", "0") != "1":
         wizard = SetupWizard(con)
         if wizard.exec() != QDialog.Accepted:
             return 0
 
-    # Automatic once-a-day backup (in addition to the on-exit one). Runs after the
-    # wizard so the lab's chosen backup folder is already set on first run.
+    # runs after the wizard so the lab's chosen backup folder is already set
     _auto_backup_on_launch(con)
 
     login = LoginDialog(con)
@@ -638,10 +556,7 @@ def run(argv: list[str]) -> int:
     except Exception as e:  # damaged DB can fail while a page reads it on build
         _db_damaged_notice(e)
         return 1
-    # Maximize so a data-dense table app uses the whole screen; the content now
-    # reflows (wrapping toolbar) and scrolls, so this fits every resolution.
-    win.showMaximized()
-    # Now that the window exists, let a second launch raise it (see run()'s lock check).
+    win.showMaximized()  # data-dense table app; content reflows/scrolls to fit
     _install_activation_listener(app, win)
 
     return app.exec()

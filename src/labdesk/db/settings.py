@@ -25,9 +25,7 @@ def set_setting(con: sqlite3.Connection, key: str, value: str) -> None:
 
 
 def set_settings(con: sqlite3.Connection, mapping) -> None:
-    """Upsert many settings in ONE transaction (a single commit). set_setting()
-    fsyncs on every call, so saving a whole form key-by-key did ~30 disk syncs and
-    visibly froze the UI; this writes them all at once."""
+    """Upsert many settings in one transaction/commit (avoids an fsync per key)."""
     items = list(mapping.items())
     if not items:
         return

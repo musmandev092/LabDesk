@@ -13,15 +13,10 @@ from .image import autocrop_image
 from .primitives import Doc
 
 
-# ---------------------------------------------------------------------------
-# Header: keep the lab name from colliding with the centred logo
-# ---------------------------------------------------------------------------
 def centered_logo_left(
     d: Doc, logo_path: str, x0: float, h_px: float = 48
 ) -> float | None:
-    """X (mm) where a logo of height `h_px`, centred across the content width,
-    will begin — or None if there is no usable logo. Mirrors Doc.image()'s sizing
-    so the title can be laid out to stop before it."""
+    """X (mm) where a logo of height `h_px`, centred across the content width, begins — or None if no usable logo."""
     p = (logo_path or "").strip()
     if not p or not Path(p).exists():
         return None
@@ -37,8 +32,7 @@ def centered_logo_left(
 def fit_lab_name_font(
     d: Doc, text: str, base_pt: float, avail_mm: float, *, min_pt: float = 10.0
 ):
-    """A bold title font shrunk just enough that `text` fits within `avail_mm`
-    on one line (down to `min_pt`), so a long lab name never overruns the logo."""
+    """Bold title font shrunk just enough that `text` fits within `avail_mm` on one line (down to `min_pt`)."""
     avail_dev = mm(max(0.0, avail_mm))
     pt = base_pt
     f = _font(pt, bold=True, spacing_px=-0.5)
@@ -48,15 +42,10 @@ def fit_lab_name_font(
     return f
 
 
-# ---------------------------------------------------------------------------
-# Shared: letterhead + patient card
-# ---------------------------------------------------------------------------
 def _wrap_value(
     fm: QFontMetricsF, text: str, max_px: float, max_lines: int = 2
 ) -> list[str]:
-    """Greedy word-wrap `text` to fit `max_px` device units across up to `max_lines`
-    lines. If content still overflows, the last line is elided with '…' so long
-    values (e.g. a full specimen) are shown completely instead of cut to one line."""
+    """Greedy word-wrap `text` to `max_px` across up to `max_lines`; elides the last line with '…' on overflow."""
     words = (text or "").split()
     if not words:
         return ["—"]
@@ -113,15 +102,14 @@ def _patient_card(
     l_h = d.text_height("X", l_font, col_w, wrap=False)
     v_h = d.text_height("X", v_font, col_w, wrap=False)
     line_gap = 0.3
-    # let a long value spill into the column gap (not the last column) so names
-    # like "Muhammad Usman Khan" don't clip, matching the CSS grid overflow
+    # long values spill into the column gap (not last column) so names don't clip
     wrapped = []
     for i, (lbl, val) in enumerate(pairs):
         c = i % cols
         vw = col_w + (gh - 1) if c < cols - 1 else col_w
         lines = _wrap_value(vfm, str(val) if val else "", mm(vw), max_value_lines)
         wrapped.append((lbl, lines, vw))
-    # per-row height adapts to the tallest (most-wrapped) value in that row
+    # row height adapts to the tallest (most-wrapped) value in that row
     row_h = []
     for r in range(rows):
         n = max(

@@ -1,8 +1,4 @@
-"""Returning-patient search / pick / history, split out of ReceptionPage.
-
-A mixin (runs on the composed ReceptionPage instance) — pure reorganisation,
-no behavior change.
-"""
+"""Returning-patient search / pick / history, split out of ReceptionPage."""
 
 from __future__ import annotations
 
@@ -29,10 +25,7 @@ class ReceptionPatientMixin:
             self.find_results.hide()
             return
         like = f"%{text}%"
-        # One row per patient. (A previous GROUP BY on phone collapsed family members
-        # who share a number into a single result, hiding the rest and causing
-        # duplicate records — patient rows aren't duplicated per visit, so no dedup
-        # is needed here.)
+        # one row per patient (no GROUP BY on phone — family members can share a number)
         rows = self.con.execute(
             """SELECT id,title,name,age,age_desc,sex,telephone,address,mr_no
                FROM patients

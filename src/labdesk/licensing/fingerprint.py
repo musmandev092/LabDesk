@@ -1,19 +1,4 @@
-"""Machine fingerprint for node-locked licensing.
-
-Collects up to three stable hardware/OS signals and returns them HASHED (so the
-raw machine identifiers never travel in the activation request or sit in the
-license file). The license records whichever signals were available at issue
-time; verification (in __init__.py) tolerates ONE of them changing — so swapping
-a disk or a network card doesn't lock the lab out, but copying the app to a
-different machine (where none match) is refused.
-
-Signals, in order of reliability on Linux:
-  * machine_id — /etc/machine-id (set at OS install; survives hardware changes,
-    needs no root). Primary anchor.
-  * mac        — first non-virtual, non-loopback NIC hardware address.
-  * disk       — root/first block-device serial, best-effort (may be empty
-    without privileges; simply omitted when unavailable).
-"""
+"""Machine fingerprint for node-locked licensing: hashed hardware/OS signals."""
 
 from __future__ import annotations
 
@@ -21,9 +6,7 @@ import contextlib
 import hashlib
 from pathlib import Path
 
-# Salt the hashes with an app-specific tag so a fingerprint can't be correlated
-# with the same machine's fingerprint in some other product, and bump-able if the
-# scheme ever changes.
+# App-specific salt so a fingerprint can't be correlated across products.
 _TAG = b"labdesk-fingerprint-v1|"
 
 
@@ -41,8 +24,7 @@ def _machine_id() -> str | None:
 
 
 def _primary_mac() -> str | None:
-    """First real NIC's MAC: skip loopback and virtual interfaces (docker/veth/
-    virbr/bridges), prefer ones backed by a physical device, deterministic order."""
+    """First real NIC's MAC, skipping loopback/virtual interfaces."""
     net = Path("/sys/class/net")
     if not net.is_dir():
         return None
@@ -76,9 +58,7 @@ def _primary_mac() -> str | None:
 
 
 def _disk_serial() -> str | None:
-    """Best-effort serial of a physical block device (no root needed when the
-    kernel exposes it under /sys). Returns None when nothing readable — the
-    fingerprint then just relies on machine_id + mac."""
+    """Best-effort serial of a physical block device."""
     blockdir = Path("/sys/block")
     if not blockdir.is_dir():
         return None
@@ -91,9 +71,6 @@ def _disk_serial() -> str | None:
 
     with contextlib.suppress(OSError):
         devs = [p.name for p in blockdir.iterdir() if not p.name.startswith(skip)]
-        # prefer NON-removable (internal) disks, then by name — so plugging in a USB
-        # drive that enumerates as 'sda' can't flip the machine signal and cause a
-        # spurious "wrong machine" licence lockout.
         for dev in sorted(devs, key=lambda d: (_removable(d), d)):
             for rel in ("device/serial", "device/wwid", "serial"):
                 with contextlib.suppress(OSError):
@@ -104,8 +81,7 @@ def _disk_serial() -> str | None:
 
 
 def collect_signals() -> dict[str, str]:
-    """Return {name: sha256hex} for every signal currently available on this
-    machine (omitting any that can't be read)."""
+    """Return {name: sha256hex} for every signal currently available on this machine."""
     raw = {
         "machine_id": _machine_id(),
         "mac": _primary_mac(),
@@ -115,9 +91,7 @@ def collect_signals() -> dict[str, str]:
 
 
 def fingerprint_code(signals: dict[str, str] | None = None) -> str:
-    """A short, human-friendly code for display/quick reference (NOT the binding
-    data — the request blob carries the full hashed signals). Grouped hyphen form,
-    e.g. LD-9F3A-2C71-B048-5E16."""
+    """Short, human-friendly code for display, e.g. LD-9F3A-2C71-B048-5E16."""
     sig = signals if signals is not None else collect_signals()
     joined = "|".join(f"{k}={sig[k]}" for k in sorted(sig))
     digest = hashlib.sha256(_TAG + b"code|" + joined.encode()).hexdigest().upper()

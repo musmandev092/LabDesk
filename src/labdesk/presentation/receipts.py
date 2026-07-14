@@ -66,23 +66,18 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
             b.clicked.connect(slot)
             return b
 
-        # receipt (bill) actions — available as soon as a saved receipt is selected
         self.prev_rcpt_btn = _btn("Preview receipt", self.preview_receipt)
         self.print_rcpt_btn = _btn("Print receipt", self.reprint)
         self.pdf_rcpt_btn = _btn("Save receipt PDF", self.save_receipt_pdf)
         self.wa_rcpt_btn = _btn("WhatsApp receipt", self.whatsapp_receipt)
-        # report actions — only once results are entered (report ready)
         self.prev_rpt_btn = _btn("Preview report", self.preview)
         self.print_rpt_btn = _btn("Print report", self.print_report)
-        # admin-only: a header/footer-free, page-centred copy for the lab's own
-        # pre-printed letterhead pad (added to the toolbar below only for admins).
+        # admin-only: a header/footer-free copy for the lab's own letterhead pad
         self.print_plain_btn = _btn("Print on letterhead", self.print_report_plain)
         self.pdf_rpt_btn = _btn("Save report PDF", self.save_report_pdf)
         self.wa_rpt_btn = _btn("WhatsApp report", self.whatsapp_report)
         self.verify_rpt_btn = _btn("Verify report", self.verify_report)
-        # Per-print, non-persisted paper-saving toggle: unchecked (default) packs
-        # several tests onto a shared page; checked prints one test per page.
-        # Read directly by ReceiptsOutputMixin at preview/print/save time.
+        # per-print, non-persisted paper-saving toggle; read by ReceiptsOutputMixin
         self.one_per_page_chk = QCheckBox("One test per page")
         self.pay_btn = _btn("Receive due", self.receive_due)
         self.deliver_btn = _btn("Mark delivered", self.mark_delivered)
@@ -102,9 +97,8 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
             self.wa_rcpt_btn,
         )
 
-        # FlowLayout so this 12-button action bar WRAPS to more rows on narrow
-        # windows instead of forcing a ~1870px minimum (which made the whole app
-        # unusable below ~2100px wide — wider than most laptop screens).
+        # FlowLayout wraps this action bar on narrow windows instead of forcing
+        # a ~1870px minimum width
         tb = FlowLayout(hspacing=8, vspacing=6)
         rcpt_lbl = QLabel("Receipt:")
         rcpt_lbl.setObjectName("muted")
@@ -120,9 +114,7 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
         tb.addWidget(rpt_lbl)
         for b in self._report_btns:
             tb.addWidget(b)
-        # visible to every role — a per-print choice, not an admin setting
         tb.addWidget(self.one_per_page_chk)
-        # the "Print on letterhead" plain copy is an admin-only action
         if can(self.user["role"], "manage_users"):
             tb.addWidget(self.print_plain_btn)
         else:
@@ -133,22 +125,19 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
         tb.addWidget(sep2)
         tb.addWidget(self.pay_btn)
         tb.addWidget(self.deliver_btn)
-        # editing the bill (discount/paid/method) and voiding are manager/admin actions
         self._can_edit_bill = can(self.user["role"], "apply_discount")
-        # once a bill/report is delivered, only an admin may edit it — a technician
-        # (manager) can edit only while it is still pending/reported.
+        # once delivered, only an admin may edit; a manager only while pending/reported
         self._is_admin = can(self.user["role"], "manage_users")
         if self._can_edit_bill:
             tb.addWidget(self.edit_btn)
         else:
             self.edit_btn.hide()
         if can(self.user["role"], "delete"):
-            tb.addWidget(self.void_btn)  # voiding a bill is a manager/admin action
+            tb.addWidget(self.void_btn)
         else:
             self.void_btn.hide()
         root.addLayout(tb)
 
-        # filters
         bar = QHBoxLayout()
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search patient / lab no / Patient ID…")
@@ -169,7 +158,6 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
         self.today_only.toggled.connect(self._today_toggled)
         self.dues_only = QCheckBox("Dues only")
         self.dues_only.toggled.connect(self.refresh)
-        # calendar date-range filter (optional — enabled by its checkbox)
         self.use_dates = QCheckBox("By date")
         self.use_dates.toggled.connect(self._dates_toggled)
         self.date_from = self._date_edit()
@@ -213,9 +201,7 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self._update_buttons)
-        # Double-clicking a row does NOT print — printing is an explicit toolbar
-        # action so a report is never sent to the printer by accident.
-        # Right-click a row for the same actions as the toolbar.
+        # printing is an explicit toolbar action, never a double-click
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._show_row_menu)
         root.addWidget(self.table, 1)
@@ -223,10 +209,8 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
         self.summary = muted("")
         root.addWidget(self.summary)
 
-    # ---------------------------------------------------------------
     def _date_edit(self) -> QDateEdit:
-        """A calendar-popup date editor, defaulting to today, disabled until the
-        'By date' filter is switched on."""
+        """A calendar-popup date editor, disabled until the 'By date' filter is on."""
         d = QDateEdit()
         setup_date_edit(d)
         d.setDisplayFormat("yyyy-MM-dd")
@@ -246,7 +230,7 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
 
     def _today_toggled(self, on: bool) -> None:
         if on and self.use_dates.isChecked():
-            self.use_dates.setChecked(False)  # toggles off → disables the editors
+            self.use_dates.setChecked(False)
         self.refresh()
 
     def _date_clause(self) -> tuple[str | None, list]:
@@ -255,9 +239,8 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
             return None, []
         d1 = self.date_from.date()
         d2 = self.date_to.date()
-        if d1 > d2:  # tolerate a reversed range
+        if d1 > d2:
             d1, d2 = d2, d1
-        # half-open upper bound (to-date + 1 day) so the whole 'to' day is included
         return (
             "received_at >= ? AND received_at < ?",
             [d1.toString("yyyy-MM-dd"), d2.addDays(1).toString("yyyy-MM-dd")],
@@ -297,8 +280,7 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
             f"SELECT * FROM receipts WHERE {where} ORDER BY id DESC LIMIT {self._ROW_CAP}",
             args,
         ).fetchall()
-        # Totals + count over ALL matching rows (not just the capped page), so a lab
-        # with >1000 receipts doesn't see understated totals presented as complete.
+        # totals + count over ALL matching rows, not just the capped page
         agg = self.con.execute(
             f"SELECT COUNT(*) AS n, "
             f"COALESCE(SUM(CASE WHEN {db.NOT_VOIDED} THEN net_amount ELSE 0 END),0) AS net, "
@@ -361,9 +343,7 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
         for b in self._receipt_btns:
             b.setEnabled(active)
         if active:
-            ready = (
-                row["status"] or ""
-            ) in REPORT_READY  # report only when results are in
+            ready = (row["status"] or "") in REPORT_READY
             for b in self._report_btns:
                 b.setEnabled(ready)
                 b.setToolTip("" if ready else "Report not ready yet (results pending)")
@@ -371,9 +351,7 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
             self.pay_btn.setEnabled(bool(row["due"] and row["due"] > 0))
             delivered = (row["status"] or "") == "delivered"
             self.deliver_btn.setEnabled(ready and not delivered)
-            # A bill is FROZEN the moment its report is ready (reported/delivered):
-            # no one — not even an admin — may change its charges after results exist.
-            # Only pending / in-progress bills can be edited.
+            # a bill is frozen the moment its report is ready — no one may edit it then
             self.edit_btn.setEnabled(self._can_edit_bill and not ready)
             self.void_btn.setEnabled(True)
         else:
@@ -386,23 +364,17 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
                 self.void_btn,
             ):
                 b.setEnabled(False)
-            # A voided bill is read-only — but an admin may still PREVIEW the
-            # cancelled receipt (and report, if results exist) on screen for
-            # reference/audit. Nothing that emits or alters it stays enabled:
-            # no print, PDF, WhatsApp, edit, void, pay or deliver.
+            # a voided bill is read-only, but an admin may still preview it
             if voided and self._is_admin:
                 self.prev_rcpt_btn.setEnabled(True)
                 if (row["status"] or "") in REPORT_READY:
                     self.prev_rpt_btn.setEnabled(True)
 
     def _show_row_menu(self, pos) -> None:
-        """Right-click menu on a receipt row. Mirrors the toolbar exactly: same
-        labels, same enabled/disabled (greyed = not available yet) and the same
-        role-based visibility — the buttons stay the single source of truth."""
+        """Right-click menu on a receipt row — mirrors the toolbar exactly."""
         idx = self.table.indexAt(pos)
         if not idx.isValid():
-            return  # no menu on empty space
-        # select the right-clicked row so the actions (and button states) target it
+            return
         self.table.selectRow(idx.row())
         groups = (
             self._receipt_btns,
@@ -412,7 +384,7 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
         menu = QMenu(self)
         first = True
         for btns in groups:
-            shown = [b for b in btns if b.isVisibleTo(self)]  # respects role hiding
+            shown = [b for b in btns if b.isVisibleTo(self)]
             if not shown:
                 continue
             if not first:
@@ -420,12 +392,11 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
             first = False
             for b in shown:
                 act = menu.addAction(b.text())
-                act.setEnabled(b.isEnabled())  # greyed when the action isn't available
+                act.setEnabled(b.isEnabled())
                 act.triggered.connect(b.click)
         if not menu.isEmpty():
             menu.exec(self.table.viewport().mapToGlobal(pos))
 
-    # ---------------------------------------------------------------
     def _lab_no(self, rid: int) -> str:
         r = self.con.execute(
             "SELECT lab_no FROM receipts WHERE id=?", (rid,)
@@ -442,8 +413,7 @@ class ReceiptsPage(ReceiptsOutputMixin, ReceiptsMutationsMixin, QWidget):
             return
 
         def _safe(item: QTableWidgetItem | None) -> str:
-            # neutralise spreadsheet formula injection: a cell a spreadsheet would
-            # treat as a formula (leading = + - @ tab CR) is prefixed with a quote
+            # neutralise spreadsheet formula injection (leading = + - @ tab CR)
             s = item.text() if item else ""
             return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
 

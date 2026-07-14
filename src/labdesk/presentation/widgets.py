@@ -22,9 +22,7 @@ from .style import PRIMARY
 
 
 def setup_date_edit(d: QDateEdit) -> QDateEdit:
-    """Enable a themed calendar popup with readable 3-letter weekday names (Sun, Mon…
-    instead of the elided "S…", "T…") and no week-number column. Used by every date
-    picker so they look and behave the same app-wide."""
+    """Themed calendar popup with 3-letter weekday names and no week-number column."""
     d.setCalendarPopup(True)
     cal = d.calendarWidget()
     if cal is not None:
@@ -35,18 +33,13 @@ def setup_date_edit(d: QDateEdit) -> QDateEdit:
             QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader
         )
         cal.setGridVisible(False)
-        # wide enough that every 3-letter day fits — the widest ("Wed"/"Mon") would
-        # otherwise elide to "W…"/"M…" at the default popup width.
+        # wide enough that every 3-letter day fits without eliding
         cal.setMinimumWidth(336)
     return d
 
 
 class FlowLayout(QLayout):
-    """Lay widgets left-to-right and WRAP to the next row when horizontal space
-    runs out (Qt's classic flow layout). Its minimum width is just the widest
-    single child, so a long button toolbar can shrink to one-button width and
-    wrap instead of forcing the whole window wider than the screen.
-    """
+    """Lay widgets left-to-right and wrap to the next row when horizontal space runs out."""
 
     def __init__(
         self,
@@ -98,31 +91,38 @@ class FlowLayout(QLayout):
         return size + QSize(m.left() + m.right(), m.top() + m.bottom())
 
     def _do_layout(self, rect: QRect, *, test_only: bool) -> int:
+        # group into rows, then vertically centre each item within its row's height
         m = self.contentsMargins()
         area = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
-        x, y, line_h = area.x(), area.y(), 0
+        rows: list[tuple[list[tuple], int]] = []
+        row: list[tuple] = []
+        x, line_h = area.x(), 0
         for item in self._items:
             hint = item.sizeHint()
-            next_x = x + hint.width() + self._hspace
-            if next_x - self._hspace > area.right() and line_h > 0:
-                x = area.x()
-                y = y + line_h + self._vspace
-                next_x = x + hint.width() + self._hspace
-                line_h = 0
-            if not test_only:
-                item.setGeometry(QRect(QPoint(x, y), hint))
-            x = next_x
+            if x + hint.width() > area.right() and row:
+                rows.append((row, line_h))
+                row, x, line_h = [], area.x(), 0
+            row.append((item, hint, x))
+            x += hint.width() + self._hspace
             line_h = max(line_h, hint.height())
-        return y + line_h - rect.y() + m.bottom()
+        if row:
+            rows.append((row, line_h))
+        y = area.y()
+        for items, lh in rows:
+            if not test_only:
+                for item, hint, ix in items:
+                    item.setGeometry(
+                        QRect(QPoint(ix, y + (lh - hint.height()) // 2), hint)
+                    )
+            y += lh + self._vspace
+        return (
+            y - self._vspace - rect.y() + m.bottom() if rows else m.top() + m.bottom()
+        )
 
 
 class Toast(QLabel):
-    """A floating, self-clearing notice pinned to the TOP-RIGHT of the window —
-    replaces modal info/warning popups so the app never blocks on a click. Green
-    for success, red (and longer-lived) for errors. It floats over the content as
-    an overlay (not in a layout). Prefer the ``toast_info`` / ``toast_warn``
-    drop-ins below over instantiating this directly.
-    """
+    """A floating, self-clearing notice pinned to the top-right of the window. Prefer
+    ``toast_info`` / ``toast_warn`` over instantiating this directly."""
 
     _GREEN = "#1f9d55"
     _RED = "#c0392b"
@@ -146,8 +146,7 @@ class Toast(QLabel):
             f"background:{color}; color:white; font-weight:700; font-size:14px;"
             "padding:12px 18px; border-radius:10px;"
         )
-        # float over the whole top-level window so it's visible regardless of which
-        # page / scroll position we're on, anchored to the top-right.
+        # float over the whole top-level window, anchored to the top-right
         win = self.window()
         if win is not None and self.parent() is not win:
             self.setParent(win)
@@ -166,8 +165,7 @@ class Toast(QLabel):
 
 
 def _window_toast(parent: QWidget | None) -> Toast | None:
-    """The single reusable Toast cached on `parent`'s top-level window (created on
-    first use). Returns None when there's no window (e.g. a headless self-test)."""
+    """The single reusable Toast cached on `parent`'s top-level window, or None if headless."""
     win = parent.window() if parent is not None else None
     if win is None:
         return None
@@ -179,8 +177,7 @@ def _window_toast(parent: QWidget | None) -> Toast | None:
 
 
 def toast_info(parent, title: str, message, *_a, **_k) -> None:
-    """Drop-in for ``QMessageBox.information``: a green top-right toast instead of a
-    modal popup (the title is ignored — toasts have no title bar)."""
+    """Drop-in for ``QMessageBox.information``: a green top-right toast (title is ignored)."""
     t = _window_toast(parent)
     if t is not None:
         t.show_message(str(message))
@@ -191,8 +188,7 @@ def toast_info(parent, title: str, message, *_a, **_k) -> None:
 
 
 def toast_warn(parent, title: str, message, *_a, **_k) -> None:
-    """Drop-in for ``QMessageBox.warning``: a red top-right toast that lingers a bit
-    longer so an error isn't missed. Questions/inputs keep their modal dialog."""
+    """Drop-in for ``QMessageBox.warning``: a red top-right toast that lingers longer."""
     t = _window_toast(parent)
     if t is not None:
         t.show_message(str(message), error=True)
@@ -203,16 +199,7 @@ def toast_warn(parent, title: str, message, *_a, **_k) -> None:
 
 
 def fit_to_screen(widget: QWidget, w: int, h: int, *, margin: float = 0.94) -> None:
-    """Clamp a top-level *dialog's* opening size so it never exceeds the screen.
-
-    Sizes are device-independent (logical) pixels — Qt 6 applies DPI scaling on top.
-    A fixed resize(.., 1040) overflows a 1366x768 laptop (≈700 px usable height);
-    this clamps to availableGeometry() (which excludes the taskbar/dock). Tall content
-    should live in a QScrollArea so clamping the height scrolls rather than hides.
-
-    Uses ONLY resize() — never move()/setGeometry() — so window placement is left to
-    the layout/window-manager (per the native-layout rule).
-    """
+    """Clamp a top-level dialog's opening size (via resize only) to the screen's available geometry."""
     screen = widget.screen() or QApplication.primaryScreen()
     if screen is None:  # headless / offscreen — nothing to clamp to
         widget.resize(w, h)
@@ -224,11 +211,7 @@ def fit_to_screen(widget: QWidget, w: int, h: int, *, margin: float = 0.94) -> N
 
 
 def max_width_center(inner: QWidget, max_w: int) -> QWidget:
-    """Wrap `inner` so it never exceeds `max_w` logical px and stays horizontally
-    centred (stretch | inner | stretch). Used for forms: on a 4K/ultrawide screen a
-    single-line field would otherwise stretch across the whole width (sparse, ugly),
-    and on a narrow screen an uncapped form can overflow — capping fixes both.
-    """
+    """Wrap `inner` so it never exceeds `max_w` px and stays horizontally centred."""
     inner.setMaximumWidth(max_w)
     wrap = QWidget()
     lay = QHBoxLayout(wrap)
@@ -281,8 +264,7 @@ def field_label(text: str) -> QLabel:
 def page_header(
     title: str, subtitle: str = "", *actions: QWidget
 ) -> tuple[QWidget, QLabel]:
-    """A consistent page header: title (+subtitle) on the left, actions on the right.
-    Returns (header_widget, subtitle_label) so callers can update the subtitle."""
+    """A consistent page header: title (+subtitle) on the left, actions on the right."""
     bar = QWidget()
     bar.setObjectName("PageHeader")
     bar.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
@@ -347,8 +329,7 @@ def stat_card(title: str, value: str, color: str = PRIMARY, on_click=None) -> QF
 
 
 def like_term(text: str) -> str:
-    """Build a %wrapped% LIKE pattern with the wildcards % _ \\ escaped so user
-    input matches literally. Pair with ESCAPE '\\' in the query."""
+    """Build a %wrapped% LIKE pattern with % _ \\ escaped. Pair with ESCAPE '\\' in the query."""
     t = (
         (text or "")
         .strip()
@@ -376,10 +357,8 @@ def num_item(text: str, color: str | None = None) -> QTableWidgetItem:
 
 
 def selected_id(table, ids: list):
-    """The id (from a parallel ``ids`` list) of the table's selected row, or None.
-
-    Derived from the actual selection (NOT currentRow): a cleared selection
-    leaves currentRow set, which would otherwise act on a stale row."""
+    """The id (from a parallel ``ids`` list) of the table's selected row, or None. Uses
+    the actual selection, not currentRow, which stays set after a cleared selection."""
     sel = table.selectionModel().selectedRows()
     if not sel:
         return None

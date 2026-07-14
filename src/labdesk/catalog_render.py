@@ -1,28 +1,4 @@
-"""Classify a catalog test into a printed-report *render category*.
-
-Pure: no Qt, no DB. Takes the ``tests`` row and its ``test_parameters`` rows
-(any mapping that supports ``row[key]`` — ``sqlite3.Row`` or ``dict``) and
-returns one of :data:`RENDER_CATEGORIES`. The renderer (``render.report_doc``)
-calls this to pick a layout, the catalog editor uses it when a test is saved,
-and the seed builder stores the result in ``tests.render_category``.
-
-Why classify at render time (not only a stored column): catalog sync into an
-existing lab DB is *additive-only* (db.connection._sync_catalog_from_seed never
-rewrites a lab's own rows), so a stored ``render_category`` would stay NULL on
-upgrades. Classifying from the data the renderer already reads makes the right
-layout apply on both fresh and existing installs with no migration. A non-NULL
-stored ``render_category`` still wins, so a lab can override a misclassification.
-
-Categories:
-  * ``numeric_tabular`` — TEST | REFERENCE | UNIT | RESULT, numeric values with
-    numeric/relational ranges (CBC, LFT, RFT, electrolytes, viral load). Default.
-  * ``qualitative``     — TEST | RESULT | REFERENCE, word-state results
-    (Positive/Negative, Reactive/Non-Reactive, Detected/Not Detected); NO unit
-    column. Serology, immunology, blood bank, qualitative PCR.
-  * ``descriptive``     — PART/ORGAN | FINDINGS (wide, wrapping) + an optional
-    IMPRESSION/CONCLUSION block. Ultrasound, X-ray, histopathology, cytology.
-  * ``culture``         — handled by the dedicated culture renderer.
-"""
+"""Classify a catalog test into a printed-report render category."""
 
 from __future__ import annotations
 
@@ -37,13 +13,11 @@ RENDER_CATEGORIES = (
     "culture",
 )
 
-# A reference value that carries a number/relation → treat the test as numeric,
-# even if a stray word appears. Mirrors report.formatting._flag's parsing.
+# A reference value with a number/relation → treat the test as numeric.
 _NUM_RANGE = re.compile(
     r"\d\s*[-–]\s*\d|[<>]=?\s*\d|\bup\s*to\b|less than|more than|upto", re.I
 )
 
-# Imaging / anatomic-pathology signals on the report head or test name.
 _DESC_HEAD = (
     "ultrasound",
     "ultrasonography",
@@ -57,7 +31,6 @@ _DESC_HEAD = (
     "cytolog",
     "fnac",
 )
-# Anatomic / narrative parameter names — two or more ⇒ a descriptive report.
 _DESC_NAME = (
     "liver",
     "gall bladder",
@@ -78,7 +51,6 @@ _DESC_NAME = (
     "conclusion",
     "organ",
 )
-# Word-state result vocabulary for qualitative serology / molecular results.
 _QUAL_WORDS = (
     "reactive",
     "non-reactive",
@@ -92,11 +64,9 @@ _QUAL_WORDS = (
     "compatible",
     "nil",
 )
-# Legacy qualitative part_type tags carried in the catalog data.
 _QUAL_PTYPES = {"N/P", "N/R", "VIR", "HIV", "B"}
 
-# Blood-bank tests report a result with NO reference column (group, cross-match,
-# Coombs). Detected by test name. Standard practice: Test | Result only.
+# Blood-bank tests report a result with no reference column.
 _BLOODBANK = (
     "blood group",
     "cross match",
@@ -107,12 +77,9 @@ _BLOODBANK = (
     "compatibility",
 )
 
-# Molecular / NAAT method words — match these, NOT bare "DNA"/"RNA" (which appear
-# in serology like anti-dsDNA). A qualitative PCR → Detected/Not Detected.
+# Molecular/NAAT method words; excludes bare "DNA"/"RNA" (serology false positives).
 _MOLECULAR = ("pcr", "genotyp", "viral load", "real-time", "real time", "naat")
 
-# Obstetric / antenatal ultrasound — a biometry table (Parameter | Normal | Unit |
-# Result) + impression, rather than the plain organ-narrative of an abdominal scan.
 _OBSTETRIC = (
     "obstetric",
     "antenatal",
@@ -152,42 +119,30 @@ def classify(test: object, params: list) -> str:
         _looks_numeric(_get(p, "ref_male"), _get(p, "ref_female")) for p in params
     )
 
-    # 1. Blood bank — result-only, no reference column.
     if any(k in tname for k in _BLOODBANK):
         return "blood_bank"
 
-    # 1b. Obstetric ultrasound — biometry table (measurements + units) + impression,
-    #     checked before the generic descriptive-imaging rule below.
     if any(k in tname for k in _OBSTETRIC) or any(k in head for k in _OBSTETRIC):
         return "obstetric"
 
-    # 2. Descriptive / imaging / narrative — strong head/name signal wins outright.
     if any(k in head for k in _DESC_HEAD) or any(k in tname for k in _DESC_HEAD):
         return "descriptive"
     if sum(k in names for k in _DESC_NAME) >= 2 and not any_unit and not any_numref:
         return "descriptive"
 
-    # 2. Qualitative — word-state results, no real units, no numeric ranges.
     if (ptypes & _QUAL_PTYPES) and not any_unit and not any_numref:
         return "qualitative"
     if (not any_unit) and (not any_numref) and any(w in refs for w in _QUAL_WORDS):
         return "qualitative"
 
-    # 3. Molecular / PCR — a Detected/Not-Detected NAAT result (no unit, no numeric
-    #    range) reads as qualitative + an interpretation block. Quantitative viral
-    #    load (carries a unit / numeric range) falls through to the numeric grid.
-    #    Matched on method words only ("pcr", "genotyp"…), NOT bare "DNA"/"RNA", so
-    #    anti-dsDNA and similar serology are not misrouted.
     if (not any_unit) and (not any_numref) and any(k in tname for k in _MOLECULAR):
         return "qualitative"
 
-    # 4. Default — the numeric tabular grid.
     return "numeric_tabular"
 
 
 def category_for_test(con: object, test_id: int) -> str:
-    """Convenience: classify a test by id using a live connection. Honours a
-    non-NULL ``tests.render_category`` override, else classifies from the data."""
+    """Classify a test by id using a live connection; honours a stored override."""
     test = con.execute(  # type: ignore[attr-defined]
         "SELECT * FROM tests WHERE id=?", (test_id,)
     ).fetchone()

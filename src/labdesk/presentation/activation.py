@@ -1,10 +1,4 @@
-"""First-run activation dialog (node-locked licensing).
-
-Shown at launch when a packaged copy hasn't been activated for this machine (see
-licensing.enforced()). The user copies the activation request to the vendor and
-loads back the license file the vendor sends. The app stays locked until a valid
-license for THIS machine is installed.
-"""
+"""First-run activation dialog (node-locked licensing)."""
 
 from __future__ import annotations
 
@@ -40,7 +34,6 @@ class ActivationDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f"Activate {PRODUCT_NAME}")
         self.setMinimumWidth(560)
-        # No close button bypass: the only ways out are Activate (accept) or Quit.
         self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
 
         root = QVBoxLayout(self)

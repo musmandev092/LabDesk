@@ -1,8 +1,5 @@
 """Low-level value formatting: escaping, method/remarks blocks, image/file URLs,
-reference-range resolution, abnormal flags, date formatting and amount-in-words.
-
-Imports only :mod:`.constants`.
-"""
+reference-range resolution, abnormal flags, date formatting and amount-in-words."""
 
 from __future__ import annotations
 
@@ -18,10 +15,7 @@ def _esc(v) -> str:
     return html.escape(str(v if v is not None else ""))
 
 
-# Medical acronyms / tokens that must stay uppercase in a report title. Plain
-# str.title() mangles them (MTB→Mtb, CSF→Csf, PCR→Pcr) and breaks possessives
-# (COOMB's→Coomb'S), so smart_title() title-cases everything else but preserves
-# these and never capitalises the letter after an apostrophe.
+# Acronyms kept uppercase by smart_title() (plain str.title() would mangle them).
 _TITLE_ACRONYMS = {
     "MTB",
     "PCR",
@@ -139,10 +133,7 @@ _TITLE_SMALL = {
 
 
 def _cap_word(w: str) -> str:
-    """Capitalise the first letter of each segment (split on non-alphabetic chars
-    such as '-' and '/'), lowercase the rest — so "Met-Haemoglobin", "Blood/Renal"
-    and "(Aids)" keep their internal capitals — but never capitalise after an
-    apostrophe, so possessives stay intact ("Coomb's", not "Coomb'S")."""
+    """Capitalise each alpha segment's first letter; never after an apostrophe (possessives)."""
     out, prev = [], ""
     for ch in w:
         start = ch.isalpha() and (prev == "" or (not prev.isalpha() and prev != "'"))
@@ -152,8 +143,7 @@ def _cap_word(w: str) -> str:
 
 
 def smart_title(text) -> str:
-    """Title-case a report heading while keeping medical acronyms uppercase and
-    possessives intact. Connective words (for/by/of…) stay lower-case unless first."""
+    """Title-case a report heading, keeping acronyms uppercase and connectives lower-case."""
     s = (text or "").strip()
     if not s:
         return ""
@@ -174,9 +164,7 @@ def smart_title(text) -> str:
 
 
 def _method_block(head) -> str:
-    """The 'Method / Comments' footer for a test. One normalisation everywhere:
-    collapse blank lines, then collapse runs of spaces (the two report variants
-    used to differ)."""
+    """The 'Method / Comments' footer for a test."""
     if not head or not head["method_note"]:
         return ""
     note = head["method_note"].replace("\r", "")
@@ -207,16 +195,9 @@ def _img(path: str, css: str = "") -> str:
     return ""
 
 
-# ---------------------------------------------------------------------------
-# Reference range + abnormal flag (numeric)
-# ---------------------------------------------------------------------------
 def _resolve_ref(res, sex: str = "") -> tuple[str, str]:
-    """Resolve the reference range to (display_html, flag_range).
-
-    ``flag_range`` is the single numeric range a result is judged against. It is
-    "" — meaning *no* abnormal flag — when the display shows both the M and F
-    ranges (sex unknown, ranges differ), so we never flag a value against the
-    wrong sex's range while showing both."""
+    """Resolve the reference range to (display_html, flag_range); flag_range is "" when
+    both M/F ranges are shown (sex unknown) so a value is never flagged against the wrong sex."""
     keys = res.keys()
     m = ((res["p_male"] if "p_male" in keys else None) or "").strip().replace("\n", " ")
     f = (
@@ -252,8 +233,7 @@ def _flag(value, ref):
     except ValueError:
         return None
     ref = (ref or "").replace("–", "-").replace("≤", "<=").replace("≥", ">=").strip()
-    # A leading operator means an open bound; resolve it BEFORE the a-b range
-    # pattern so "< 200 (ideal 0-99)" is judged on <200, not the parenthetical.
+    # leading operator = open bound; check before the a-b range pattern
     mlt = re.match(r"^<\s*=?\s*(-?\d+\.?\d*)", ref)
     if mlt:
         return ("High", RED) if v > float(mlt.group(1)) else ("Normal", GREEN)

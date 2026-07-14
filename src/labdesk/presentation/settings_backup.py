@@ -1,9 +1,4 @@
-"""Backup / restore / DB-password settings, split out of the SettingsPage god-class.
-
-A mixin (runs on the composed SettingsPage instance). Backup/restore and the
-database-password change are admin-gated (can("manage_backups")) exactly as
-before — pure reorganisation, no behavior change.
-"""
+"""Backup / restore / DB-password settings mixin for SettingsPage."""
 
 from __future__ import annotations
 
@@ -51,17 +46,15 @@ class BackupSettingsMixin:
         row.addWidget(now)
         row.addWidget(restore)
         if db.ENCRYPTION_AVAILABLE:
-            row.addWidget(chpw)  # only meaningful when the DB is encrypted
+            row.addWidget(chpw)
             from ..db import keyvault
 
             if keyvault.available():
-                row.addWidget(forget)  # only when a system wallet exists
+                row.addWidget(forget)
         row.addStretch(1)
         w = QWidget()
         w.setLayout(row)
 
-        # automatic-backup controls: an on/off toggle + a destination folder that
-        # can live on a USB stick or a network share.
         self.auto_backup_chk = QCheckBox(
             "Automatic backups — save an encrypted copy on exit and once a day"
         )
@@ -81,8 +74,7 @@ class BackupSettingsMixin:
         dirw = QWidget()
         dirw.setLayout(dirrow)
 
-        # A plain label (not muted()) so we fully own its colour — it turns red as a
-        # nudge when the last backup is stale, or when none has ever been made.
+        # plain label (not muted()) so it can turn red when stale
         self._backup_status = QLabel("")
         self._backup_status.setWordWrap(True)
         return card(
@@ -106,10 +98,9 @@ class BackupSettingsMixin:
             self.inputs["backup_dir"].setText(path)
 
     def _refresh_backup_status(self) -> None:
-        """Show when the database was last backed up (from the audit trail), nudging
-        in red if it has never been done or is a week or more stale."""
+        """Show when the DB was last backed up, in red if stale/never."""
         if not hasattr(self, "_backup_status"):
-            return  # card only exists for users who can manage backups
+            return
         row = self.con.execute(
             "SELECT at FROM audit_log WHERE action='backup_created' ORDER BY id DESC LIMIT 1"
         ).fetchone()
@@ -141,9 +132,7 @@ class BackupSettingsMixin:
 
     def _backup_now(self) -> None:
         if not can(self.user["role"], "manage_backups"):
-            return  # defence in depth — backup/restore is admin-only
-        # let the user choose where to save the encrypted backup (Save-As dialog),
-        # defaulting to the folder they last saved a backup to (else home).
+            return
         import time
 
         base = db.get_setting(self.con, "last_backup_dir", "")
@@ -162,17 +151,16 @@ class BackupSettingsMixin:
         user = self.user["username"]
 
         def work(con) -> object | None:
-            ok = db.backup_to(path)  # encrypted copy to the chosen file
+            ok = db.backup_to(path)
             if ok:
                 db.log_audit(con, user, "backup_created", path)
             return path if ok else None
 
         def done(work_ok: bool, result) -> None:
             if work_ok and result:
-                # remember this folder so the next Save-As / Restore opens here
                 db.set_setting(self.con, "last_backup_dir", str(Path(result).parent))
                 toast_info(self, "Backup", f"Backup saved:\n{result}")
-                self._refresh_backup_status()  # update the "Last backup" line right away
+                self._refresh_backup_status()
             else:
                 toast_warn(self, "Backup", "Could not create a backup.")
 
@@ -187,7 +175,7 @@ class BackupSettingsMixin:
 
     def _change_db_password(self) -> None:
         if not can(self.user["role"], "manage_backups"):
-            return  # defence in depth — admin-only
+            return
         if not db.ENCRYPTION_AVAILABLE:
             toast_warn(
                 self, "Database password", "This build's database is not encrypted."
@@ -198,11 +186,9 @@ class BackupSettingsMixin:
         dlg = ChangePasswordDialog(self)
         if dlg.exec() != QDialog.Accepted:
             return
-        # rekey runs on the LIVE connection so it keeps working with the new key;
-        # it verifies the current password and takes a backup first.
+        # rekey on the live connection; verifies current password, backs up first
         if db.rekey_database(self.con, dlg.current, dlg.new):
             db.log_audit(self.con, self.user["username"], "db_password_changed", "")
-            # if the password was remembered in the wallet, update it to the new one
             from ..db import keyvault
 
             if keyvault.load_key() is not None:
@@ -241,7 +227,6 @@ class BackupSettingsMixin:
                 self, "Restore", "You don't have permission to restore the database."
             )
             return
-        # start in the folder backups were last saved to (that's where they live)
         start = db.get_setting(self.con, "last_backup_dir", "")
         if not (start and Path(start).is_dir()):
             start = str(Path.home())
@@ -251,11 +236,8 @@ class BackupSettingsMixin:
         if not path:
             return
         src = Path(path)
-        # Validate the file FIRST, before we touch the live connection — a bad pick
-        # then changes nothing. A valid backup must open AND have a users table.
-        # __current__ means it opens with the current password; otherwise we offer
-        # to enter the password it WAS made with (e.g. before a password change), so
-        # a perfectly good older backup is never wrongly rejected as "not a backup".
+        # validate before touching the live connection; __current__ means it opens
+        # with the current password, else prompt for the password it was made under
         restore_key = "__current__"
         if not db._looks_like_labdesk_db(src):
             pw, ok = QInputDialog.getText(
@@ -289,16 +271,12 @@ class BackupSettingsMixin:
         ):
             return
         db.log_audit(self.con, self.user["username"], "db_restored", path)
-        # CRITICAL: close the live connection (and flush/checkpoint its WAL) BEFORE the
-        # file is replaced, otherwise the old session checkpoints stale data back over
-        # the restored database. Then restore synchronously and quit for a clean reopen.
+        # close the live connection (flush WAL) before the file is replaced
         win = self.window()
         if win is not None:
-            win._logged_out = True  # skip the logout-audit on the closed connection
-            win._restoring = True  # skip the on-exit auto-backup (DB is being swapped)
-        # Restoring a backup made under a different password: adopt that password as the
-        # session key so restore_db's guard passes and the next unlock uses it, and
-        # update any saved wallet password to match (else auto-unlock would then fail).
+            win._logged_out = True
+            win._restoring = True
+        # adopt a non-current restore password as the session key + saved wallet password
         if restore_key != "__current__":
             db.unlock(restore_key)
             from ..db import keyvault

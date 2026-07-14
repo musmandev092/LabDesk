@@ -1,9 +1,4 @@
-"""Background WhatsApp sending.
-
-The threading machinery lives in ui/tasks.py; this module adds the WhatsApp
-specifics: instant no-network pre-flight checks (so the user gets immediate
-feedback instead of a frozen wait) and the result message box.
-"""
+"""Background WhatsApp sending: pre-flight checks plus the actual send."""
 
 from __future__ import annotations
 
@@ -24,15 +19,9 @@ def send_async(
     lock_buttons: tuple = (),
     on_done: Callable[[bool, str], None] | None = None,
 ) -> bool:
-    """Send a 'receipt' or 'report' PDF to the patient on a background thread.
-
-    Returns True if the send was started, False if a pre-flight check rejected it.
-    `con` is the main-thread connection, used only for the instant pre-checks; the
-    actual send runs on a worker thread with its own connection (see ui/tasks.py).
-    """
+    """Send a 'receipt' or 'report' PDF to the patient on a background thread."""
     if receipt_id is None:
         return False
-    # instant, no-network pre-flight → immediate clear feedback, no freeze
     ok, msg = whatsapp.config_ready(con)
     if not ok:
         toast_warn(parent, "WhatsApp", msg)
@@ -45,8 +34,6 @@ def send_async(
     fn = whatsapp.send_receipt if kind == "receipt" else whatsapp.send_report
 
     def _done(work_ok: bool, result: object) -> None:
-        # send_report/send_receipt return (success, message); work_ok is False
-        # only if the worker raised unexpectedly (then result is the error str).
         if work_ok and isinstance(result, tuple):
             success, message = result
         else:

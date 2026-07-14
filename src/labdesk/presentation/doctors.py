@@ -33,7 +33,7 @@ class DoctorDialog(QDialog):
         heading.setObjectName("h2")
         form.addRow(heading)
         self.name = QLineEdit()
-        self.name.setMaxLength(50)  # prints as the referring doctor on reports
+        self.name.setMaxLength(50)
         self.hospital = QLineEdit()
         self.hospital.setMaxLength(50)
         self.area = QLineEdit()
@@ -79,7 +79,7 @@ class DoctorsPage(QWidget):
         super().__init__()
         self.con = con
         self.user = user
-        self._ids: list[int] = []  # parallel to doctors table rows; filled by refresh
+        self._ids: list[int] = []  # parallel to table rows
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(12)
@@ -109,8 +109,6 @@ class DoctorsPage(QWidget):
         self.table.setHorizontalHeaderLabels(
             ["Name", "Hospital", "Area", "Phone", "Mobile"]
         )
-        # Name fills the row; the rest size to their content so short values
-        # (e.g. "042-555") don't balloon across a 4K-wide column.
         _dh = self.table.horizontalHeader()
         _dh.setSectionResizeMode(0, QHeaderView.Stretch)
         for _c in range(1, 5):
@@ -126,8 +124,6 @@ class DoctorsPage(QWidget):
     def _update_buttons(self) -> None:
         has = self.table.currentRow() >= 0 and self.table.currentRow() < len(self._ids)
         self.edit_btn.setEnabled(has)
-        # deleting a doctor is an admin ("delete") action — keep the button
-        # disabled for lower roles instead of warning only after a click.
         self.del_btn.setEnabled(has and can(self.user["role"], "delete"))
 
     def on_show(self) -> None:

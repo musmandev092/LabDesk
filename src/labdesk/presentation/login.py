@@ -24,7 +24,6 @@ class LoginDialog(QDialog):
         self.user = None
         lab = db.get_setting(con, "lab_name", "") or PRODUCT_NAME
         self.setWindowTitle(f"Sign in — {lab}")
-        # A bit taller so the brand mark, fields and footer breathe (was cramped).
         self.setMinimumSize(420, 560)
 
         outer = QVBoxLayout(self)
@@ -63,9 +62,7 @@ class LoginDialog(QDialog):
 
         btn = QPushButton("Sign in")
         btn.setMinimumHeight(42)
-        # Don't let the button auto-activate on Enter: otherwise pressing Enter in
-        # the password field fires BOTH returnPressed AND this default button, so
-        # try_login runs twice (two "Invalid username or password" popups).
+        # avoid double-firing try_login via returnPressed + default-button activation
         btn.setAutoDefault(False)
         btn.setDefault(False)
         btn.clicked.connect(self.try_login)
@@ -77,13 +74,10 @@ class LoginDialog(QDialog):
         )
         credit.setObjectName("muted")
         credit.setAlignment(Qt.AlignCenter)
-        # The full credit line is wider than the narrow auth dialog — wrap it and
-        # shrink slightly so neither end is clipped (was rendering "oDesk…/…mosman0").
         credit.setWordWrap(True)
         credit.setStyleSheet("font-size: 11px;")
         outer.addWidget(credit)
 
-        # Enter: username → move to password; password → sign in (once).
         self.password.returnPressed.connect(self.try_login)
         self.username.returnPressed.connect(lambda: self.password.setFocus())
         self.username.setFocus()
@@ -104,12 +98,11 @@ class LoginDialog(QDialog):
             db.log_audit(self.con, user["username"], "login", "signed in")
             if "must_change_password" in user.keys() and user["must_change_password"]:
                 if not self._force_password_change(user):
-                    return  # cancelled → stay on the login screen
+                    return
             self.user = user
             self.accept()
         else:
-            # store the attacker-controlled username in DETAIL, not the username
-            # column (log-injection / misleading actor), and surface lockout.
+            # attempted username goes in DETAIL, not the username column (log-injection)
             db.log_audit(
                 self.con,
                 "(unauthenticated)",
