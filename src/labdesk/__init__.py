@@ -7,4 +7,4 @@ try:
     __version__ = _v("labdesk")
 except PackageNotFoundError:
     # Vendored layout lacks .dist-info; keep in sync with pyproject.toml version.
-    __version__ = "1.2.6"
+    __version__ = "1.2.7"
