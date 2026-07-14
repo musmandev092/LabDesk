@@ -1522,27 +1522,48 @@ def _build_report_letterfree(
     con, r, items, sex, g, device, images, pack: bool = True, img_scale: float = 1.0
 ):
     """Render the report with no clinic letterhead and no footer, so it can be printed
-    onto the lab's own pre-printed letterhead paper. Tests pack onto shared pages just
-    like the normal copy; each page opens with the patient card."""
+    onto the lab's own pre-printed letterhead paper. When the whole report fits on one
+    page the content is vertically CENTRED — so it sits in the middle of the sheet,
+    clear of the paper's pre-printed letterhead, rather than jammed against the top; a
+    report that spans multiple pages packs from the top."""
     from . import report as R
 
     d = Doc(margin_mm=(8, 8, 8, 8), device=device, images=images, img_scale=img_scale)
     blocks = _measure_blocks(d, con, items, sex, r)
 
-    def header_fn(dd: Doc) -> float:
-        ch = _patient_card(
-            dd,
-            dd.ml,
-            dd.mt,
-            R._patient_pairs(r),
-            card_pad=(2.4, 5),
-            gap=(1.6, 4),
-            l_pt=6.6,
-            v_pt=8.4,
-            radius=5,
-            border=BORDER,
+    _card_kw = dict(
+        card_pad=(2.4, 5), gap=(1.6, 4), l_pt=6.6, v_pt=8.4, radius=5, border=BORDER
+    )
+
+    # Vertically centre the content when it all fits on one page (single test, or
+    # several packed tests). Measure the patient-card height on a throwaway buffer and
+    # add the pre-measured block heights + inter-block gaps; centre within the drawable
+    # band so the content never dips past the (reserved) bottom margin.
+    card_top = d.mt
+    if blocks and not any(b[3] for b in blocks) and (pack or len(blocks) == 1):
+        md = Doc(margin_mm=(8, 8, 8, 8), measure=True)
+        card_h = _patient_card(md, md.ml, md.mt, R._patient_pairs(r), **_card_kw)
+        with contextlib.suppress(Exception):
+            md.tobytes()
+        total = (
+            card_h
+            + 4
+            + sum(b[2] for b in blocks)
+            + max(0, len(blocks) - 1) * _PACK_GAP_MM
         )
-        return dd.mt + ch + 4
+        drawable = A4_H_MM - d.mb - REPORT_FOOTER_MM - d.mt
+        if total <= drawable:
+            usable = A4_H_MM - d.mt - d.mb
+            center = d.mt + (usable - total) / 2.0
+            card_top = max(d.mt, min(center, d.mt + drawable - total))
+
+    first_page = [True]
+
+    def header_fn(dd: Doc) -> float:
+        top = card_top if first_page[0] else dd.mt  # only page 1 is centred
+        first_page[0] = False
+        ch = _patient_card(dd, dd.ml, top, R._patient_pairs(r), **_card_kw)
+        return top + ch + 4
 
     def footer_fn(dd: Doc, page_no: int, total: int) -> None:
         return None

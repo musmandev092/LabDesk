@@ -305,3 +305,27 @@ def test_letterfree_one_per_page_option(con):
     imgs = report_doc.build_report(con, rid, images=True, letterhead=False, pack=False)
     assert isinstance(imgs, list)
     assert len(imgs) == 3
+
+
+def _first_content_row(img):
+    """Top-most pixel row that isn't white (where drawing begins)."""
+    w, h = img.width(), img.height()
+    for y in range(0, h, 3):
+        for x in range(0, w, 11):
+            if img.pixelColor(x, y).value() < 245:
+                return y / h  # fraction down the page
+    return 1.0
+
+
+def test_letterfree_short_report_is_vertically_centred(con):
+    """A short 'print without header' report must be centred vertically (clear of the
+    pre-printed letterhead), NOT jammed against the top of the page (regression)."""
+    rid = make_receipt(con, status="reported")
+    _add_small_qual(con, rid, 2)  # a short report → should centre
+    plain = report_doc.build_report(con, rid, images=True, letterhead=False)
+    normal = report_doc.build_report(con, rid, images=True, letterhead=True)
+    assert isinstance(plain, list) and len(plain) == 1
+    # the plain copy's content starts well below the top (centred)…
+    assert _first_content_row(plain[0]) > 0.18
+    # …and clearly lower than the normal copy, which starts near the top (letterhead)
+    assert _first_content_row(plain[0]) > _first_content_row(normal[0]) + 0.1
