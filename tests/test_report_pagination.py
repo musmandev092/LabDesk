@@ -329,5 +329,5 @@ def test_letterfree_content_anchored_below_letterhead(con):
     ln = report_doc.build_report(con, long, images=True, letterhead=False)
     assert len(s) == 1 and len(ln) == 1
     fs, fl = _first_content_row(s[0]), _first_content_row(ln[0])
-    assert 0.08 < fs < 0.22  # anchored below the letterhead band, not centred/floating
+    assert 0.15 < fs < 0.28  # anchored ~2.5in below the top, not centred/floating
     assert abs(fs - fl) < 0.03  # short and long start at the same top offset

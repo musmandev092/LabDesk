@@ -1446,9 +1446,9 @@ def _build_report_letterfree(
     # letterhead (logo/name/address/rule) ends — the same y the normal copy uses — so
     # both copies position content identically, just with/without the printed header.
     md = Doc(margin_mm=(8, 8, 8, 8), measure=True)
-    # floor at 40mm so there's room for a real pre-printed letterhead even when the
-    # app's own letterhead is left minimal/blank.
-    card_top = max(_report_letterhead(md, g, md.ml, md.mt) + 3, 40.0)
+    # floor at 63.5mm (2.5in) so there's room for a real pre-printed letterhead; grows
+    # only if the lab's own configured letterhead is taller than that.
+    card_top = max(_report_letterhead(md, g, md.ml, md.mt) + 3, 63.5)
     with contextlib.suppress(Exception):
         md.tobytes()
 
