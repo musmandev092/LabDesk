@@ -81,7 +81,7 @@ def verify_user(con: sqlite3.Connection, username: str, password: str):
             # The window has ELAPSED → clear it AND reset the failure counter, so the
             # user gets a fresh set of attempts. Without this reset the counter stays
             # at/above the threshold, so a single mistype right after waiting re-locks
-            # instantly and each repeat escalates the window toward an hour — the
+            # instantly and each repeat escalates the window to its cap — the
             # "endless lockout loop". Safe: user login already sits behind the
             # database-unlock password, so this isn't the primary brute-force barrier.
             try:

@@ -164,9 +164,11 @@ _PAISA_COLUMNS = {
 # brute-force lockout policy: lock after _MAX_FAILS wrong tries; the lockout
 # window then doubles on every further failure (60s → 120s → 240s …) up to
 # _LOCK_MAX_SECONDS, so a sustained guessing run is throttled, not just delayed.
+# Cap kept modest (15 min) so a fat-fingered receptionist in a busy lab isn't shut
+# out for long — user login already sits behind the database-unlock password.
 _MAX_FAILS = 5
 _LOCK_SECONDS = 60
-_LOCK_MAX_SECONDS = 3600
+_LOCK_MAX_SECONDS = 900  # 15 minutes
 # scrypt work factors (memory-hard; ~tens of ms per hash)
 _SCRYPT_N, _SCRYPT_R, _SCRYPT_P = 16384, 8, 1
 _SCRYPT_MAXMEM = 64 * 1024 * 1024
